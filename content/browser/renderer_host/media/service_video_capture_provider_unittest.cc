@@ -8,9 +8,10 @@
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
+#include "content/public/browser/video_capture_device_launcher.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/video_capture/public/interfaces/device_factory.mojom.h"
-#include "services/video_capture/public/interfaces/device_factory_provider.mojom.h"
+#include "services/video_capture/public/mojom/device_factory.mojom.h"
+#include "services/video_capture/public/mojom/device_factory_provider.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -19,6 +20,12 @@ using testing::Invoke;
 using testing::_;
 
 namespace content {
+
+static const std::string kStubDeviceId = "StubDevice";
+static const media::VideoCaptureParams kArbitraryParams;
+static const base::WeakPtr<media::VideoFrameReceiver> kNullReceiver;
+static const auto kIgnoreLogMessageCB =
+    base::BindRepeating([](const std::string&) {});
 
 class MockServiceConnector
     : public ServiceVideoCaptureProvider::ServiceConnector {
@@ -52,12 +59,37 @@ class MockDeviceFactory : public video_capture::mojom::DeviceFactory {
                     CreateDeviceCallback callback) override {
     DoCreateDevice(device_id, &device_request, callback);
   }
+  void AddVirtualDevice(const media::VideoCaptureDeviceInfo& device_info,
+                        video_capture::mojom::ProducerPtr producer,
+                        video_capture::mojom::VirtualDeviceRequest
+                            virtual_device_request) override {
+    DoAddVirtualDevice(device_info, producer.get(), &virtual_device_request);
+  }
 
   MOCK_METHOD1(DoGetDeviceInfos, void(GetDeviceInfosCallback& callback));
   MOCK_METHOD3(DoCreateDevice,
                void(const std::string& device_id,
                     video_capture::mojom::DeviceRequest* device_request,
                     CreateDeviceCallback& callback));
+  MOCK_METHOD3(
+      DoAddVirtualDevice,
+      void(const media::VideoCaptureDeviceInfo& device_info,
+           video_capture::mojom::ProducerProxy* producer,
+           video_capture::mojom::VirtualDeviceRequest* virtual_device_request));
+};
+
+class MockVideoCaptureDeviceLauncherCallbacks
+    : public VideoCaptureDeviceLauncher::Callbacks {
+ public:
+  void OnDeviceLaunched(
+      std::unique_ptr<LaunchedVideoCaptureDevice> device) override {
+    DoOnDeviceLaunched(&device);
+  }
+
+  MOCK_METHOD1(DoOnDeviceLaunched,
+               void(std::unique_ptr<LaunchedVideoCaptureDevice>* device));
+  MOCK_METHOD0(OnDeviceLaunchFailed, void());
+  MOCK_METHOD0(OnDeviceLaunchAborted, void());
 };
 
 class ServiceVideoCaptureProviderTest : public testing::Test {
@@ -69,10 +101,10 @@ class ServiceVideoCaptureProviderTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    auto mock_service_connector = base::MakeUnique<MockServiceConnector>();
+    auto mock_service_connector = std::make_unique<MockServiceConnector>();
     mock_service_connector_ = mock_service_connector.get();
-    provider_ = base::MakeUnique<ServiceVideoCaptureProvider>(
-        std::move(mock_service_connector));
+    provider_ = std::make_unique<ServiceVideoCaptureProvider>(
+        std::move(mock_service_connector), kIgnoreLogMessageCB);
 
     ON_CALL(*mock_service_connector_, BindFactoryProvider(_))
         .WillByDefault(
@@ -199,8 +231,8 @@ TEST_F(ServiceVideoCaptureProviderTest,
 
 // Tests that |ServiceVideoCaptureProvider| does not close the connection to the
 // service while at least one previously handed out VideoCaptureDeviceLauncher
-// instance is still alive. Then confirms that it closes the connection as soon
-// as the last VideoCaptureDeviceLauncher instance is released.
+// instance is still using it. Then confirms that it closes the connection as
+// soon as the last VideoCaptureDeviceLauncher instance is released.
 TEST_F(ServiceVideoCaptureProviderTest,
        KeepsServiceConnectionWhileDeviceLauncherAlive) {
   ON_CALL(mock_device_factory_, DoGetDeviceInfos(_))
@@ -209,10 +241,26 @@ TEST_F(ServiceVideoCaptureProviderTest,
         std::vector<media::VideoCaptureDeviceInfo> arbitrarily_empty_results;
         base::ResetAndReturn(&callback).Run(arbitrarily_empty_results);
       }));
+  ON_CALL(mock_device_factory_, DoCreateDevice(_, _, _))
+      .WillByDefault(
+          Invoke([](const std::string& device_id,
+                    video_capture::mojom::DeviceRequest* device_request,
+                    video_capture::mojom::DeviceFactory::CreateDeviceCallback&
+                        callback) {
+            base::ResetAndReturn(&callback).Run(
+                video_capture::mojom::DeviceAccessResultCode::SUCCESS);
+          }));
+  MockVideoCaptureDeviceLauncherCallbacks mock_callbacks;
 
   // Exercise part 1: Create a device launcher and hold on to it.
   auto device_launcher_1 = provider_->CreateDeviceLauncher();
+  base::RunLoop wait_for_launch_1;
+  device_launcher_1->LaunchDeviceAsync(
+      kStubDeviceId, content::MEDIA_DEVICE_VIDEO_CAPTURE, kArbitraryParams,
+      kNullReceiver, base::DoNothing(), &mock_callbacks,
+      wait_for_launch_1.QuitClosure());
   wait_for_connection_to_service_.Run();
+  wait_for_launch_1.Run();
 
   // Monitor if connection gets closed
   bool connection_has_been_closed = false;
@@ -257,6 +305,12 @@ TEST_F(ServiceVideoCaptureProviderTest,
 
   // Exercise part 3: Create and release another device launcher
   auto device_launcher_2 = provider_->CreateDeviceLauncher();
+  base::RunLoop wait_for_launch_2;
+  device_launcher_2->LaunchDeviceAsync(
+      kStubDeviceId, content::MEDIA_DEVICE_VIDEO_CAPTURE, kArbitraryParams,
+      kNullReceiver, base::DoNothing(), &mock_callbacks,
+      wait_for_launch_2.QuitClosure());
+  wait_for_launch_2.Run();
   device_launcher_2.reset();
   {
     base::RunLoop give_provider_chance_to_disconnect;

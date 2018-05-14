@@ -15,8 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/animation/animation_container.h"
-#include "ui/message_center/message_center_tray.h"
-#include "ui/message_center/message_center_tray_delegate.h"
+#include "ui/message_center/ui_delegate.h"
 #include "ui/views/bubble/tray_bubble_view.h"
 
 namespace aura {
@@ -25,12 +24,13 @@ class Window;
 
 namespace message_center {
 class MessageCenter;
-class MessageCenterBubble;
 class MessagePopupCollection;
+class UiController;
 }
 
 namespace ash {
 class AshPopupAlignmentDelegate;
+class MessageCenterBubble;
 class SystemTray;
 class WebNotificationBubbleWrapper;
 class WebNotificationImage;
@@ -45,7 +45,7 @@ class WebNotificationLabel;
 // is controlled by StatusAreaWidget.
 class ASH_EXPORT WebNotificationTray
     : public TrayBackgroundView,
-      public message_center::MessageCenterTrayDelegate,
+      public message_center::UiDelegate,
       public base::SupportsWeakPtr<WebNotificationTray>,
       public ui::SimpleMenuModel::Delegate {
  public:
@@ -68,10 +68,7 @@ class ASH_EXPORT WebNotificationTray
   bool ShouldBlockShelfAutoHide() const;
 
   // Returns true if the message center bubble is visible.
-  bool IsMessageCenterBubbleVisible() const;
-
-  // Called when the login status is changed.
-  void UpdateAfterLoginStatusChange(LoginStatus login_status);
+  bool IsMessageCenterVisible() const;
 
   // Overridden from TrayBackgroundView.
   void UpdateAfterShelfAlignmentChange() override;
@@ -81,7 +78,7 @@ class ASH_EXPORT WebNotificationTray
   void ClickedOutsideBubble() override;
   bool PerformAction(const ui::Event& event) override;
   void CloseBubble() override;
-  void ShowBubble() override;
+  void ShowBubble(bool show_by_click) override;
   views::TrayBubbleView* GetBubbleView() override;
 
   // Overridden from views::TrayBubbleView::Delegate.
@@ -92,15 +89,13 @@ class ASH_EXPORT WebNotificationTray
   bool ShouldEnableExtraKeyboardAccessibility() override;
   void HideBubble(const views::TrayBubbleView* bubble_view) override;
 
-  // Overridden from MessageCenterTrayDelegate.
-  void OnMessageCenterTrayChanged() override;
-  bool ShowMessageCenter() override;
+  // Overridden from message_center::UiDelegate.
+  void OnMessageCenterContentsChanged() override;
+  bool ShowMessageCenter(bool show_by_click) override;
   void HideMessageCenter() override;
   bool ShowPopups() override;
   void HidePopups() override;
   bool ShowNotifierSettings() override;
-  bool IsContextMenuEnabled() const override;
-  message_center::MessageCenterTray* GetMessageCenterTray() override;
 
   // Overridden from ui::SimpleMenuModel::Delegate.
   bool IsCommandIdChecked(int command_id) const override;
@@ -108,6 +103,10 @@ class ASH_EXPORT WebNotificationTray
   void ExecuteCommand(int command_id, int event_flags) override;
 
   message_center::MessageCenter* message_center() const;
+
+  message_center::UiController* message_center_ui_controller() {
+    return message_center_ui_controller_.get();
+  }
 
  private:
   friend class WebNotificationTrayTest;
@@ -120,13 +119,17 @@ class ASH_EXPORT WebNotificationTray
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, PopupShownOnBothDisplays);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, PopupAndSystemTray);
   FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, PopupAndAutoHideShelf);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, VisibleSmallIcon);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, QuietModeIcon);
+  FRIEND_TEST_ALL_PREFIXES(WebNotificationTrayTest, CloseOnActivation);
 
   void UpdateTrayContent();
 
   // The actual process to show the message center. Set |show_settings| to true
-  // if the message center should be initialized with the settings visible.
-  // Returns true if the center is successfully created.
-  bool ShowMessageCenterInternal(bool show_settings);
+  // if the message center should be initialized with the settings visible. Set
+  // |show_by_click| to true if the message center is shown by mouse or gesture
+  // click. Returns true if the center is successfully created.
+  bool ShowMessageCenterInternal(bool show_settings, bool show_by_click);
 
   // Queries login status and the status area widget to determine visibility of
   // the message center.
@@ -147,20 +150,22 @@ class ASH_EXPORT WebNotificationTray
 
   // Testing accessors.
   bool IsPopupVisible() const;
-  message_center::MessageCenterBubble* GetMessageCenterBubbleForTest();
+  MessageCenterBubble* GetMessageCenterBubbleForTest();
 
   aura::Window* status_area_window_;
   SystemTray* system_tray_;
-  std::unique_ptr<message_center::MessageCenterTray> message_center_tray_;
+  std::unique_ptr<message_center::UiController> message_center_ui_controller_;
   std::unique_ptr<WebNotificationBubbleWrapper> message_center_bubble_;
   std::unique_ptr<message_center::MessagePopupCollection> popup_collection_;
-  std::unique_ptr<WebNotificationImage> bell_icon_;
+  std::unique_ptr<views::View> bell_icon_;
+  std::unique_ptr<views::View> quiet_mode_icon_;
   std::unique_ptr<WebNotificationLabel> counter_;
 
   scoped_refptr<gfx::AnimationContainer> animation_container_ =
       new gfx::AnimationContainer();
 
-  std::unordered_map<std::string, WebNotificationImage*> visible_small_icons_;
+  std::unordered_map<std::string, std::unique_ptr<WebNotificationImage>>
+      visible_small_icons_;
 
   bool show_message_center_on_unlock_;
 

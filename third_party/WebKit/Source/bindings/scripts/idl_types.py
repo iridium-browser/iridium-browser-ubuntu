@@ -8,7 +8,6 @@ IdlTypeBase
  IdlType
  IdlUnionType
  IdlArrayOrSequenceType
-  IdlArrayType
   IdlSequenceType
   IdlFrozenArrayType
  IdlNullableType
@@ -88,8 +87,6 @@ STRING_TYPES = frozenset([
 STANDARD_CALLBACK_FUNCTIONS = frozenset([
     # http://heycam.github.io/webidl/#common-Function
     'Function',
-    # http://heycam.github.io/webidl/#common-VoidFunction
-    'VoidFunction',
 ])
 
 
@@ -144,12 +141,13 @@ class IdlType(IdlTypeBase):
     dictionaries = set()
     enums = {}  # name -> values
 
-    def __init__(self, base_type, is_unrestricted=False):
+    def __init__(self, base_type, is_unrestricted=False, extended_attributes=None):
         super(IdlType, self).__init__()
         if is_unrestricted:
             self.base_type = 'unrestricted %s' % base_type
         else:
             self.base_type = base_type
+        self.extended_attributes = extended_attributes
 
     def __str__(self):
         return self.base_type
@@ -157,10 +155,15 @@ class IdlType(IdlTypeBase):
     def __getstate__(self):
         return {
             'base_type': self.base_type,
+            'extended_attributes': self.extended_attributes,
         }
 
     def __setstate__(self, state):
         self.base_type = state['base_type']
+        self.extended_attributes = state['extended_attributes']
+
+    def set_extended_attributes(self, extended_attributes):
+        self.extended_attributes = extended_attributes
 
     @property
     def is_basic_type(self):
@@ -224,7 +227,7 @@ class IdlType(IdlTypeBase):
         # Anything that is not another type is an interface type.
         # http://www.w3.org/TR/WebIDL/#idl-types
         # http://www.w3.org/TR/WebIDL/#idl-interface
-        # In C++ these are RefPtr or PassRefPtr types.
+        # In C++ these are RefPtr types.
         return not(self.is_basic_type or
                    self.is_callback_function or
                    self.is_dictionary or
@@ -365,6 +368,11 @@ class IdlUnionType(IdlTypeBase):
             lambda member_type: member_type.base_type == 'boolean')
 
     @property
+    def sequence_member_type(self):
+        return self.single_matching_member_type(
+            lambda member_type: member_type.is_sequence_type)
+
+    @property
     def as_union_type(self):
         # Note: Use this to "look through" a possible IdlNullableType wrapper.
         return self
@@ -391,7 +399,7 @@ class IdlUnionType(IdlTypeBase):
 
 
 ################################################################################
-# IdlArrayOrSequenceType, IdlArrayType, IdlSequenceType, IdlFrozenArrayType
+# IdlArrayOrSequenceType, IdlSequenceType, IdlFrozenArrayType
 ################################################################################
 
 # TODO(bashi): Rename this like "IdlArrayTypeBase" or something.
@@ -419,10 +427,6 @@ class IdlArrayOrSequenceType(IdlTypeBase):
         return True
 
     @property
-    def is_array_type(self):
-        return False
-
-    @property
     def is_sequence_type(self):
         return False
 
@@ -442,22 +446,6 @@ class IdlArrayOrSequenceType(IdlTypeBase):
         yield self
         for idl_type in self.element_type.idl_types():
             yield idl_type
-
-
-class IdlArrayType(IdlArrayOrSequenceType):
-    def __init__(self, element_type):
-        super(IdlArrayType, self).__init__(element_type)
-
-    def __str__(self):
-        return '%s[]' % self.element_type
-
-    @property
-    def name(self):
-        return self.element_type.name + 'Array'
-
-    @property
-    def is_array_type(self):
-        return True
 
 
 class IdlSequenceType(IdlArrayOrSequenceType):
@@ -571,6 +559,16 @@ class IdlNullableType(IdlTypeBase):
     @property
     def name(self):
         return self.inner_type.name + 'OrNull'
+
+    @property
+    def enum_values(self):
+        # Nullable enums are handled by preprending a None value to the list of
+        # enum values. This None value is converted to nullptr on the C++ side,
+        # which matches the JavaScript 'null' in the enum parsing code.
+        inner_values = self.inner_type.enum_values
+        if inner_values:
+            return [None] + inner_values
+        return None
 
     def resolve_typedefs(self, typedefs):
         self.inner_type = self.inner_type.resolve_typedefs(typedefs)

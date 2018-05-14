@@ -7,14 +7,19 @@ package org.chromium.chrome.browser.metrics;
 import android.content.ComponentCallbacks;
 import android.content.Context;
 import android.content.res.Configuration;
+import android.os.AsyncTask;
+import android.text.TextUtils;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.browser.DefaultBrowserInfo;
+import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
+import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -53,6 +58,15 @@ public class UmaSessionStats {
         nativeRecordPageLoaded(isDesktopUserAgent);
         if (mKeyboardConnected) {
             nativeRecordPageLoadedWithKeyboard();
+        }
+
+        String url = tab.getUrl();
+        if (!TextUtils.isEmpty(url) && UrlUtilities.isHttpOrHttps(url)) {
+            AsyncTask.THREAD_POOL_EXECUTOR.execute(() -> {
+                if (InstantAppsHandler.getInstance().getInstantAppIntentForUrl(url) != null) {
+                    RecordUserAction.record("Android.InstantApps.InstantAppsEligiblePageLoaded");
+                }
+            });
         }
 
         // If the session has ended (i.e. chrome is in the background), escape early. Ideally we
@@ -143,10 +157,6 @@ public class UmaSessionStats {
                 .apply();
     }
 
-    public static void logRendererCrash() {
-        nativeLogRendererCrash();
-    }
-
     /**
      * Updates the metrics services based on a change of consent. This can happen during first-run
      * flow, and when the user changes their preferences.
@@ -205,7 +215,6 @@ public class UmaSessionStats {
     private static native void nativeUpdateMetricsServiceState(boolean mayUpload);
     private native void nativeUmaResumeSession(long nativeUmaSessionStats);
     private native void nativeUmaEndSession(long nativeUmaSessionStats);
-    private static native void nativeLogRendererCrash();
     private static native void nativeRegisterExternalExperiment(
             String studyName, int[] experimentIds);
     private static native void nativeRegisterSyntheticFieldTrial(

@@ -9,6 +9,7 @@
 #include "core/dom/UserGestureIndicator.h"
 #include "core/editing/SelectionController.h"
 #include "core/events/GestureEvent.h"
+#include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
@@ -17,6 +18,7 @@
 #include "core/input/InputDeviceCapabilities.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
+#include "public/web/WebTappedInfo.h"
 
 namespace blink {
 
@@ -39,7 +41,7 @@ void GestureManager::Clear() {
   last_show_press_timestamp_.reset();
 }
 
-DEFINE_TRACE(GestureManager) {
+void GestureManager::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(scroll_manager_);
   visitor->Trace(mouse_event_manager_);
@@ -177,8 +179,9 @@ WebInputEventResult GestureManager::HandleGestureTap(
   // http://crbug.com/398920
   if (current_hit_test.InnerNode()) {
     LocalFrame& main_frame = frame_->LocalFrameRoot();
-    if (main_frame.View())
-      main_frame.View()->UpdateLifecycleToCompositingCleanPlusScrolling();
+    if (!main_frame.View() ||
+        !main_frame.View()->UpdateLifecycleToPrePaintClean())
+      return WebInputEventResult::kNotHandled;
     adjusted_point = frame_view->RootFrameToContents(
         FlooredIntPoint(gesture_event.PositionInRootFrame()));
     current_hit_test = EventHandlingUtil::HitTestResultInFrame(
@@ -190,8 +193,9 @@ WebInputEventResult GestureManager::HandleGestureTap(
       FlooredIntPoint(gesture_event.PositionInRootFrame());
   Node* tapped_node = current_hit_test.InnerNode();
   Element* tapped_element = current_hit_test.InnerElement();
-  UserGestureIndicator gesture_indicator(UserGestureToken::Create(
-      tapped_node ? &tapped_node->GetDocument() : nullptr));
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(
+          tapped_node ? tapped_node->GetDocument().GetFrame() : nullptr);
 
   mouse_event_manager_->SetClickElement(tapped_element);
 
@@ -298,9 +302,9 @@ WebInputEventResult GestureManager::HandleGestureTap(
     IntPoint tapped_position_in_viewport =
         frame_->GetPage()->GetVisualViewport().RootFrameToViewport(
             tapped_position);
-    frame_->GetChromeClient().ShowUnhandledTapUIIfNeeded(
-        tapped_position_in_viewport, tapped_node,
-        dom_tree_changed || style_changed);
+    WebTappedInfo tapped_info(dom_tree_changed, style_changed, tapped_node,
+                              tapped_position_in_viewport);
+    frame_->GetChromeClient().ShowUnhandledTapUIIfNeeded(tapped_info);
   }
   return event_result;
 }
@@ -410,7 +414,7 @@ WebInputEventResult GestureManager::SendContextMenuEventForGesture(
 }
 
 WebInputEventResult GestureManager::HandleGestureShowPress() {
-  last_show_press_timestamp_ = TimeTicks::Now();
+  last_show_press_timestamp_ = CurrentTimeTicks();
 
   LocalFrameView* view = frame_->View();
   if (!view)

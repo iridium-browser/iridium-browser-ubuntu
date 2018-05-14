@@ -26,9 +26,13 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.favicon.LargeIconBridge;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.PrefChangeRegistrar;
+import org.chromium.chrome.browser.preferences.PrefChangeRegistrar.PrefObserver;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.SigninManager;
@@ -36,12 +40,16 @@ import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
+import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.util.IntentUtils;
+import org.chromium.chrome.browser.widget.selection.SelectableBottomSheetContent.SelectableBottomSheetContentManager;
 import org.chromium.chrome.browser.widget.selection.SelectableListLayout;
 import org.chromium.chrome.browser.widget.selection.SelectableListToolbar;
 import org.chromium.chrome.browser.widget.selection.SelectableListToolbar.SearchDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -52,7 +60,8 @@ import java.util.List;
  */
 public class HistoryManager implements OnMenuItemClickListener, SignInStateObserver,
                                        SelectionObserver<HistoryItem>, SearchDelegate,
-                                       SnackbarController {
+                                       SnackbarController, PrefObserver,
+                                       SelectableBottomSheetContentManager<HistoryItem> {
     private static final int FAVICON_MAX_CACHE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
     private static final int MEGABYTES_TO_BYTES =  1024 * 1024;
     private static final String METRICS_PREFIX = "Android.HistoryPage.";
@@ -70,10 +79,12 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
     private final TextView mEmptyView;
     private final RecyclerView mRecyclerView;
     private final SnackbarManager mSnackbarManager;
+    private final PrefChangeRegistrar mPrefChangeRegistrar;
     private LargeIconBridge mLargeIconBridge;
 
     private boolean mIsSearching;
     private boolean mShouldShowInfoHeader;
+
     /**
      * Creates a new HistoryManager.
      * @param activity The Activity associated with the HistoryManager.
@@ -110,7 +121,7 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
         mToolbar = (HistoryManagerToolbar) mSelectableListLayout.initializeToolbar(
                 R.layout.history_toolbar, mSelectionDelegate, R.string.menu_history, null,
                 R.id.normal_menu_group, R.id.selection_mode_menu_group,
-                R.color.default_primary_color, this, true);
+                R.color.modern_primary_color, this, true);
         mToolbar.setManager(this);
         mToolbar.initializeSearchView(this, R.string.history_manager_search, R.id.search_menu_id);
         mToolbar.setInfoMenuItem(R.id.info_menu_id);
@@ -134,17 +145,23 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
         mLargeIconBridge.createCache(maxSize);
 
         // 7. Initialize the adapter to load items.
+        mHistoryAdapter.generateHeaderItems();
         mHistoryAdapter.initialize();
 
-        // 8. Add scroll listener to page in more items when necessary.
+        // 8. Add scroll listener to show/hide info button on scroll and page in more items
+        // when necessary.
         mRecyclerView.addOnScrollListener(new OnScrollListener() {
             @Override
             public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-                if (!mHistoryAdapter.canLoadMoreItems()) return;
-
-                // Load more items if the scroll position is close to the bottom of the list.
                 LinearLayoutManager layoutManager =
                         (LinearLayoutManager) recyclerView.getLayoutManager();
+                // Show info button if available if first visible position is close to info header;
+                // otherwise hide info button.
+                mToolbar.updateInfoMenuItem(
+                        shouldShowInfoButton(), shouldShowInfoHeaderIfAvailable());
+
+                if (!mHistoryAdapter.canLoadMoreItems()) return;
+                // Load more items if the scroll position is close to the bottom of the list.
                 if (layoutManager.findLastVisibleItemPosition()
                         > (mHistoryAdapter.getItemCount() - 25)) {
                     mHistoryAdapter.loadMoreItems();
@@ -153,7 +170,12 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
             }});
 
         // 9. Listen to changes in sign in state.
-        SigninManager.get(mActivity).addSignInStateObserver(this);
+        SigninManager.get().addSignInStateObserver(this);
+
+        // 10. Create PrefChangeRegistrar to receive notifications on preference changes.
+        mPrefChangeRegistrar = new PrefChangeRegistrar();
+        mPrefChangeRegistrar.addObserver(Pref.ALLOW_DELETING_BROWSER_HISTORY, this);
+        mPrefChangeRegistrar.addObserver(Pref.INCOGNITO_MODE_AVAILABILITY, this);
 
         recordUserAction("Show");
     }
@@ -213,41 +235,42 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
                     .putBoolean(PREF_SHOW_HISTORY_INFO, mShouldShowInfoHeader)
                     .apply();
             mToolbar.updateInfoMenuItem(shouldShowInfoButton(), shouldShowInfoHeaderIfAvailable());
-            mHistoryAdapter.setPrivacyDisclaimerVisibility();
+            mHistoryAdapter.setPrivacyDisclaimer();
         }
         return false;
     }
 
-    /**
-     * @return The view that shows the main browsing history UI.
-     */
+    @Override
     public ViewGroup getView() {
         return mSelectableListLayout;
     }
 
-    /**
-     * See {@link SelectableListLayout#detachToolbarView()}.
-     */
+    @Override
+    public RecyclerView getRecyclerView() {
+        return mRecyclerView;
+    }
+
+    @Override
+    public TextView getEmptyView() {
+        return mEmptyView;
+    }
+
+    @Override
     public SelectableListToolbar<HistoryItem> detachToolbarView() {
         return mSelectableListLayout.detachToolbarView();
     }
 
     /**
-     * @return The vertical scroll offset of the content view.
+     * Called when the bottom sheet content/activity/native page is destroyed.
      */
-    public int getVerticalScrollOffset() {
-        return mRecyclerView.computeVerticalScrollOffset();
-    }
-
-    /**
-     * Called when the activity/native page is destroyed.
-     */
+    @Override
     public void onDestroyed() {
         mSelectableListLayout.onDestroyed();
         mHistoryAdapter.onDestroyed();
         mLargeIconBridge.destroy();
         mLargeIconBridge = null;
-        SigninManager.get(mActivity).removeSignInStateObserver(this);
+        SigninManager.get().removeSignInStateObserver(this);
+        mPrefChangeRegistrar.destroy();
     }
 
     /**
@@ -271,8 +294,21 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
      *                     the current tab.
      */
     public void openUrl(String url, Boolean isIncognito, boolean createNewTab) {
-        IntentHandler.startActivityForTrustedIntent(
-                getOpenUrlIntent(url, isIncognito, createNewTab));
+        if (isDisplayedInSeparateActivity()) {
+            IntentHandler.startActivityForTrustedIntent(
+                    getOpenUrlIntent(url, isIncognito, createNewTab));
+            return;
+        }
+
+        ChromeActivity activity = (ChromeActivity) mActivity;
+        if (createNewTab) {
+            TabCreator tabCreator = (isIncognito == null) ? activity.getCurrentTabCreator()
+                                                          : activity.getTabCreator(isIncognito);
+            tabCreator.createNewTab(
+                    new LoadUrlParams(url), TabLaunchType.FROM_LINK, activity.getActivityTab());
+        } else {
+            activity.getActivityTab().loadUrl(new LoadUrlParams(url));
+        }
     }
 
     /**
@@ -376,11 +412,6 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
     }
 
     @VisibleForTesting
-    TextView getEmptyViewForTests() {
-        return mEmptyView;
-    }
-
-    @VisibleForTesting
     public HistoryAdapter getAdapterForTests() {
         return mHistoryAdapter;
     }
@@ -414,7 +445,16 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
      * @return True if info menu item should be shown on history toolbar, false otherwise.
      */
     boolean shouldShowInfoButton() {
-        return mHistoryAdapter.hasPrivacyDisclaimers();
+        LinearLayoutManager layoutManager = (LinearLayoutManager) mRecyclerView.getLayoutManager();
+        // Before the RecyclerView binds its items, LinearLayoutManager#firstVisibleItemPosition()
+        // returns {@link RecyclerView#NO_POSITION}. If #findVisibleItemPosition() returns
+        // NO_POSITION, the current adapter position should not prevent the info button from being
+        // displayed if all of the other criteria is met. See crbug.com/756249#c3.
+        boolean firstAdapterItemScrolledOff = layoutManager.findFirstVisibleItemPosition() > 0;
+
+        return !firstAdapterItemScrolledOff && mHistoryAdapter.hasPrivacyDisclaimers()
+                && mHistoryAdapter.getItemCount() > 0 && !mToolbar.isSearching()
+                && !mSelectionDelegate.isSelectionEnabled();
     }
 
     /**
@@ -433,6 +473,12 @@ public class HistoryManager implements OnMenuItemClickListener, SignInStateObser
 
     @Override
     public void onSignedOut() {
+        mToolbar.onSignInStateChange();
+        mHistoryAdapter.onSignInStateChange();
+    }
+
+    @Override
+    public void onPreferenceChange() {
         mToolbar.onSignInStateChange();
         mHistoryAdapter.onSignInStateChange();
     }

@@ -11,7 +11,6 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -158,7 +157,7 @@ class FakeSyncedPrintersManager : public SyncedPrintersManager {
 
 class FakePrinterDetector : public PrinterDetector {
  public:
-  FakePrinterDetector() = default;
+  FakePrinterDetector() {}
   ~FakePrinterDetector() override = default;
 
   void AddObserver(Observer* observer) override {
@@ -167,6 +166,7 @@ class FakePrinterDetector : public PrinterDetector {
   void RemoveObserver(Observer* observer) override {
     observers_.RemoveObserver(observer);
   }
+
   std::vector<DetectedPrinter> GetPrinters() override { return detections_; }
 
   void AddDetections(
@@ -205,27 +205,27 @@ class FakePpdProvider : public PpdProvider {
   FakePpdProvider() {}
 
   void ResolvePpdReference(const PrinterSearchData& search_data,
-                           const ResolvePpdReferenceCallback& cb) override {
+                           ResolvePpdReferenceCallback cb) override {
     if (search_data.make_and_model.empty()) {
       base::SequencedTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE,
-          base::Bind(cb, PpdProvider::NOT_FOUND, Printer::PpdReference()));
+          FROM_HERE, base::BindOnce(std::move(cb), PpdProvider::NOT_FOUND,
+                                    Printer::PpdReference()));
     } else {
       Printer::PpdReference ret;
       ret.effective_make_and_model = search_data.make_and_model[0];
       base::SequencedTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::Bind(cb, PpdProvider::SUCCESS, ret));
+          FROM_HERE, base::BindOnce(std::move(cb), PpdProvider::SUCCESS, ret));
     }
   }
 
   // These three functions are not used by CupsPrintersManager.
   void ResolvePpd(const Printer::PpdReference& reference,
-                  const ResolvePpdCallback& cb) override {}
-  void ResolveManufacturers(const ResolveManufacturersCallback& cb) override {}
+                  ResolvePpdCallback cb) override {}
+  void ResolveManufacturers(ResolveManufacturersCallback cb) override {}
   void ResolvePrinters(const std::string& manufacturer,
-                       const ResolvePrintersCallback& cb) override {}
+                       ResolvePrintersCallback cb) override {}
   void ReverseLookup(const std::string& effective_make_and_model,
-                     const ReverseLookupCallback& cb) override {}
+                     ReverseLookupCallback cb) override {}
 
  private:
   ~FakePpdProvider() override {}
@@ -251,13 +251,15 @@ class CupsPrintersManagerTest : public testing::Test,
   CupsPrintersManagerTest()
       : observed_printers_(CupsPrintersManager::kNumPrinterClasses),
         ppd_provider_(new FakePpdProvider) {
-    // Zeroconf detector ownership is taken by the manager, so we have
-    // to keep a raw pointer to it.
-    auto zeroconf_detector = base::MakeUnique<FakePrinterDetector>();
+    // Zeroconf and usb detector ownerships are taken by the manager, so we have
+    // to keep raw pointers to them.
+    auto zeroconf_detector = std::make_unique<FakePrinterDetector>();
     zeroconf_detector_ = zeroconf_detector.get();
+    auto usb_detector = std::make_unique<FakePrinterDetector>();
+    usb_detector_ = usb_detector.get();
     manager_ = CupsPrintersManager::Create(
-        &synced_printers_manager_, &usb_detector_, std::move(zeroconf_detector),
-        ppd_provider_, &event_tracker_);
+        &synced_printers_manager_, std::move(usb_detector),
+        std::move(zeroconf_detector), ppd_provider_, &event_tracker_);
     manager_->AddObserver(this);
   }
 
@@ -286,7 +288,7 @@ class CupsPrintersManagerTest : public testing::Test,
 
   // Backend fakes driving the CupsPrintersManager.
   FakeSyncedPrintersManager synced_printers_manager_;
-  FakePrinterDetector usb_detector_;
+  FakePrinterDetector* usb_detector_;
   FakePrinterDetector* zeroconf_detector_;
   scoped_refptr<FakePpdProvider> ppd_provider_;
 
@@ -340,8 +342,8 @@ TEST_F(CupsPrintersManagerTest, GetConfiguredPrinters) {
 // surfaced appropriately.  One printer should be "automatic" because it has
 // a findable Ppd, the other should be "discovered".
 TEST_F(CupsPrintersManagerTest, GetUsbPrinters) {
-  usb_detector_.AddDetections({MakeDiscoveredPrinter("DiscoveredPrinter"),
-                               MakeAutomaticPrinter("AutomaticPrinter")});
+  usb_detector_->AddDetections({MakeDiscoveredPrinter("DiscoveredPrinter"),
+                                MakeAutomaticPrinter("AutomaticPrinter")});
   scoped_task_environment_.RunUntilIdle();
   ExpectPrintersInClassAre(CupsPrintersManager::kDiscovered,
                            {"DiscoveredPrinter"});
@@ -402,7 +404,7 @@ TEST_F(CupsPrintersManagerTest, UpdateConfiguredPrinter) {
   // Enterprise which is not relevant to this test.
   Printer existing_configured("Configured");
   synced_printers_manager_.AddConfiguredPrinters({existing_configured});
-  usb_detector_.AddDetections({MakeDiscoveredPrinter("Discovered")});
+  usb_detector_->AddDetections({MakeDiscoveredPrinter("Discovered")});
   zeroconf_detector_->AddDetections({MakeAutomaticPrinter("Automatic")});
   scoped_task_environment_.RunUntilIdle();
 
@@ -426,15 +428,13 @@ TEST_F(CupsPrintersManagerTest, UpdateConfiguredPrinter) {
   // into the configured category.
   manager_->UpdateConfiguredPrinter(Printer("Automatic"));
   scoped_task_environment_.RunUntilIdle();
-  ExpectPrintersInClassAre(CupsPrintersManager::kAutomatic,
-                           std::vector<std::string>());
+  ExpectPrintersInClassAre(CupsPrintersManager::kAutomatic, {});
   ExpectPrintersInClassAre(CupsPrintersManager::kConfigured,
                            {"Automatic", "Configured"});
 
   manager_->UpdateConfiguredPrinter(Printer("Discovered"));
   scoped_task_environment_.RunUntilIdle();
-  ExpectPrintersInClassAre(CupsPrintersManager::kDiscovered,
-                           std::vector<std::string>());
+  ExpectPrintersInClassAre(CupsPrintersManager::kDiscovered, {});
   ExpectPrintersInClassAre(CupsPrintersManager::kConfigured,
                            {"Automatic", "Configured", "Discovered"});
 
@@ -459,7 +459,7 @@ TEST_F(CupsPrintersManagerTest, UpdateConfiguredPrinter) {
 TEST_F(CupsPrintersManagerTest, GetPrinter) {
   synced_printers_manager_.AddConfiguredPrinters({Printer("Configured")});
   synced_printers_manager_.AddEnterprisePrinters({Printer("Enterprise")});
-  usb_detector_.AddDetections({MakeDiscoveredPrinter("Discovered")});
+  usb_detector_->AddDetections({MakeDiscoveredPrinter("Discovered")});
   zeroconf_detector_->AddDetections({MakeAutomaticPrinter("Automatic")});
   scoped_task_environment_.RunUntilIdle();
 

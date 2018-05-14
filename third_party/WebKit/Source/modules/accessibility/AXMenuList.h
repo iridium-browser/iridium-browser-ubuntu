@@ -26,6 +26,7 @@
 #ifndef AXMenuList_h
 #define AXMenuList_h
 
+#include "base/macros.h"
 #include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
@@ -34,14 +35,12 @@ class AXObjectCacheImpl;
 class LayoutMenuList;
 
 class AXMenuList final : public AXLayoutObject {
-  WTF_MAKE_NONCOPYABLE(AXMenuList);
-
  public:
   static AXMenuList* Create(LayoutMenuList* layout_object, AXObjectCacheImpl&);
 
   bool IsCollapsed() const override;
   AccessibilityExpanded IsExpanded() const final;
-  bool Press() override;
+  bool OnNativeClickAction() override;
   void ClearChildren() override;
 
   void DidUpdateActiveOption(int option_index);
@@ -57,6 +56,8 @@ class AXMenuList final : public AXLayoutObject {
   AccessibilityRole DetermineAccessibilityRole() final;
 
   void AddChildren() override;
+
+  DISALLOW_COPY_AND_ASSIGN(AXMenuList);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXMenuList, IsMenuList());

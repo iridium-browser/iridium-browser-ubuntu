@@ -31,6 +31,8 @@ import org.chromium.content.common.IGpuProcessCallback;
 import org.chromium.content.common.SurfaceWrapper;
 import org.chromium.content_public.common.ContentProcessInfo;
 
+import java.util.List;
+
 /**
  * This implementation of {@link ChildProcessServiceDelegate} loads the native library potentially
  * using the custom linker, provides access to view surfaces.
@@ -69,8 +71,10 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
     }
 
     @Override
-    public void onConnectionSetup(Bundle connectionBundle, IBinder callback) {
-        mGpuCallback = callback != null ? IGpuProcessCallback.Stub.asInterface(callback) : null;
+    public void onConnectionSetup(Bundle connectionBundle, List<IBinder> clientInterfaces) {
+        mGpuCallback = clientInterfaces != null && !clientInterfaces.isEmpty()
+                ? IGpuProcessCallback.Stub.asInterface(clientInterfaces.get(0))
+                : null;
 
         mCpuCount = connectionBundle.getInt(ContentChildProcessConstants.EXTRA_CPU_COUNT);
         mCpuFeatures = connectionBundle.getLong(ContentChildProcessConstants.EXTRA_CPU_FEATURES);
@@ -80,6 +84,19 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
         if (sharedRelros != null) {
             getLinker().useSharedRelros(sharedRelros);
             sharedRelros = null;
+        }
+    }
+
+    @Override
+    public void preloadNativeLibrary(Context hostContext) {
+        // This function can be called before command line is set. That is fine because
+        // preloading explicitly doesn't run any Chromium code, see NativeLibraryPreloader
+        // for more info.
+        try {
+            LibraryLoader libraryLoader = LibraryLoader.get(mLibraryProcessType);
+            libraryLoader.preloadNowOverrideApplicationContext(hostContext);
+        } catch (ProcessInitException e) {
+            Log.w(TAG, "Failed to preload native library", e);
         }
     }
 
@@ -179,8 +196,7 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
             // For testing, set the Linker implementation and the test runner
             // class name to match those used by the parent.
             assert mLinkerParams != null;
-            Linker.setupForTesting(mLinkerParams.mLinkerImplementationForTesting,
-                    mLinkerParams.mTestRunnerClassNameForTesting);
+            Linker.setupForTesting(mLinkerParams.mTestRunnerClassNameForTesting);
         }
         return Linker.getInstance();
     }
@@ -236,7 +252,7 @@ public class ContentChildProcessServiceDelegate implements ChildProcessServiceDe
     /**
      * Initializes the native parts of the service.
      *
-     * @param serviceImpl This ChildProcessServiceImpl object.
+     * @param serviceImpl This ChildProcessService object.
      * @param cpuCount The number of CPUs.
      * @param cpuFeatures The CPU features.
      */

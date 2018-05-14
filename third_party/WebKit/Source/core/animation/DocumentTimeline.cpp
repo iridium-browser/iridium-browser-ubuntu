@@ -31,6 +31,7 @@
 #include "core/animation/DocumentTimeline.h"
 
 #include <algorithm>
+#include "core/animation/Animation.h"
 #include "core/animation/AnimationClock.h"
 #include "core/animation/DocumentTimelineOptions.h"
 #include "core/animation/ElementAnimations.h"
@@ -38,7 +39,6 @@
 #include "core/frame/LocalFrameView.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/animation/CompositorAnimationTimeline.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/wtf/PtrUtil.h"
@@ -117,6 +117,7 @@ Animation* DocumentTimeline::Play(AnimationEffectReadOnly* child) {
 }
 
 HeapVector<Member<Animation>> DocumentTimeline::getAnimations() {
+  document_->UpdateStyleAndLayoutTree();
   HeapVector<Member<Animation>> animations;
   for (const auto& animation : animations_) {
     if (animation->effect() &&
@@ -178,7 +179,7 @@ void DocumentTimeline::ScheduleNextService() {
 void DocumentTimeline::DocumentTimelineTiming::WakeAfter(double duration) {
   if (timer_.IsActive() && timer_.NextFireInterval() < duration)
     return;
-  timer_.StartOneShot(duration, BLINK_FROM_HERE);
+  timer_.StartOneShot(duration, FROM_HERE);
 }
 
 void DocumentTimeline::DocumentTimelineTiming::ServiceOnNextFrame() {
@@ -186,15 +187,27 @@ void DocumentTimeline::DocumentTimelineTiming::ServiceOnNextFrame() {
     timeline_->document_->View()->ScheduleAnimation();
 }
 
-DEFINE_TRACE(DocumentTimeline::DocumentTimelineTiming) {
+void DocumentTimeline::DocumentTimelineTiming::Trace(blink::Visitor* visitor) {
   visitor->Trace(timeline_);
   DocumentTimeline::PlatformTiming::Trace(visitor);
 }
 
+size_t DocumentTimeline::MainThreadCompositableAnimationsCount() const {
+  size_t main_thread_compositable_animations_count = 0;
+  for (Animation* animation : animations_needing_update_) {
+    if (animation->IsNonCompositedCompositable() &&
+        animation->PlayStateInternal() != Animation::kFinished)
+      main_thread_compositable_animations_count++;
+  }
+  return main_thread_compositable_animations_count;
+}
+
 double DocumentTimeline::ZeroTime() {
   if (!zero_time_initialized_ && document_ && document_->Loader()) {
-    zero_time_ = document_->Loader()->GetTiming().ReferenceMonotonicTime() +
-                 origin_time_;
+    zero_time_ =
+        TimeTicksInSeconds(
+            document_->Loader()->GetTiming().ReferenceMonotonicTime()) +
+        origin_time_;
     zero_time_initialized_ = true;
   }
   return zero_time_;
@@ -306,7 +319,7 @@ void DocumentTimeline::InvalidateKeyframeEffects(const TreeScope& tree_scope) {
     animation->InvalidateKeyframeEffect(tree_scope);
 }
 
-DEFINE_TRACE(DocumentTimeline) {
+void DocumentTimeline::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(timing_);
   visitor->Trace(animations_needing_update_);

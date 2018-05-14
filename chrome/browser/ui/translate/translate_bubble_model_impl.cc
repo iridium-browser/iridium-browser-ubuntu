@@ -50,6 +50,10 @@ bool TranslateBubbleModelImpl::ShouldAlwaysTranslateBeCheckedByDefault() const {
   return ui_delegate_->ShouldAlwaysTranslateBeCheckedByDefault();
 }
 
+bool TranslateBubbleModelImpl::ShouldShowAlwaysTranslateShortcut() const {
+  return ui_delegate_->ShouldShowAlwaysTranslateShortcut();
+}
+
 void TranslateBubbleModelImpl::SetViewState(
     TranslateBubbleModel::ViewState view_state) {
   view_state_transition_.SetViewState(view_state);
@@ -98,6 +102,10 @@ void TranslateBubbleModelImpl::SetNeverTranslateLanguage(bool value) {
 
 void TranslateBubbleModelImpl::SetNeverTranslateSite(bool value) {
   ui_delegate_->SetSiteBlacklist(value);
+}
+
+bool TranslateBubbleModelImpl::CanBlacklistSite() {
+  return ui_delegate_->CanBlacklistSite();
 }
 
 bool TranslateBubbleModelImpl::ShouldAlwaysTranslate() const {

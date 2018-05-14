@@ -5,8 +5,10 @@
 #include "core/editing/VisibleSelection.h"
 
 #include "core/dom/Range.h"
-#include "core/editing/EditingTestBase.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/SelectionAdjuster.h"
+#include "core/editing/SelectionTemplate.h"
+#include "core/editing/testing/EditingTestBase.h"
 
 #define LOREM_IPSUM                                                            \
   "Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod "  \
@@ -43,7 +45,20 @@ class VisibleSelectionTest : public EditingTestBase {
             .Extend(PositionTemplate<Strategy>(node, extend))
             .Build());
   }
+
+  std::string GetWordSelectionText(const std::string&);
 };
+
+std::string VisibleSelectionTest::GetWordSelectionText(
+    const std::string& selection_text) {
+  const PositionInFlatTree position =
+      ToPositionInFlatTree(SetSelectionTextToBody(selection_text).Base());
+  return GetSelectionTextInFlatTreeFromBody(
+      CreateVisibleSelectionWithGranularity(
+          SelectionInFlatTree::Builder().Collapse(position).Build(),
+          TextGranularity::kWord)
+          .AsSelection());
+}
 
 static void TestFlatTreePositionsToEqualToDOMTreePositions(
     const VisibleSelection& selection,
@@ -69,29 +84,6 @@ VisibleSelectionTemplate<Strategy> ExpandUsingGranularity(
           .SetBaseAndExtent(selection.Base(), selection.Extent())
           .Build(),
       granularity);
-}
-
-// For http://crbug.com/700368
-TEST_F(VisibleSelectionTest, appendTrailingWhitespaceWithAfterAnchor) {
-  SetBodyContent(
-      "<input type=checkbox>"
-      "<div style='user-select:none'>abc</div>");
-  Element* const input = GetDocument().QuerySelector("input");
-
-  // Simulate double-clicking "abc".
-  // TODO(editing-dev): We should remove above comment once we fix [1].
-  // [1] http://crbug.com/701657 double-click on user-select:none should not
-  // compute selection.
-  const VisibleSelection selection = CreateVisibleSelectionWithGranularity(
-      SelectionInDOMTree::Builder()
-          .Collapse(Position::BeforeNode(*input))
-          .Extend(Position::AfterNode(*input))
-          .Build(),
-      TextGranularity::kWord);
-  const VisibleSelection result = selection.AppendTrailingWhitespace();
-
-  EXPECT_EQ(Position::BeforeNode(*input), result.Start());
-  EXPECT_EQ(Position::AfterNode(*input), result.End());
 }
 
 TEST_F(VisibleSelectionTest, expandUsingGranularity) {
@@ -221,20 +213,21 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
 
 // For http://wkb.ug/32622
 TEST_F(VisibleSelectionTest, ExpandUsingGranularityWithEmptyCell) {
-  SetBodyContent(
+  const SelectionInDOMTree& selection_in_dom_tree = SetSelectionTextToBody(
       "<div contentEditable><table cellspacing=0><tr>"
-      "<td id='first' width='50' height='25pt'></td>"
+      "<td id='first' width='50' height='25pt'>|</td>"
       "<td id='second' width='50' height='25pt'></td>"
       "</tr></table></div>");
-  Element* const first = GetDocument().getElementById("first");
   const VisibleSelectionInFlatTree& selection =
       CreateVisibleSelectionWithGranularity(
-          SelectionInFlatTree::Builder()
-              .Collapse(PositionInFlatTree(first, 0))
-              .Build(),
+          ConvertToSelectionInFlatTree(selection_in_dom_tree),
           TextGranularity::kWord);
-  EXPECT_EQ(PositionInFlatTree(first, 0), selection.Start());
-  EXPECT_EQ(PositionInFlatTree(first, 0), selection.End());
+  EXPECT_EQ(
+      "<div contenteditable><table cellspacing=\"0\"><tbody><tr>"
+      "<td height=\"25pt\" id=\"first\" width=\"50\">|</td>"
+      "<td height=\"25pt\" id=\"second\" width=\"50\"></td>"
+      "</tr></tbody></table></div>",
+      GetSelectionTextInFlatTreeFromBody(selection.AsSelection()));
 }
 
 TEST_F(VisibleSelectionTest, Initialisation) {
@@ -259,7 +252,93 @@ TEST_F(VisibleSelectionTest, Initialisation) {
 
   const VisibleSelection no_selection =
       CreateVisibleSelection(SelectionInDOMTree::Builder().Build());
-  EXPECT_EQ(kNoSelection, no_selection.GetSelectionType());
+  EXPECT_TRUE(no_selection.IsNone());
+}
+
+TEST_F(VisibleSelectionTest, FirstLetter) {
+  SetBodyContent(
+      "<style>p::first-letter { font-color: red; }</style>"
+      "<p>abc def</p>");
+  const Element* sample = GetDocument().QuerySelector("p");
+  const SelectionInDOMTree selection =
+      SelectionInDOMTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 3))
+          .Build();
+  const VisibleSelection visible_selection = CreateVisibleSelection(selection);
+
+  EXPECT_EQ(selection, visible_selection.AsSelection());
+}
+
+TEST_F(VisibleSelectionTest, FirstLetterCollapsedWhitespace) {
+  SetBodyContent(
+      "<style>p::first-letter { font-color: red; }</style>"
+      "<p>  abc def</p>");
+  const Element* sample = GetDocument().QuerySelector("p");
+  const SelectionInDOMTree selection =
+      SelectionInDOMTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 5))
+          .Build();
+  const VisibleSelection visible_selection = CreateVisibleSelection(selection);
+
+  EXPECT_EQ(SelectionInDOMTree::Builder()
+                .Collapse(Position(sample->firstChild(), 2))
+                .Extend(Position(sample->firstChild(), 5))
+                .Build(),
+            visible_selection.AsSelection())
+      << "VisibleSelection doesn't contains collapsed whitespaces";
+}
+
+TEST_F(VisibleSelectionTest, FirstLetterPartial) {
+  SetBodyContent(
+      "<style>p::first-letter { font-color: red; }</style>"
+      "<p>((a))bc def</p>");
+  const Element* sample = GetDocument().QuerySelector("p");
+  const SelectionInDOMTree selection =
+      SelectionInDOMTree::Builder()
+          .Collapse(Position(sample->firstChild(), 1))
+          .Extend(Position(sample->firstChild(), 4))
+          .Build();
+  const VisibleSelection visible_selection = CreateVisibleSelection(selection);
+
+  EXPECT_EQ(selection, visible_selection.AsSelection())
+      << "Select '(a)' of '((a))";
+}
+
+TEST_F(VisibleSelectionTest, FirstLetterTextTransform) {
+  SetBodyContent(
+      "<style>p::first-letter { text-transform: uppercase; }</style>"
+      "<p>\u00DFbc def</p>");  // uppercase(U+00DF) = "SS"
+  const Element* sample = GetDocument().QuerySelector("p");
+  const SelectionInDOMTree selection =
+      SelectionInDOMTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 3))
+          .Build();
+  const VisibleSelection visible_selection = CreateVisibleSelection(selection);
+
+  EXPECT_EQ(selection, visible_selection.AsSelection());
+}
+
+TEST_F(VisibleSelectionTest, FirstLetterVisibilityHidden) {
+  SetBodyContent(
+      "<style>p::first-letter { visibility: hidden; }</style>"
+      "<p>abc def</p>");
+  const Element* sample = GetDocument().QuerySelector("p");
+  const SelectionInDOMTree selection =
+      SelectionInDOMTree::Builder()
+          .Collapse(Position(sample->firstChild(), 0))
+          .Extend(Position(sample->firstChild(), 3))
+          .Build();
+  const VisibleSelection visible_selection = CreateVisibleSelection(selection);
+
+  EXPECT_EQ(SelectionInDOMTree::Builder()
+                .Collapse(Position(sample->firstChild(), 1))
+                .Extend(Position(sample->firstChild(), 3))
+                .Build(),
+            visible_selection.AsSelection())
+      << "Exclude first-letter part since it is visibility::hidden";
 }
 
 // For http://crbug.com/695317
@@ -269,18 +348,19 @@ TEST_F(VisibleSelectionTest, SelectAllWithInputElement) {
   Element* const input = GetDocument().QuerySelector("input");
   Node* const last_child = GetDocument().body()->lastChild();
 
-  const VisibleSelection& visible_selectin_in_dom_tree = CreateVisibleSelection(
-      SelectionInDOMTree::Builder()
-          .Collapse(Position::FirstPositionInNode(*html_element))
-          .Extend(Position::LastPositionInNode(*html_element))
-          .Build());
+  const VisibleSelection& visible_selection_in_dom_tree =
+      CreateVisibleSelection(
+          SelectionInDOMTree::Builder()
+              .Collapse(Position::FirstPositionInNode(*html_element))
+              .Extend(Position::LastPositionInNode(*html_element))
+              .Build());
   EXPECT_EQ(SelectionInDOMTree::Builder()
                 .Collapse(Position::BeforeNode(*input))
                 .Extend(Position(last_child, 3))
                 .Build(),
-            visible_selectin_in_dom_tree.AsSelection());
+            visible_selection_in_dom_tree.AsSelection());
 
-  const VisibleSelectionInFlatTree& visible_selectin_in_flat_tree =
+  const VisibleSelectionInFlatTree& visible_selection_in_flat_tree =
       CreateVisibleSelection(
           SelectionInFlatTree::Builder()
               .Collapse(PositionInFlatTree::FirstPositionInNode(*html_element))
@@ -290,7 +370,43 @@ TEST_F(VisibleSelectionTest, SelectAllWithInputElement) {
                 .Collapse(PositionInFlatTree::BeforeNode(*input))
                 .Extend(PositionInFlatTree(last_child, 3))
                 .Build(),
-            visible_selectin_in_flat_tree.AsSelection());
+            visible_selection_in_flat_tree.AsSelection());
+}
+
+TEST_F(VisibleSelectionTest, GetWordSelectionTextWithTextSecurity) {
+  InsertStyleElement("s {-webkit-text-security:disc;}");
+  // Note: |CreateVisibleSelectionWithGranularity()| considers security
+  // characters as a sequence "x".
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("|abc<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("a|bc<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc|<s>foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>|foo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>f|oo bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>fo|o bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo| bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo |bar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo b|ar</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo ba|r</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar|</s>baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>|baz"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>b|az"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>ba|z"));
+  EXPECT_EQ("^abc<s>foo bar</s>baz|",
+            GetWordSelectionText("abc<s>foo bar</s>baz|"));
 }
 
 TEST_F(VisibleSelectionTest, ShadowCrossing) {
@@ -321,7 +437,7 @@ TEST_F(VisibleSelectionTest, ShadowCrossing) {
 
   EXPECT_EQ(Position(host, PositionAnchorType::kBeforeAnchor),
             selection.Start());
-  EXPECT_EQ(Position(one->firstChild(), 0), selection.End());
+  EXPECT_EQ(Position(host, PositionAnchorType::kBeforeAnchor), selection.End());
   EXPECT_EQ(PositionInFlatTree(one->firstChild(), 0),
             selection_in_flat_tree.Start());
   EXPECT_EQ(PositionInFlatTree(six->firstChild(), 2),
@@ -402,7 +518,7 @@ TEST_F(VisibleSelectionTest, ShadowNested) {
 
   EXPECT_EQ(Position(host, PositionAnchorType::kBeforeAnchor),
             selection.Start());
-  EXPECT_EQ(Position(one->firstChild(), 0), selection.End());
+  EXPECT_EQ(Position(host, PositionAnchorType::kBeforeAnchor), selection.End());
   EXPECT_EQ(PositionInFlatTree(eight->firstChild(), 2),
             selection_in_flat_tree.Start());
   EXPECT_EQ(PositionInFlatTree(eight->firstChild(), 2),

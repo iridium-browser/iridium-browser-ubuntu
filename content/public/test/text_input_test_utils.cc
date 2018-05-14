@@ -10,7 +10,6 @@
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
-#include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/renderer_host/render_widget_host_view_base_observer.h"
 #include "content/browser/renderer_host/text_input_manager.h"
@@ -22,10 +21,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/test_utils.h"
-#include "third_party/WebKit/public/web/WebCompositionUnderline.h"
-#include "ui/base/ime/composition_underline.h"
+#include "third_party/WebKit/public/web/WebImeTextSpan.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/ime/input_method_observer.h"
+
+#if defined(USE_AURA)
+#include "content/browser/renderer_host/render_widget_host_view_aura.h"
+#endif
 
 namespace ui {
 class TextInputClient;
@@ -268,22 +271,22 @@ bool DoesFrameHaveFocusedEditableElement(RenderFrameHost* frame) {
 void SendImeCommitTextToWidget(
     RenderWidgetHost* rwh,
     const base::string16& text,
-    const std::vector<ui::CompositionUnderline>& underlines,
+    const std::vector<ui::ImeTextSpan>& ime_text_spans,
     const gfx::Range& replacement_range,
     int relative_cursor_pos) {
   RenderWidgetHostImpl::From(rwh)->ImeCommitText(
-      text, underlines, replacement_range, relative_cursor_pos);
+      text, ime_text_spans, replacement_range, relative_cursor_pos);
 }
 
 void SendImeSetCompositionTextToWidget(
     RenderWidgetHost* rwh,
     const base::string16& text,
-    const std::vector<ui::CompositionUnderline>& underlines,
+    const std::vector<ui::ImeTextSpan>& ime_text_spans,
     const gfx::Range& replacement_range,
     int selection_start,
     int selection_end) {
   RenderWidgetHostImpl::From(rwh)->ImeSetComposition(
-      text, underlines, replacement_range, selection_start, selection_end);
+      text, ime_text_spans, replacement_range, selection_start, selection_end);
 }
 
 bool DestroyRenderWidgetHost(int32_t process_id,

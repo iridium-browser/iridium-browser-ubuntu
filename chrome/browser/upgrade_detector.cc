@@ -48,7 +48,6 @@ gfx::Image UpgradeDetector::GetIcon() {
       color = gfx::kGoogleYellow700;
       break;
     case UPGRADE_ANNOYANCE_HIGH:
-    case UPGRADE_ANNOYANCE_SEVERE:
     case UPGRADE_ANNOYANCE_CRITICAL:
       color = gfx::kGoogleRed700;
       break;
@@ -108,6 +107,11 @@ void UpgradeDetector::NotifyCriticalUpgradeInstalled() {
 void UpgradeDetector::NotifyUpdateOverCellularAvailable() {
   for (auto& observer : observer_list_)
     observer.OnUpdateOverCellularAvailable();
+}
+
+void UpgradeDetector::NotifyUpdateOverCellularOneTimePermissionGranted() {
+  for (auto& observer : observer_list_)
+    observer.OnUpdateOverCellularOneTimePermissionGranted();
 }
 
 void UpgradeDetector::TriggerCriticalUpdate() {

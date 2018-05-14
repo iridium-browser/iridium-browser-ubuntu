@@ -8,7 +8,6 @@
 #include "base/guid.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -31,7 +30,6 @@
 #include "components/metrics/metrics_state_manager.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
-#include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/ui/screen_info_metrics_provider.h"
 #include "components/metrics/url_constants.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -60,8 +58,11 @@ const char kMetricsOldClientID[] = "user_experience_metrics.client_id";
 #if defined(OS_ANDROID)
 const char kClientIdName[] = "Client ID";
 #else
+
+#if defined(OS_LINUX)
 const char kExternalUmaEventsRelativePath[] = "metrics/uma-events";
 const char kPlatformUmaEventsPath[] = "/data/share/chrome/metrics/uma-events";
+#endif  // defined(OS_LINUX)
 
 const struct ChannelMap {
   const char* chromecast_channel;
@@ -213,11 +214,6 @@ std::string CastMetricsServiceClient::GetVersionString() {
   return version_string;
 }
 
-void CastMetricsServiceClient::InitializeSystemProfileMetrics(
-    const base::Closure& done_callback) {
-  done_callback.Run();
-}
-
 void CastMetricsServiceClient::CollectFinalMetricsForLog(
     const base::Closure& done_callback) {
   // Asynchronously fetch metrics data from child processes. Since this method
@@ -242,20 +238,21 @@ std::string CastMetricsServiceClient::GetMetricsServerUrl() {
 std::unique_ptr<::metrics::MetricsLogUploader>
 CastMetricsServiceClient::CreateUploader(
     base::StringPiece server_url,
+    base::StringPiece insecure_server_url,
     base::StringPiece mime_type,
     ::metrics::MetricsLogUploader::MetricServiceType service_type,
     const ::metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return std::unique_ptr<::metrics::MetricsLogUploader>(
       new ::metrics::NetMetricsLogUploader(request_context_, server_url,
-                                           mime_type, service_type,
-                                           on_upload_complete));
+                                           insecure_server_url, mime_type,
+                                           service_type, on_upload_complete));
 }
 
 base::TimeDelta CastMetricsServiceClient::GetStandardUploadInterval() {
   return base::TimeDelta::FromMinutes(kStandardUploadIntervalMinutes);
 }
 
-bool CastMetricsServiceClient::IsConsentGiven() {
+bool CastMetricsServiceClient::IsConsentGiven() const {
   return pref_service_->GetBoolean(prefs::kOptInStats);
 }
 
@@ -278,7 +275,6 @@ CastMetricsServiceClient::CastMetricsServiceClient(
     PrefService* pref_service,
     net::URLRequestContextGetter* request_context)
     : pref_service_(pref_service),
-      cast_service_(nullptr),
       client_info_loaded_(false),
 #if defined(OS_LINUX)
       external_metrics_(nullptr),
@@ -317,11 +313,8 @@ void CastMetricsServiceClient::SetForceClientId(
   force_client_id_ = client_id;
 }
 
-void CastMetricsServiceClient::Initialize(CastService* cast_service) {
-  DCHECK(cast_service);
-  DCHECK(!cast_service_);
-  cast_service_ = cast_service;
-
+void CastMetricsServiceClient::Initialize() {
+  DCHECK(!metrics_state_manager_);
   metrics_state_manager_ = ::metrics::MetricsStateManager::Create(
       pref_service_, this, base::string16(),
       base::Bind(&CastMetricsServiceClient::StoreClientInfo,
@@ -360,10 +353,7 @@ void CastMetricsServiceClient::Initialize(CastService* cast_service) {
             new ::metrics::ScreenInfoMetricsProvider));
   }
   metrics_service_->RegisterMetricsProvider(
-      base::MakeUnique<::metrics::NetworkMetricsProvider>());
-  metrics_service_->RegisterMetricsProvider(
-      std::unique_ptr<::metrics::MetricsProvider>(
-          new ::metrics::ProfilerMetricsProvider));
+      std::make_unique<::metrics::NetworkMetricsProvider>());
   shell::CastBrowserProcess::GetInstance()->browser_client()->
       RegisterMetricsProviders(metrics_service_.get());
 

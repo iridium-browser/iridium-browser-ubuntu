@@ -32,17 +32,12 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/InputTypeNames.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/NodeComputedStyle.h"
+#include "core/dom/events/ScopedEventQueue.h"
 #include "core/events/KeyboardEvent.h"
-#include "core/events/ScopedEventQueue.h"
 #include "core/fileapi/FileList.h"
-#include "core/html/FormData.h"
-#include "core/html/HTMLFormElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLShadowElement.h"
 #include "core/html/forms/ButtonInputType.h"
 #include "core/html/forms/CheckboxInputType.h"
 #include "core/html/forms/ColorChooser.h"
@@ -51,6 +46,9 @@
 #include "core/html/forms/DateTimeLocalInputType.h"
 #include "core/html/forms/EmailInputType.h"
 #include "core/html/forms/FileInputType.h"
+#include "core/html/forms/FormData.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "core/html/forms/HiddenInputType.h"
 #include "core/html/forms/ImageInputType.h"
 #include "core/html/forms/MonthInputType.h"
@@ -67,10 +65,10 @@
 #include "core/html/forms/URLInputType.h"
 #include "core/html/forms/WeekInputType.h"
 #include "core/html/parser/HTMLParserIdioms.h"
+#include "core/input_type_names.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/page/Page.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/json/JSONValues.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/text/TextBreakIterator.h"
@@ -121,7 +119,7 @@ static const InputTypeFactoryMap* FactoryMap() {
 InputType* InputType::Create(HTMLInputElement& element,
                              const AtomicString& type_name) {
   InputTypeFactoryFunction factory =
-      type_name.IsEmpty() ? 0 : FactoryMap()->at(type_name);
+      type_name.IsEmpty() ? nullptr : FactoryMap()->at(type_name);
   if (!factory)
     factory = TextInputType::Create;
   return factory(element);
@@ -140,9 +138,9 @@ const AtomicString& InputType::NormalizeTypeName(
   return it == FactoryMap()->end() ? InputTypeNames::text : it->key;
 }
 
-InputType::~InputType() {}
+InputType::~InputType() = default;
 
-DEFINE_TRACE(InputType) {
+void InputType::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_);
 }
 
@@ -641,15 +639,6 @@ bool InputType::HasLegalLinkAttribute(const QualifiedName&) const {
 
 const QualifiedName& InputType::SubResourceAttributeName() const {
   return QualifiedName::Null();
-}
-
-bool InputType::SupportsAutocapitalize() const {
-  return false;
-}
-
-const AtomicString& InputType::DefaultAutocapitalize() const {
-  DEFINE_STATIC_LOCAL(const AtomicString, none, ("none"));
-  return none;
 }
 
 void InputType::CopyNonAttributeProperties(const HTMLInputElement&) {}

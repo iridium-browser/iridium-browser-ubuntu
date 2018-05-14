@@ -12,7 +12,7 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "ui/display/types/display_mode.h"
+#include "ui/display/types/display_snapshot.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/platform/drm/common/display_types.h"
 #include "ui/ozone/platform/drm/common/scoped_drm_types.h"
@@ -58,18 +58,32 @@ GetAvailableDisplayControllerInfos(int fd);
 
 bool SameMode(const drmModeModeInfo& lhs, const drmModeModeInfo& rhs);
 
-DisplayMode_Params CreateDisplayModeParams(const drmModeModeInfo& mode);
+std::unique_ptr<display::DisplayMode> CreateDisplayMode(
+    const drmModeModeInfo& mode);
+
+// Extracts the display modes list from |info| as well as the current and native
+// display modes given the |active_pixel_size| which is retrieved from the first
+// detailed timing descriptor in the EDID.
+display::DisplaySnapshot::DisplayModeList ExtractDisplayModes(
+    HardwareDisplayControllerInfo* info,
+    const gfx::Size& active_pixel_size,
+    const display::DisplayMode** out_current_mode,
+    const display::DisplayMode** out_native_mode);
 
 // |info| provides the DRM information related to the display, |fd| is the
 // connection to the DRM device.
-DisplaySnapshot_Params CreateDisplaySnapshotParams(
+std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
     HardwareDisplayControllerInfo* info,
     int fd,
     const base::FilePath& sys_path,
     size_t device_index,
     const gfx::Point& origin);
 
-std::vector<DisplaySnapshot_Params> CreateParamsFromSnapshot(
+std::unique_ptr<display::DisplaySnapshot> CreateDisplaySnapshot(
+    const DisplaySnapshot_Params& params);
+
+// Creates a serialized version of MovableDisplaySnapshots for IPC transmission.
+std::vector<DisplaySnapshot_Params> CreateDisplaySnapshotParams(
     const MovableDisplaySnapshots& displays);
 
 int GetFourCCFormatFromBufferFormat(gfx::BufferFormat format);
@@ -93,8 +107,21 @@ float ModeRefreshRate(const drmModeModeInfo& mode);
 
 bool ModeIsInterlaced(const drmModeModeInfo& mode);
 
-MovableDisplaySnapshots CreateMovableDisplaySnapshotsFromParams(
-    const std::vector<DisplaySnapshot_Params>& displays);
+OverlaySurfaceCandidateList CreateOverlaySurfaceCandidateListFrom(
+    const std::vector<OverlayCheck_Params>& params);
+
+std::vector<OverlayCheck_Params> CreateParamsFromOverlaySurfaceCandidate(
+    const OverlaySurfaceCandidateList& candidates);
+
+OverlayStatusList CreateOverlayStatusListFrom(
+    const std::vector<OverlayCheckReturn_Params>& params);
+
+std::vector<OverlayCheckReturn_Params> CreateParamsFromOverlayStatusList(
+    const OverlayStatusList& returns);
+
+// Parses |edid| to extract a gfx::ColorSpace which will be IsValid() if both
+// gamma and the color primaries were correctly found.
+gfx::ColorSpace GetColorSpaceFromEdid(const std::vector<uint8_t>& edid);
 
 }  // namespace ui
 

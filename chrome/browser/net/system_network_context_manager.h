@@ -7,17 +7,19 @@
 
 #include <memory>
 
-#include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "content/public/common/network_service.mojom.h"
+#include "chrome/browser/net/proxy_config_monitor.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
-// Global object that lives on the UI thread. Responsible for creating and
-// managing access to the system NetworkContext. This NetworkContext is intended
-// for requests not associated with a profile. It stores no data on disk, and
-// has no HTTP cache, but it does have ephemeral cookie and channel ID stores.
-// It also does not have access to HTTP proxy auth information the user has
-// entered or that comes from extensions, and similarly, has no
-// extension-provided per-profile proxy configuration information.
+class ProxyConfigMonitor;
+
+// Responsible for creating and managing access to the system NetworkContext.
+// Lives on the UI thread. The NetworkContext this owns is intended for requests
+// not associated with a profile. It stores no data on disk, and has no HTTP
+// cache, but it does have ephemeral cookie and channel ID stores. It also does
+// not have access to HTTP proxy auth information the user has entered or that
+// comes from extensions, and similarly, has no extension-provided per-profile
+// proxy configuration information.
 //
 // The "system" NetworkContext will either share a URLRequestContext with
 // IOThread's SystemURLRequestContext and be part of IOThread's NetworkService
@@ -30,41 +32,64 @@
 // to being compatible with the network service.
 class SystemNetworkContextManager {
  public:
+  SystemNetworkContextManager();
+  ~SystemNetworkContextManager();
+
   // Initializes |network_context_params| as needed to set up a system
   // NetworkContext. If the network service is disabled,
   // |network_context_request| will be for the NetworkContext used by the
   // SystemNetworkContextManager. Otherwise, this method can still be used to
-  // help set up the IOThread's in-process URLRequestContext, and
-  // |network_context_request| will still be populated, but the associated
-  // NetworkContext will not be used by the SystemNetworkContextManager.
+  // help set up the IOThread's in-process URLRequestContext.
   //
   // Must be called before the system NetworkContext is first used.
-  static void SetUp(
-      content::mojom::NetworkContextRequest* network_context_request,
-      content::mojom::NetworkContextParamsPtr* network_context_params);
+  //
+  // |is_quic_allowed| is set to true if policy allows QUIC to be enabled.
+  void SetUp(network::mojom::NetworkContextRequest* network_context_request,
+             network::mojom::NetworkContextParamsPtr* network_context_params,
+             bool* is_quic_allowed);
 
-  // Returns the System NetworkContext. May only be called after SetUp().
-  static content::mojom::NetworkContext* Context();
+  // Returns the System NetworkContext. May only be called after SetUp(). Does
+  // any initialization of the NetworkService that may be needed when first
+  // called.
+  network::mojom::NetworkContext* GetContext();
+
+  // Returns a URLLoaderFactory owned by the SystemNetworkContextManager that is
+  // backed by the SystemNetworkContext. Allows sharing of the URLLoaderFactory.
+  // Prefer this to creating a new one.  Call Clone() on the value returned by
+  // this method to get a URLLoaderFactory that can be used on other threads.
+  network::mojom::URLLoaderFactory* GetURLLoaderFactory();
+
+  // Permanently disables QUIC, both for NetworkContexts using the IOThread's
+  // NetworkService, and for those using the network service (if enabled).
+  void DisableQuic();
+
+  // Flushes all pending proxy configuration changes.
+  void FlushProxyConfigMonitorForTesting();
+  // Call |FlushForTesting()| on Network Service related interfaces. For test
+  // use only.
+  void FlushNetworkInterfaceForTesting();
 
  private:
-  static SystemNetworkContextManager* GetInstance();
+  // Creates parameters for the NetworkContext. May only be called once, since
+  // it initializes some class members.
+  network::mojom::NetworkContextParamsPtr CreateNetworkContextParams();
 
-  friend struct base::LazyInstanceTraitsBase<SystemNetworkContextManager>;
+  ProxyConfigMonitor proxy_config_monitor_;
 
-  SystemNetworkContextManager();
-  ~SystemNetworkContextManager();
-
-  // Gets the system NetworkContext, creating it if needed.
-  content::mojom::NetworkContext* GetContext();
-
-  // NetworkContext using the network service, if the/ network service is
+  // NetworkContext using the network service, if the network service is
   // enabled. nullptr, otherwise.
-  content::mojom::NetworkContextPtr network_service_network_context_;
+  network::mojom::NetworkContextPtr network_service_network_context_;
 
   // This is a NetworkContext that wraps the IOThread's SystemURLRequestContext.
   // Always initialized in SetUp, but it's only returned by Context() when the
   // network service is disabled.
-  content::mojom::NetworkContextPtr io_thread_network_context_;
+  network::mojom::NetworkContextPtr io_thread_network_context_;
+
+  // URLLoaderFactory backed by the NetworkContext returned by GetContext(), so
+  // consumers don't all need to create their own factory.
+  network::mojom::URLLoaderFactoryPtr url_loader_factory_;
+
+  bool is_quic_allowed_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(SystemNetworkContextManager);
 };

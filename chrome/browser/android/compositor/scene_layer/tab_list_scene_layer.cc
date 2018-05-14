@@ -4,7 +4,6 @@
 
 #include "chrome/browser/android/compositor/scene_layer/tab_list_scene_layer.h"
 
-#include "base/android/jni_android.h"
 #include "chrome/browser/android/compositor/layer/content_layer.h"
 #include "chrome/browser/android/compositor/layer/tab_layer.h"
 #include "chrome/browser/android/compositor/layer_title_cache.h"
@@ -14,10 +13,11 @@
 #include "ui/android/resources/resource_manager_impl.h"
 
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace android {
 
-TabListSceneLayer::TabListSceneLayer(JNIEnv* env, jobject jobj)
+TabListSceneLayer::TabListSceneLayer(JNIEnv* env, const JavaRef<jobject>& jobj)
     : SceneLayer(env, jobj),
       content_obscures_self_(false),
       resource_manager_(nullptr),
@@ -98,7 +98,7 @@ void TabListSceneLayer::PutTabLayer(
     jint border_resource_id,
     jint border_inner_shadow_resource_id,
     jboolean can_use_live_layer,
-    jboolean browser_controls_at_bottom,
+    jboolean modern_design_enabled,
     jint tab_background_color,
     jint back_logo_color,
     jboolean incognito,
@@ -158,11 +158,14 @@ void TabListSceneLayer::PutTabLayer(
   // used for this frame.
   used_tints_.insert(toolbar_background_color);
   used_tints_.insert(close_button_color);
+  if (modern_design_enabled) {
+    used_tints_.insert(toolbar_textbox_background_color);
+  }
 
   DCHECK(layer);
   if (layer) {
     layer->SetProperties(
-        id, can_use_live_layer, browser_controls_at_bottom,
+        id, can_use_live_layer, modern_design_enabled,
         toolbar_resource_id, close_button_resource_id,
         shadow_resource_id, contour_resource_id, back_logo_resource_id,
         border_resource_id, border_inner_shadow_resource_id,
@@ -185,11 +188,6 @@ void TabListSceneLayer::PutTabLayer(
   content_obscures_self_ |= content.Contains(self);
 }
 
-base::android::ScopedJavaLocalRef<jobject> TabListSceneLayer::GetJavaObject(
-    JNIEnv* env) {
-  return base::android::ScopedJavaLocalRef<jobject>(java_obj_);
-}
-
 void TabListSceneLayer::OnDetach() {
   SceneLayer::OnDetach();
   for (auto tab : tab_map_)
@@ -205,7 +203,8 @@ SkColor TabListSceneLayer::GetBackgroundColor() {
   return background_color_;
 }
 
-static jlong Init(JNIEnv* env, const JavaParamRef<jobject>& jobj) {
+static jlong JNI_TabListSceneLayer_Init(JNIEnv* env,
+                                        const JavaParamRef<jobject>& jobj) {
   // This will automatically bind to the Java object and pass ownership there.
   TabListSceneLayer* scene_layer = new TabListSceneLayer(env, jobj);
   return reinterpret_cast<intptr_t>(scene_layer);

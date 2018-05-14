@@ -5,7 +5,6 @@
 from core import perf_benchmark
 
 from telemetry import benchmark
-from telemetry import story
 from telemetry.timeline import chrome_trace_category_filter
 from telemetry.timeline import chrome_trace_config
 from telemetry.web_perf import timeline_based_measurement
@@ -13,33 +12,6 @@ from telemetry.web_perf import timeline_based_measurement
 import page_sets
 
 
-@benchmark.Owner(emails=['oysteine@chromium.org',
-                         'nednguyen@chromium.org',
-                         'zhenw@chromium.org'])
-class TracingWithDebugOverhead(perf_benchmark.PerfBenchmark):
-
-  page_set = page_sets.Top10PageSet
-
-  def CreateCoreTimelineBasedMeasurementOptions(self):
-    options = timeline_based_measurement.Options(
-        timeline_based_measurement.DEBUG_OVERHEAD_LEVEL)
-    options.SetTimelineBasedMetrics(['tracingMetric'])
-    return options
-
-  @classmethod
-  def Name(cls):
-    return 'tracing.tracing_with_debug_overhead'
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # No tests disabled.
-    return StoryExpectations()
-
-
-# TODO(ssid): Enable on reference builds once stable browser starts supporting
-# background mode memory-infra. crbug.com/621195.
-@benchmark.Disabled('reference')
 @benchmark.Owner(emails=['ssid@chromium.org'])
 class TracingWithBackgroundMemoryInfra(perf_benchmark.PerfBenchmark):
   """Measures the overhead of background memory-infra dumps"""
@@ -60,9 +32,3 @@ class TracingWithBackgroundMemoryInfra(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'tracing.tracing_with_background_memory_infra'
-
-  def GetExpectations(self):
-    class StoryExpectations(story.expectations.StoryExpectations):
-      def SetExpectations(self):
-        pass # No tests disabled.
-    return StoryExpectations()

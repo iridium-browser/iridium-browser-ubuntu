@@ -6,6 +6,7 @@
 
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutObject.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/fonts/CharacterRange.h"
 #include "platform/fonts/shaping/ShapeResultBuffer.h"
 
@@ -16,7 +17,81 @@ const char* kNGInlineItemTypeStrings[] = {
     "Text",     "Control",  "AtomicInline",        "OpenTag",
     "CloseTag", "Floating", "OutOfFlowPositioned", "BidiControl"};
 
+// Returns true if this inline box is "empty", i.e. if the node contains only
+// empty items it will produce a single zero block-size line box.
+//
+// While the spec defines "non-zero margins, padding, or borders" prevents
+// line boxes to be zero-height, tests indicate that only inline direction
+// of them do so. https://drafts.csswg.org/css2/visuren.html
+bool IsInlineBoxEmpty(const ComputedStyle& style,
+                      const LayoutObject& layout_object) {
+  if (style.BorderStart().NonZero() || !style.PaddingStart().IsZero() ||
+      style.BorderEnd().NonZero() || !style.PaddingEnd().IsZero())
+    return false;
+
+  // Non-zero margin can prevent "empty" only in non-quirks mode.
+  // https://quirks.spec.whatwg.org/#the-line-height-calculation-quirk
+  if ((!style.MarginStart().IsZero() || !style.MarginEnd().IsZero()) &&
+      !layout_object.GetDocument().InLineHeightQuirksMode())
+    return false;
+
+  return true;
+}
+
 }  // namespace
+
+NGInlineItem::NGInlineItem(NGInlineItemType type,
+                           unsigned start,
+                           unsigned end,
+                           const ComputedStyle* style,
+                           LayoutObject* layout_object)
+    : start_offset_(start),
+      end_offset_(end),
+      script_(USCRIPT_INVALID_CODE),
+      style_(style),
+      layout_object_(layout_object),
+      type_(type),
+      bidi_level_(UBIDI_LTR),
+      shape_options_(kPreContext | kPostContext),
+      is_empty_item_(false),
+      should_create_box_fragment_(false) {
+  DCHECK_GE(end, start);
+  ComputeBoxProperties();
+}
+
+NGInlineItem::~NGInlineItem() = default;
+
+void NGInlineItem::ComputeBoxProperties() {
+  DCHECK(!is_empty_item_);
+  DCHECK(!should_create_box_fragment_);
+
+  if (type_ == NGInlineItem::kText || type_ == NGInlineItem::kAtomicInline ||
+      type_ == NGInlineItem::kControl)
+    return;
+
+  if (type_ == NGInlineItem::kOpenTag) {
+    DCHECK(style_ && layout_object_ && layout_object_->IsLayoutInline());
+    if (layout_object_->HasBoxDecorationBackground() || style_->HasPadding() ||
+        style_->HasMargin()) {
+      is_empty_item_ = IsInlineBoxEmpty(*style_, *layout_object_);
+      should_create_box_fragment_ = true;
+    } else {
+      is_empty_item_ = true;
+      should_create_box_fragment_ =
+          ToLayoutBoxModelObject(layout_object_)->HasSelfPaintingLayer() ||
+          style_->HasOutline() || style_->CanContainAbsolutePositionObjects() ||
+          style_->CanContainFixedPositionObjects();
+    }
+    return;
+  }
+
+  if (type_ == kListMarker) {
+    is_empty_item_ = false;
+    return;
+  }
+
+  is_empty_item_ = true;
+}
 
 const char* NGInlineItem::NGInlineItemTypeToString(int val) const {
   return kNGInlineItemTypeStrings[val];
@@ -52,6 +127,12 @@ unsigned NGInlineItem::SetBidiLevel(Vector<NGInlineItem>& items,
   return index + 1;
 }
 
+UBiDiLevel NGInlineItem::BidiLevelForReorder() const {
+  // List markers should not be reordered to protect it from being included into
+  // unclosed inline boxes.
+  return Type() != NGInlineItem::kListMarker ? BidiLevel() : 0;
+}
+
 String NGInlineItem::ToString() const {
   return String::Format("NGInlineItem. Type: '%s'. LayoutObject: '%s'",
                         NGInlineItemTypeToString(Type()),
@@ -85,33 +166,6 @@ void NGInlineItem::SetEndOffset(unsigned end_offset) {
   end_offset_ = end_offset;
 }
 
-LayoutUnit NGInlineItem::InlineSize() const {
-  if (Type() == NGInlineItem::kText)
-    return LayoutUnit(shape_result_->Width());
-
-  DCHECK_NE(Type(), NGInlineItem::kAtomicInline)
-      << "Use NGInlineLayoutAlgorithm::InlineSize";
-  // Bidi controls and out-of-flow objects do not have in-flow widths.
-  return LayoutUnit();
-}
-
-LayoutUnit NGInlineItem::InlineSize(unsigned start, unsigned end) const {
-  DCHECK_GE(start, StartOffset());
-  DCHECK_LE(start, end);
-  DCHECK_LE(end, EndOffset());
-
-  if (start == end)
-    return LayoutUnit();
-  if (start == start_offset_ && end == end_offset_)
-    return InlineSize();
-
-  DCHECK_EQ(Type(), NGInlineItem::kText);
-  return LayoutUnit(ShapeResultBuffer::GetCharacterRange(
-                        shape_result_, Direction(), shape_result_->Width(),
-                        start - StartOffset(), end - StartOffset())
-                        .Width());
-}
-
 bool NGInlineItem::HasStartEdge() const {
   DCHECK(Type() == kOpenTag || Type() == kCloseTag);
   // TODO(kojii): Should use break token when NG has its own tree building.
@@ -121,7 +175,8 @@ bool NGInlineItem::HasStartEdge() const {
 bool NGInlineItem::HasEndEdge() const {
   DCHECK(Type() == kOpenTag || Type() == kCloseTag);
   // TODO(kojii): Should use break token when NG has its own tree building.
-  return !ToLayoutInline(GetLayoutObject())->Continuation();
+  return !GetLayoutObject()->IsLayoutInline() ||
+         !ToLayoutInline(GetLayoutObject())->Continuation();
 }
 
 NGInlineItemRange::NGInlineItemRange(Vector<NGInlineItem>* items,

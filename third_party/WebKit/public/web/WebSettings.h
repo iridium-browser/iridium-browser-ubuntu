@@ -31,11 +31,13 @@
 #ifndef WebSettings_h
 #define WebSettings_h
 
+#include <unicode/uscript.h>
+
 #include "public/platform/PointerProperties.h"
 #include "public/platform/WebCommon.h"
+#include "public/platform/WebEffectiveConnectionType.h"
 #include "public/platform/WebSize.h"
 #include "public/platform/WebViewportStyle.h"
-#include <unicode/uscript.h>
 
 namespace blink {
 
@@ -63,22 +65,13 @@ class WebSettings {
   enum V8CacheOptions {
     kV8CacheOptionsDefault,
     kV8CacheOptionsNone,
-    kV8CacheOptionsParse,
     kV8CacheOptionsCode,
   };
 
-  enum class V8CacheStrategiesForCacheStorage {
-    kDefault,
-    kNone,
-    kNormal,
-    kAggressive,
-  };
-
-  enum class ProgressBarCompletion {
-    kLoadEvent,
-    kResourcesBeforeDCL,
-    kDOMContentLoaded,
-    kResourcesBeforeDCLAndSameOriginIFrames
+  enum class SavePreviousDocumentResources {
+    kNever,
+    kUntilOnDOMContentLoaded,
+    kUntilOnLoad
   };
 
   // Selection strategy defines how the selection granularity changes when the
@@ -163,7 +156,6 @@ class WebSettings {
   virtual void SetCursiveFontFamily(const WebString&,
                                     UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetDNSPrefetchingEnabled(bool) = 0;
-  virtual void SetDataSaverEnabled(bool) = 0;
   virtual void SetDOMPasteAllowed(bool) = 0;
   virtual void SetDefaultFixedFontSize(int) = 0;
   virtual void SetDefaultFontSize(int) = 0;
@@ -179,11 +171,13 @@ class WebSettings {
   virtual void SetEnableTouchAdjustment(bool) = 0;
   virtual bool MultiTargetTapNotificationEnabled() = 0;
   virtual void SetMultiTargetTapNotificationEnabled(bool) = 0;
-  virtual void SetExperimentalWebGLEnabled(bool) = 0;
+  virtual void SetWebGL1Enabled(bool) = 0;
+  virtual void SetWebGL2Enabled(bool) = 0;
   virtual void SetFantasyFontFamily(const WebString&,
                                     UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetFixedFontFamily(const WebString&,
                                   UScriptCode = USCRIPT_COMMON) = 0;
+  virtual void SetForceMainWorldInitialization(bool) = 0;
   virtual void SetForcePreloadNoneForMediaElements(bool) = 0;
   virtual void SetForceZeroLayoutHeight(bool) = 0;
   virtual void SetFullscreenSupported(bool) = 0;
@@ -199,15 +193,17 @@ class WebSettings {
   virtual void SetLoadsImagesAutomatically(bool) = 0;
   virtual void SetLoadWithOverviewMode(bool) = 0;
   virtual void SetShouldReuseGlobalForUnownedMainFrame(bool) = 0;
-  virtual void SetProgressBarCompletion(ProgressBarCompletion) = 0;
+  virtual void SetSavePreviousDocumentResources(
+      SavePreviousDocumentResources) = 0;
   virtual void SetLocalStorageEnabled(bool) = 0;
   virtual void SetMainFrameClipsContent(bool) = 0;
   virtual void SetMainFrameResizesAreOrientationChanges(bool) = 0;
   virtual void SetMaxTouchPoints(int) = 0;
+  virtual void SetPictureInPictureEnabled(bool) = 0;
   virtual void SetMediaPlaybackGestureWhitelistScope(const WebString&) = 0;
   virtual void SetPresentationRequiresUserGesture(bool) = 0;
   virtual void SetEmbeddedMediaExperienceEnabled(bool) = 0;
-  virtual void SetPagePopupsSuppressed(bool) = 0;
+  virtual void SetImmersiveModeEnabled(bool) = 0;
   virtual void SetMinimumAccelerated2dCanvasSize(int) = 0;
   virtual void SetMinimumFontSize(int) = 0;
   virtual void SetMinimumLogicalFontSize(int) = 0;
@@ -221,7 +217,6 @@ class WebSettings {
   virtual void SetPictographFontFamily(const WebString&,
                                        UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetPluginsEnabled(bool) = 0;
-  virtual void SetEncryptedMediaEnabled(bool) = 0;
   virtual void SetPresentationReceiver(bool) = 0;
   virtual void SetAvailablePointerTypes(int) = 0;
   virtual void SetPrimaryPointerType(PointerType) = 0;
@@ -278,13 +273,12 @@ class WebSettings {
   virtual void SetTextTrackTextSize(const WebString&) = 0;
   virtual void SetThreadedScrollingEnabled(bool) = 0;
   virtual void SetTouchDragDropEnabled(bool) = 0;
+  virtual void SetBarrelButtonForDragEnabled(bool) = 0;
   virtual void SetUseLegacyBackgroundSizeShorthandBehavior(bool) = 0;
   virtual void SetViewportStyle(WebViewportStyle) = 0;
   virtual void SetUseSolidColorScrollbars(bool) = 0;
   virtual void SetUseWideViewport(bool) = 0;
   virtual void SetV8CacheOptions(V8CacheOptions) = 0;
-  virtual void SetV8CacheStrategiesForCacheStorage(
-      V8CacheStrategiesForCacheStorage) = 0;
   virtual void SetValidationMessageTimerMagnification(int) = 0;
   virtual void SetViewportEnabled(bool) = 0;
   virtual void SetViewportMetaEnabled(bool) = 0;
@@ -298,9 +292,11 @@ class WebSettings {
   virtual void SetXSSAuditorEnabled(bool) = 0;
   virtual void SetMediaControlsEnabled(bool) = 0;
   virtual void SetDoNotUpdateSelectionOnMutatingSelectionRange(bool) = 0;
+  virtual void SetMediaDownloadInProductHelpEnabled(bool) = 0;
+  virtual void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) = 0;
 
  protected:
-  ~WebSettings() {}
+  ~WebSettings() = default;
 };
 
 }  // namespace blink

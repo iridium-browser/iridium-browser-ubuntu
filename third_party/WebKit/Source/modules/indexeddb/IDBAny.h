@@ -26,13 +26,14 @@
 #ifndef IDBAny_h
 #define IDBAny_h
 
+#include <memory>
+
 #include "core/dom/DOMStringList.h"
 #include "modules/ModulesExport.h"
 #include "modules/indexeddb/IDBKey.h"
 #include "modules/indexeddb/IDBValue.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/text/WTFString.h"
 
 namespace blink {
@@ -64,14 +65,17 @@ class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
     return new IDBAny(dom_string_list);
   }
   static IDBAny* Create(int64_t value) { return new IDBAny(value); }
-  static IDBAny* Create(RefPtr<IDBValue> value) {
+  static IDBAny* Create(std::unique_ptr<IDBKey> key) {
+    return new IDBAny(std::move(key));
+  }
+  static IDBAny* Create(std::unique_ptr<IDBValue> value) {
     return new IDBAny(std::move(value));
   }
-  static IDBAny* Create(const Vector<RefPtr<IDBValue>>& values) {
-    return new IDBAny(values);
+  static IDBAny* Create(Vector<std::unique_ptr<IDBValue>> values) {
+    return new IDBAny(std::move(values));
   }
   ~IDBAny();
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
   void ContextWillBeDestroyed();
 
   enum Type {
@@ -81,8 +85,6 @@ class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
     kIDBCursorType,
     kIDBCursorWithValueType,
     kIDBDatabaseType,
-    kIDBIndexType,
-    kIDBObjectStoreType,
     kIntegerType,
     kKeyType,
     kIDBValueType,
@@ -95,10 +97,8 @@ class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
   IDBCursor* IdbCursor() const;
   IDBCursorWithValue* IdbCursorWithValue() const;
   IDBDatabase* IdbDatabase() const;
-  IDBIndex* IdbIndex() const;
-  IDBObjectStore* IdbObjectStore() const;
   IDBValue* Value() const;
-  const Vector<RefPtr<IDBValue>>* Values() const;
+  const Vector<std::unique_ptr<IDBValue>>& Values() const;
   int64_t Integer() const;
   const IDBKey* Key() const;
 
@@ -107,11 +107,9 @@ class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
   explicit IDBAny(DOMStringList*);
   explicit IDBAny(IDBCursor*);
   explicit IDBAny(IDBDatabase*);
-  explicit IDBAny(IDBIndex*);
-  explicit IDBAny(IDBObjectStore*);
-  explicit IDBAny(IDBKey*);
-  explicit IDBAny(const Vector<RefPtr<IDBValue>>&);
-  explicit IDBAny(RefPtr<IDBValue>);
+  explicit IDBAny(std::unique_ptr<IDBKey>);
+  explicit IDBAny(Vector<std::unique_ptr<IDBValue>>);
+  explicit IDBAny(std::unique_ptr<IDBValue>);
   explicit IDBAny(int64_t);
 
   const Type type_;
@@ -120,11 +118,9 @@ class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
   const Member<DOMStringList> dom_string_list_;
   const Member<IDBCursor> idb_cursor_;
   const Member<IDBDatabase> idb_database_;
-  const Member<IDBIndex> idb_index_;
-  const Member<IDBObjectStore> idb_object_store_;
-  const Member<IDBKey> idb_key_;
-  const RefPtr<IDBValue> idb_value_;
-  const Vector<RefPtr<IDBValue>> idb_values_;
+  const std::unique_ptr<IDBKey> idb_key_;
+  const std::unique_ptr<IDBValue> idb_value_;
+  const Vector<std::unique_ptr<IDBValue>> idb_values_;
   const int64_t integer_ = 0;
 };
 

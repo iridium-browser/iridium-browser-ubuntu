@@ -111,7 +111,11 @@ class SupervisedUserCreationControllerNew
   };
 
   // Indicates if we create new user, or import an existing one.
-  enum CreationType { NEW_USER, USER_IMPORT_OLD, USER_IMPORT_NEW, };
+  enum CreationType {
+    NEW_USER,
+    USER_IMPORT_OLD,
+    USER_IMPORT_NEW,
+  };
 
   // Contains information necessary for new user creation.
   struct UserCreationContext {
@@ -147,7 +151,7 @@ class SupervisedUserCreationControllerNew
     std::unique_ptr<SupervisedUserRegistrationUtility> registration_utility;
   };
 
-  // SupervisedUserAuthenticator::StatusConsumer overrides.
+  // ExtendedAuthenticator::NewAuthStatusConsumer overrides.
   void OnAuthenticationFailure(ExtendedAuthenticator::AuthState error) override;
 
   // Authenticator success callbacks.

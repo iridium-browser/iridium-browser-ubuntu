@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,6 +8,7 @@
 from __future__ import print_function
 
 import collections
+import math
 import os
 
 from chromite.cbuildbot import afdo
@@ -14,45 +16,26 @@ from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import generic_stages
-from chromite.lib import cgroups
 from chromite.lib import config_lib
 from chromite.lib import constants
+from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import failures_lib
 from chromite.lib import gs
 from chromite.lib import hwtest_results
 from chromite.lib import image_test_lib
 from chromite.lib import osutils
+from chromite.lib import path_util
 from chromite.lib import perf_uploader
 from chromite.lib import portage_util
 from chromite.lib import timeout_util
 
 
-_VM_TEST_ERROR_MSG = """
-!!!VMTests failed!!!
-
-Logs are uploaded in the corresponding %(vm_test_results)s. This can be found
-by clicking on the artifacts link in the "Report" Stage. Specifically look
-for the test_harness/failed for the failing tests. For more
-particulars, please refer to which test failed i.e. above see the
-individual test that failed -- or if an update failed, check the
-corresponding update directory.
-"""
-
-_GCE_TEST_ERROR_MSG = """
-!!!GCETests failed!!!
-
-Logs are uploaded in the corresponding %(gce_test_results)s. This can be found
-by clicking on the artifacts link in the "Report" Stage. Specifically look
-for the test_harness/failed for the failing tests. For more
-particulars, please refer to which test failed i.e. above see the
-individual test that failed -- or if an update failed, check the
-corresponding update directory.
-"""
 PRE_CQ = validation_pool.PRE_CQ
 
 
-class UnitTestStage(generic_stages.BoardSpecificBuilderStage):
+class UnitTestStage(generic_stages.BoardSpecificBuilderStage,
+                    generic_stages.ArchivingStageMixin):
   """Run unit tests."""
 
   option_name = 'tests'
@@ -76,207 +59,15 @@ class UnitTestStage(generic_stages.BoardSpecificBuilderStage):
                             self._current_board,
                             blacklist=self._run.config.unittest_blacklist,
                             extra_env=extra_env)
+    # Package UnitTest binaries.
+    tarball = commands.BuildUnitTestTarball(
+        self._build_root, self._current_board, self.archive_path)
+    self.UploadArtifact(tarball, archive=False)
 
     if os.path.exists(os.path.join(self.GetImageDirSymlink(),
                                    'au-generator.zip')):
       commands.TestAuZip(self._build_root,
                          self.GetImageDirSymlink())
-
-
-class VMTestStage(generic_stages.BoardSpecificBuilderStage,
-                  generic_stages.ArchivingStageMixin):
-  """Run autotests in a virtual machine."""
-
-  option_name = 'tests'
-  config_name = 'vm_tests'
-
-  def _PrintFailedTests(self, results_path, test_basename):
-    """Print links to failed tests.
-
-    Args:
-      results_path: Path to directory containing the test results.
-      test_basename: The basename that the tests are archived to.
-    """
-    test_list = commands.ListFailedTests(results_path)
-    for test_name, path in test_list:
-      self.PrintDownloadLink(
-          os.path.join(test_basename, path), text_to_display=test_name)
-
-  def _NoTestResults(self, path):
-    """Returns True if |path| is not a directory or is an empty directory."""
-    return not os.path.isdir(path) or not os.listdir(path)
-
-  @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
-  def _ArchiveTestResults(self, test_results_dir, test_basename):
-    """Archives test results to Google Storage.
-
-    Args:
-      test_results_dir: Name of the directory containing the test results.
-      test_basename: The basename to archive the tests.
-    """
-    results_path = commands.GetTestResultsDir(
-        self._build_root, test_results_dir)
-
-    # Skip archiving if results_path does not exist or is an empty directory.
-    if self._NoTestResults(results_path):
-      return
-
-    archived_results_dir = os.path.join(self.archive_path, test_basename)
-    # Copy relevant files to archvied_results_dir.
-    commands.ArchiveTestResults(results_path, archived_results_dir)
-    upload_paths = [os.path.basename(archived_results_dir)]
-    # Create the compressed tarball to upload.
-    # TODO: We should revisit whether uploading the tarball is necessary.
-    test_tarball = commands.BuildAndArchiveTestResultsTarball(
-        archived_results_dir, self._build_root)
-    upload_paths.append(test_tarball)
-
-    got_symbols = self.GetParallel('breakpad_symbols_generated',
-                                   pretty_name='breakpad symbols')
-    upload_paths += commands.GenerateStackTraces(
-        self._build_root, self._current_board, test_results_dir,
-        self.archive_path, got_symbols)
-
-    self._Upload(upload_paths)
-    self._PrintFailedTests(results_path, test_basename)
-
-    # Remove the test results directory.
-    osutils.RmDir(results_path, ignore_missing=True, sudo=True)
-
-  @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
-  def _ArchiveVMFiles(self, test_results_dir):
-    vm_files = commands.ArchiveVMFiles(
-        self._build_root, os.path.join(test_results_dir, 'test_harness'),
-        self.archive_path)
-    # We use paths relative to |self.archive_path|, for prettier
-    # formatting on the web page.
-    self._Upload([os.path.basename(image) for image in vm_files])
-
-  def _Upload(self, filenames):
-    logging.info('Uploading artifacts to Google Storage...')
-    with self.ArtifactUploader(archive=False, strict=False) as queue:
-      for filename in filenames:
-        queue.put([filename])
-        if filename.endswith('.dmp.txt'):
-          prefix = 'crash: '
-        elif constants.VM_DISK_PREFIX in os.path.basename(filename):
-          prefix = 'vm_disk: '
-        elif constants.VM_MEM_PREFIX in os.path.basename(filename):
-          prefix = 'vm_memory: '
-        else:
-          prefix = ''
-        self.PrintDownloadLink(filename, prefix)
-
-  def _RunTest(self, test_type, test_results_dir):
-    """Run a VM test.
-
-    Args:
-      test_type: Any test in constants.VALID_VM_TEST_TYPES
-      test_results_dir: The base directory to store the results.
-    """
-    if test_type == constants.CROS_VM_TEST_TYPE:
-      commands.RunCrosVMTest(self._current_board, self.GetImageDirSymlink())
-    elif test_type == constants.DEV_MODE_TEST_TYPE:
-      commands.RunDevModeTest(
-          self._build_root, self._current_board, self.GetImageDirSymlink())
-    else:
-      image_path = os.path.join(self.GetImageDirSymlink(),
-                                constants.TEST_IMAGE_BIN)
-      ssh_private_key = os.path.join(self.GetImageDirSymlink(),
-                                     constants.TEST_KEY_PRIVATE)
-      if not os.path.exists(ssh_private_key):
-        # TODO: Disallow usage of default test key completely.
-        logging.warning('Test key was not found in the image directory. '
-                        'Default key will be used.')
-        ssh_private_key = None
-
-      commands.RunTestSuite(self._build_root,
-                            self._current_board,
-                            image_path,
-                            os.path.join(test_results_dir, 'test_harness'),
-                            test_type=test_type,
-                            whitelist_chrome_crashes=self._chrome_rev is None,
-                            archive_dir=self.bot_archive_root,
-                            ssh_private_key=ssh_private_key)
-
-  def PerformStage(self):
-    # These directories are used later to archive test artifacts.
-    if not self._run.options.vmtests:
-      return
-
-    test_results_root = commands.CreateTestRoot(self._build_root)
-    test_basename = constants.VM_TEST_RESULTS % dict(attempt=self._attempt)
-    try:
-      for vm_test in self._run.config.vm_tests:
-        test_type = vm_test.test_type
-        logging.info('Running VM test %s.', test_type)
-        per_test_results_dir = os.path.join(test_results_root, test_type)
-        with cgroups.SimpleContainChildren('VMTest'):
-          r = ' Reached VMTestStage test run timeout.'
-          with timeout_util.Timeout(vm_test.timeout, reason_message=r):
-            self._RunTest(test_type, per_test_results_dir)
-
-    except Exception:
-      logging.error(_VM_TEST_ERROR_MSG % dict(vm_test_results=test_basename))
-      self._ArchiveVMFiles(test_results_root)
-      raise
-    finally:
-      self._ArchiveTestResults(test_results_root, test_basename)
-
-
-class GCETestStage(VMTestStage):
-  """Run autotests on a GCE VM instance."""
-
-  config_name = 'gce_tests'
-
-  # TODO: We should revisit whether GCE tests should have their own configs.
-  TEST_TIMEOUT = 60 * 60
-
-  def _RunTest(self, test_type, test_results_dir):
-    """Run a GCE test.
-
-    Args:
-      test_type: Any test in constants.VALID_GCE_TEST_TYPES
-      test_results_dir: The base directory to store the results.
-    """
-    image_path = os.path.join(self.GetImageDirSymlink(),
-                              constants.TEST_IMAGE_GCE_TAR)
-    ssh_private_key = os.path.join(self.GetImageDirSymlink(),
-                                   constants.TEST_KEY_PRIVATE)
-    if not os.path.exists(ssh_private_key):
-      # TODO: Disallow usage of default test key completely.
-      logging.warning('Test key was not found in the image directory. '
-                      'Default key will be used.')
-      ssh_private_key = None
-
-    commands.RunTestSuite(self._build_root,
-                          self._current_board,
-                          image_path,
-                          os.path.join(test_results_dir, 'test_harness'),
-                          test_type=test_type,
-                          whitelist_chrome_crashes=self._chrome_rev is None,
-                          archive_dir=self.bot_archive_root,
-                          ssh_private_key=ssh_private_key)
-
-  def PerformStage(self):
-    # These directories are used later to archive test artifacts.
-    test_results_root = commands.CreateTestRoot(self._build_root)
-    test_basename = constants.GCE_TEST_RESULTS % dict(attempt=self._attempt)
-    try:
-      for gce_test in self._run.config.gce_tests:
-        test_type = gce_test.test_type
-        logging.info('Running GCE test %s.', test_type)
-        per_test_results_dir = os.path.join(test_results_root, test_type)
-        with cgroups.SimpleContainChildren('GCETest'):
-          r = ' Reached GCETestStage test run timeout.'
-          with timeout_util.Timeout(self.TEST_TIMEOUT, reason_message=r):
-            self._RunTest(gce_test.test_type, per_test_results_dir)
-
-    except Exception:
-      logging.error(_GCE_TEST_ERROR_MSG % dict(gce_test_results=test_basename))
-      raise
-    finally:
-      self._ArchiveTestResults(test_results_root, test_basename)
 
 
 class HWTestStage(generic_stages.BoardSpecificBuilderStage,
@@ -290,12 +81,23 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
   PERF_RESULTS_EXTENSION = 'results'
 
   def __init__(
-      self, builder_run, board, model, suite_config, suffix=None, **kwargs):
-    if board is not model:
-      if suffix is None:
-        suffix = ' [%s]' % (model)
-      else:
-        suffix = '%s [%s]' % (suffix, model)
+      self,
+      builder_run,
+      board,
+      model,
+      suite_config,
+      suffix=None,
+      lab_board_name=None,
+      **kwargs):
+
+    if suffix is None:
+      suffix = ''
+
+    if model:
+      suffix += ' [%s]' % (model)
+
+    if not self.TestsEnabled(builder_run):
+      suffix += ' [DISABLED]'
 
     suffix = self.UpdateSuffix(suite_config.suite, suffix)
     super(HWTestStage, self).__init__(builder_run, board,
@@ -308,6 +110,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     self.wait_for_results = True
 
     self._model = model
+    self._board_name = lab_board_name or board
 
   # Disable complaint about calling _HandleStageException.
   # pylint: disable=W0212
@@ -418,35 +221,51 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
 
     return True
 
+  def TestsEnabled(self, builder_run):
+    """Abstract the logic to decide if tests are enabled."""
+    if (builder_run.options.remote_trybot and
+        (builder_run.options.hwtest or builder_run.config.pre_cq)):
+      return not builder_run.options.debug_forced
+    else:
+      return not builder_run.options.debug
+
   def PerformStage(self):
     if self.suite_config.suite == constants.HWTEST_AFDO_SUITE:
       arch = self._GetPortageEnvVar('ARCH', self._current_board)
       cpv = portage_util.BestVisible(constants.CHROME_CP,
                                      buildroot=self._build_root)
-      afdo.InitGSUrls(self._current_board)
       if afdo.CheckAFDOPerfData(cpv, arch, gs.GSContext()):
         logging.info('AFDO profile already generated for arch %s '
                      'and Chrome %s. Not generating it again',
                      arch, cpv.version_no_rev.split('_')[0])
         return
 
+    if self.suite_config.suite in [constants.HWTEST_CTS_QUAL_SUITE,
+                                   constants.HWTEST_GTS_QUAL_SUITE]:
+      # Increase the priority for CTS/GTS qualification suite as we want stable
+      # build to have higher priority than beta build (again higher than dev).
+      try:
+        cros_vers = self._run.GetVersionInfo().VersionString().split('.')
+        if not isinstance(self.suite_config.priority, (int, long)):
+          # Convert CTS/GTS priority to corresponding integer value.
+          self.suite_config.priority = constants.HWTEST_PRIORITIES_MAP[
+              self.suite_config.priority]
+        # We add 1/10 of the branch version to the priority. This results in a
+        # modest priority bump the older the branch is. Typically beta priority
+        # would be dev + [1..4] and stable priority dev + [5..9].
+        self.suite_config.priority += int(math.ceil(float(cros_vers[1]) / 10.0))
+      except cbuildbot_run.VersionNotSetError:
+        logging.debug('Could not obtain version info. %s will use initial '
+                      'priority value: %s', self.suite_config.suite,
+                      self.suite_config.priority)
+
     build = '/'.join([self._bot_id, self.version])
-    if (self._run.options.remote_trybot and (self._run.options.hwtest or
-                                             self._run.config.pre_cq)):
-      debug = self._run.options.debug_forced
-    else:
-      debug = self._run.options.debug
 
     # Get the subsystems set for the board to test
-    per_board_dict = self._run.attrs.metadata.GetDict()['board-metadata']
-    current_board_dict = per_board_dict.get(self._current_board)
-    if current_board_dict:
-      subsystems = set(current_board_dict.get('subsystems_to_test', []))
-      # 'subsystem:all' indicates to skip the subsystem logic
-      if 'all' in subsystems:
-        subsystems = None
+    if self.suite_config.suite == constants.HWTEST_PROVISION_SUITE:
+      subsystems = set()
     else:
-      subsystems = None
+      subsystems = self._GetSubsystems()
 
     skip_duts_check = False
     if config_lib.IsCanaryType(self._run.config.build_type):
@@ -454,9 +273,14 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
 
     build_id, db = self._run.GetCIDBHandle()
 
+    test_args = None
+    if config_lib.IsCQType(self._run.config.build_type):
+      test_args = {'fast': 'True'}
+
     cmd_result = commands.RunHWTestSuite(
-        build, self.suite_config.suite, self._model,
-        pool=self.suite_config.pool, num=self.suite_config.num,
+        build, self.suite_config.suite, self._board_name,
+        model=self._model,
+        pool=self.suite_config.pool,
         file_bugs=self.suite_config.file_bugs,
         wait_for_results=self.wait_for_results,
         priority=self.suite_config.priority,
@@ -465,9 +289,13 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
         max_retries=self.suite_config.max_retries,
         minimum_duts=self.suite_config.minimum_duts,
         suite_min_duts=self.suite_config.suite_min_duts,
+        suite_args=self.suite_config.suite_args,
         offload_failures_only=self.suite_config.offload_failures_only,
-        debug=debug, subsystems=subsystems, skip_duts_check=skip_duts_check,
-        job_keyvals=self.GetJobKeyvals())
+        debug=not self.TestsEnabled(self._run),
+        subsystems=subsystems,
+        skip_duts_check=skip_duts_check,
+        job_keyvals=self.GetJobKeyvals(),
+        test_args=test_args)
 
     if config_lib.IsCQType(self._run.config.build_type):
       self.ReportHWTestResults(cmd_result.json_dump_result, build_id, db)
@@ -493,21 +321,20 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     if cmd_result.to_raise:
       raise cmd_result.to_raise
 
+  def _GetSubsystems(self):
+    """Return a set of subsystem strings for the current board.
 
-class AUTestStage(HWTestStage):
-  """Stage for au hw test suites that requires special pre-processing."""
-
-  stage_name = "AUTest"
-
-  def PerformStage(self):
-    """Uploads its au control files."""
-    with osutils.TempDir() as tempdir:
-      tarball = commands.BuildAUTestTarball(
-          self._build_root, self._current_board, tempdir,
-          self.version, self.upload_url)
-      self.UploadArtifact(tarball)
-
-    super(AUTestStage, self).PerformStage()
+    Returns an empty set if there are no subsystems.
+    """
+    per_board_dict = self._run.attrs.metadata.GetDict()['board-metadata']
+    current_board_dict = per_board_dict.get(self._current_board)
+    if not current_board_dict:
+      return set()
+    subsystems = set(current_board_dict.get('subsystems_to_test', []))
+    # 'subsystem:all' indicates to skip the subsystem logic
+    if 'all' in subsystems:
+      return set()
+    return subsystems
 
 
 class ASyncHWTestStage(HWTestStage, generic_stages.ForgivingBuilderStage):
@@ -625,9 +452,53 @@ class CrosSigningTestStage(generic_stages.BuilderStage):
     commands.RunCrosSigningTests(self._build_root)
 
 
+class AutotestTestStage(generic_stages.BuilderStage):
+  """Stage that runs Chromite tests, including network tests."""
+
+  SUITE_SCHEDULER_TEST = ('src/third_party/autotest/files/'
+                          'site_utils/suite_scheduler/suite_scheduler.py')
+
+  SUITE_SCHEDULER_INI = ('chromeos-admin/puppet/modules/lab/files/'
+                         'autotest_cautotest/suite_scheduler.ini')
+
+  def PerformStage(self):
+    """Run the tests."""
+    # Run the Suite Scheduler INI test.
+    cmd = [os.path.join(self._build_root, self.SUITE_SCHEDULER_TEST),
+           '--sanity', '-f',
+           os.path.join(self._build_root, self.SUITE_SCHEDULER_INI)]
+
+    cros_build_lib.RunCommand(cmd, cwd=self._build_root)
+
+
 class ChromiteTestStage(generic_stages.BuilderStage):
   """Stage that runs Chromite tests, including network tests."""
 
   def PerformStage(self):
-    """Run the cros-signing unittests."""
-    commands.RunChromiteTests(self._build_root, network=False)
+    """Run the chromite unittests."""
+    buildroot_chromite = path_util.ToChrootPath(
+        os.path.join(self._build_root, 'chromite'))
+
+    cmd = [
+        os.path.join(buildroot_chromite, 'cbuildbot', 'run_tests'),
+        # TODO(crbug.com/682381): When tests can pass, add '--network',
+    ]
+    # TODO: Remove enter_chroot=True when we have virtualenv support.
+    # Until then, we skip all chromite tests outside the chroot.
+    cros_build_lib.RunCommand(cmd, enter_chroot=True)
+
+
+class CidbIntegrationTestStage(generic_stages.BuilderStage):
+  """Stage that runs the CIDB integration tests."""
+
+  def PerformStage(self):
+    """Run the CIDB integration tests."""
+    buildroot_chromite = path_util.ToChrootPath(
+        os.path.join(self._build_root, 'chromite'))
+
+    cmd = [
+        os.path.join(buildroot_chromite, 'lib', 'cidb_integration_test'),
+        '-v',
+        # '--network'  Doesn't work in a build, yet.
+    ]
+    cros_build_lib.RunCommand(cmd, enter_chroot=True)

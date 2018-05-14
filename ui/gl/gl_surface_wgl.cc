@@ -148,6 +148,9 @@ class DisplayWGL {
 DisplayWGL* g_display;
 }  // namespace
 
+// static
+bool GLSurfaceWGL::initialized_ = false;
+
 GLSurfaceWGL::GLSurfaceWGL() {
 }
 
@@ -158,9 +161,9 @@ void* GLSurfaceWGL::GetDisplay() {
   return GetDisplayDC();
 }
 
+// static
 bool GLSurfaceWGL::InitializeOneOff() {
-  static bool initialized = false;
-  if (initialized)
+  if (initialized_)
     return true;
 
   DCHECK(g_display == NULL);
@@ -169,7 +172,15 @@ bool GLSurfaceWGL::InitializeOneOff() {
     return false;
 
   g_display = wgl_display.release();
-  initialized = true;
+  initialized_ = true;
+  return true;
+}
+
+// static
+bool GLSurfaceWGL::InitializeExtensionSettingsOneOff() {
+  if (!initialized_)
+    return false;
+  g_driver_wgl.InitializeExtensionBindings();
   return true;
 }
 
@@ -257,6 +268,7 @@ void NativeViewGLSurfaceWGL::Destroy() {
 
 bool NativeViewGLSurfaceWGL::Resize(const gfx::Size& size,
                                     float scale_factor,
+                                    ColorSpace color_space,
                                     bool has_alpha) {
   RECT rect;
   if (!GetClientRect(window_, &rect)) {
@@ -285,7 +297,9 @@ bool NativeViewGLSurfaceWGL::IsOffscreen() {
   return false;
 }
 
-gfx::SwapResult NativeViewGLSurfaceWGL::SwapBuffers() {
+gfx::SwapResult NativeViewGLSurfaceWGL::SwapBuffers(
+    const PresentationCallback& callback) {
+  // TODO(penghuang): Provide presentation feedback. https://crbug.com/776877
   TRACE_EVENT2("gpu", "NativeViewGLSurfaceWGL:RealSwapBuffers",
       "width", GetSize().width(),
       "height", GetSize().height());
@@ -385,7 +399,8 @@ bool PbufferGLSurfaceWGL::IsOffscreen() {
   return true;
 }
 
-gfx::SwapResult PbufferGLSurfaceWGL::SwapBuffers() {
+gfx::SwapResult PbufferGLSurfaceWGL::SwapBuffers(
+    const PresentationCallback& callback) {
   NOTREACHED() << "Attempted to call SwapBuffers on a pbuffer.";
   return gfx::SwapResult::SWAP_FAILED;
 }

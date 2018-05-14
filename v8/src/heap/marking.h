@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef V8_MARKING_H
-#define V8_MARKING_H
+#ifndef V8_HEAP_MARKING_H_
+#define V8_HEAP_MARKING_H_
 
 #include "src/base/atomic-utils.h"
 #include "src/utils.h"
@@ -267,13 +267,6 @@ class Marking : public AllStatic {
   }
 
   template <AccessMode mode = AccessMode::NON_ATOMIC>
-  INLINE(static bool BlackToGrey(MarkBit markbit)) {
-    STATIC_ASSERT(mode == AccessMode::NON_ATOMIC);
-    DCHECK(IsBlack(markbit));
-    return markbit.Next().Clear<mode>();
-  }
-
-  template <AccessMode mode = AccessMode::NON_ATOMIC>
   INLINE(static bool WhiteToGrey(MarkBit markbit)) {
     return markbit.Set<mode>();
   }
@@ -323,4 +316,4 @@ class Marking : public AllStatic {
 }  // namespace internal
 }  // namespace v8
 
-#endif  // V8_MARKING_H_
+#endif  // V8_HEAP_MARKING_H_

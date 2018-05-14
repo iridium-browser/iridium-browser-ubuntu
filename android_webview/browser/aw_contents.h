@@ -5,8 +5,6 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_CONTENTS_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_CONTENTS_H_
 
-#include <jni.h>
-
 #include <list>
 #include <memory>
 #include <string>
@@ -14,7 +12,6 @@
 
 #include "android_webview/browser/aw_browser_permission_request_delegate.h"
 #include "android_webview/browser/aw_render_process_gone_delegate.h"
-#include "android_webview/browser/aw_renderer_priority_manager.h"
 #include "android_webview/browser/aw_safe_browsing_ui_manager.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/browser_view_renderer_client.h"
@@ -29,7 +26,6 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
-#include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 
 class SkBitmap;
@@ -73,7 +69,6 @@ class AwContents : public FindHelper::Listener,
                    public AwBrowserPermissionRequestDelegate,
                    public AwRenderProcessGoneDelegate,
                    public content::WebContentsObserver,
-                   public content::RenderProcessHostObserver,
                    public AwSafeBrowsingUIManager::UIManagerClient {
  public:
   // Returns the AwContents instance associated with |web_contents|, or NULL.
@@ -221,21 +216,8 @@ class AwContents : public FindHelper::Listener,
       jboolean value,
       const base::android::JavaParamRef<jstring>& origin);
 
-  AwRendererPriorityManager::RendererPriority GetCurrentRendererPriority();
-  jint GetRendererCurrentPriority(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-  jint GetRendererRequestedPriority(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-  jboolean GetRendererPriorityWaivedWhenNotVisible(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-  void SetRendererPriorityPolicy(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      jint rendererRequestedPriority,
-      jboolean waivedhenNotVisible);
+  jint GetEffectivePriority(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj);
 
   // PermissionRequestHandlerClient implementation.
   void OnPermissionRequest(base::android::ScopedJavaLocalRef<jobject> j_request,
@@ -299,7 +281,10 @@ class AwContents : public FindHelper::Listener,
   void PostInvalidate() override;
   void OnNewPicture() override;
   gfx::Point GetLocationOnScreen() override;
+
+  // |new_value| is in physical pixel scale.
   void ScrollContainerViewTo(const gfx::Vector2d& new_value) override;
+
   void UpdateScrollState(const gfx::Vector2d& max_scroll_offset,
                          const gfx::SizeF& contents_size_dip,
                          float page_scale_factor,
@@ -358,11 +343,10 @@ class AwContents : public FindHelper::Listener,
   // content::WebContentsObserver overrides
   void RenderViewHostChanged(content::RenderViewHost* old_host,
                              content::RenderViewHost* new_host) override;
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override;
   void DidAttachInterstitialPage() override;
   void DidDetachInterstitialPage() override;
-
-  // content::RenderProcessHostObserver overrides
-  void RenderProcessReady(content::RenderProcessHost* host) override;
 
   // AwSafeBrowsingUIManager::UIManagerClient implementation
   bool CanShowInterstitial() override;
@@ -389,12 +373,6 @@ class AwContents : public FindHelper::Listener,
 
   void SetAwGLFunctor(AwGLFunctor* functor);
 
-  AwRendererPriorityManager* GetAwRendererPriorityManager();
-  AwRendererPriorityManager::RendererPriority GetComputedRendererPriority();
-  void UpdateRendererPriority(
-      AwRendererPriorityManager::RendererPriority base_priority);
-  void UpdateRendererPriority();
-
   JavaObjectWeakGlobalRef java_ref_;
   AwGLFunctor* functor_;
   BrowserViewRenderer browser_view_renderer_;  // Must outlive |web_contents_|.
@@ -418,13 +396,8 @@ class AwContents : public FindHelper::Listener,
 
   GLViewRendererManager::Key renderer_manager_key_;
 
-  AwRendererPriorityManager::RendererPriority renderer_requested_priority_;
-  bool renderer_priority_waived_when_not_visible_;
-
   DISALLOW_COPY_AND_ASSIGN(AwContents);
 };
-
-bool RegisterAwContents(JNIEnv* env);
 
 }  // namespace android_webview
 

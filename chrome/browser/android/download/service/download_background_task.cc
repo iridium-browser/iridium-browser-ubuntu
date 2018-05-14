@@ -7,7 +7,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
-#include "components/download/public/download_service.h"
+#include "components/download/public/background_service/download_service.h"
 #include "content/public/browser/browser_context.h"
 #include "jni/DownloadBackgroundTask_jni.h"
 
@@ -22,7 +22,7 @@ void CallTaskFinishedCallback(const base::android::JavaRef<jobject>& j_callback,
 }
 
 // static
-void StartBackgroundTask(
+void JNI_DownloadBackgroundTask_StartBackgroundTask(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
     const base::android::JavaParamRef<jobject>& jprofile,
@@ -42,7 +42,7 @@ void StartBackgroundTask(
 }
 
 // static
-jboolean StopBackgroundTask(
+jboolean JNI_DownloadBackgroundTask_StopBackgroundTask(
     JNIEnv* env,
     const base::android::JavaParamRef<jobject>& jcaller,
     const base::android::JavaParamRef<jobject>& jprofile,

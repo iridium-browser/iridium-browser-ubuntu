@@ -126,14 +126,12 @@ class GLES2DecoderLostContextTest : public GLES2DecoderManualInitTest {
   }
 
   void InitWithVirtualContextsAndRobustness() {
-    base::CommandLine command_line(0, NULL);
-    command_line.AppendSwitchASCII(
-        switches::kGpuDriverBugWorkarounds,
-        base::IntToString(USE_VIRTUALIZED_GL_CONTEXTS));
+    gpu::GpuDriverBugWorkarounds workarounds;
+    workarounds.use_virtualized_gl_contexts = true;
     InitState init;
     init.gl_version = "opengl es 2.0";
     init.extensions = "GL_KHR_robustness";
-    InitDecoderWithCommandLine(init, &command_line);
+    InitDecoderWithWorkarounds(init, workarounds);
   }
 
   void DoGetErrorWithContextLost(GLenum reset_status) {
@@ -190,6 +188,100 @@ TEST_P(GLES2DecoderLostContextTest, LostFromMakeCurrentWithRobustness) {
   // We didn't process commands, so we need to clear the decoder error,
   // so that we can shut down cleanly.
   ClearCurrentDecoderError();
+}
+
+TEST_P(GLES2DecoderLostContextTest, TextureDestroyAfterLostFromMakeCurrent) {
+  Init(true);
+  // Create a texture and framebuffer, and attach the texture to the
+  // framebuffer.
+  const GLuint kClientTextureId = 4100;
+  const GLuint kServiceTextureId = 4101;
+  EXPECT_CALL(*gl_, GenTextures(_, _))
+      .WillOnce(SetArgPointee<1>(kServiceTextureId))
+      .RetiresOnSaturation();
+  GenHelper<GenTexturesImmediate>(kClientTextureId);
+  DoBindTexture(GL_TEXTURE_2D, kClientTextureId, kServiceTextureId);
+  DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 5, 6, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               shared_memory_id_, kSharedMemoryOffset);
+  DoBindFramebuffer(GL_FRAMEBUFFER, client_framebuffer_id_,
+                    kServiceFramebufferId);
+  DoFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                         kClientTextureId, kServiceTextureId, 0, GL_NO_ERROR);
+
+  // The texture should never be deleted at the GL level.
+  EXPECT_CALL(*gl_, DeleteTextures(1, Pointee(kServiceTextureId)))
+      .Times(0)
+      .RetiresOnSaturation();
+
+  DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
+  EXPECT_CALL(*gl_, BindTexture(_, 0)).Times(testing::AnyNumber());
+  GenHelper<cmds::DeleteTexturesImmediate>(kClientTextureId);
+
+  // Force context lost for MakeCurrent().
+  EXPECT_CALL(*context_, MakeCurrent(surface_.get())).WillOnce(Return(false));
+  // Expect the group to be lost.
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kUnknown)).Times(1);
+
+  decoder_->MakeCurrent();
+  EXPECT_TRUE(decoder_->WasContextLost());
+  EXPECT_EQ(error::kMakeCurrentFailed, GetContextLostReason());
+  ClearCurrentDecoderError();
+}
+
+TEST_P(GLES2DecoderLostContextTest, QueryDestroyAfterLostFromMakeCurrent) {
+  InitState init;
+  init.extensions = "GL_EXT_occlusion_query_boolean GL_ARB_sync";
+  init.gl_version = "2.0";
+  init.has_alpha = true;
+  init.request_alpha = true;
+  init.bind_generates_resource = true;
+  InitDecoder(init);
+
+  const GLsync kGlSync = reinterpret_cast<GLsync>(0xdeadbeef);
+  GenHelper<GenQueriesEXTImmediate>(kNewClientId);
+
+  BeginQueryEXT begin_cmd;
+  begin_cmd.Init(GL_COMMANDS_COMPLETED_CHROMIUM, kNewClientId,
+                 shared_memory_id_, kSharedMemoryOffset);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(begin_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+  QueryManager* query_manager = decoder_->GetQueryManager();
+  ASSERT_TRUE(query_manager != nullptr);
+  QueryManager::Query* query = query_manager->GetQuery(kNewClientId);
+  ASSERT_TRUE(query != nullptr);
+  EXPECT_FALSE(query->IsPending());
+
+  EXPECT_CALL(*gl_, Flush()).RetiresOnSaturation();
+  EXPECT_CALL(*gl_, FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0))
+      .WillOnce(Return(kGlSync))
+      .RetiresOnSaturation();
+#if DCHECK_IS_ON()
+  EXPECT_CALL(*gl_, IsSync(kGlSync))
+      .WillOnce(Return(GL_TRUE))
+      .RetiresOnSaturation();
+#endif
+
+  EndQueryEXT end_cmd;
+  end_cmd.Init(GL_COMMANDS_COMPLETED_CHROMIUM, 1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(end_cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+
+#if DCHECK_IS_ON()
+  EXPECT_CALL(*gl_, IsSync(kGlSync)).Times(0).RetiresOnSaturation();
+#endif
+  EXPECT_CALL(*gl_, DeleteSync(kGlSync)).Times(0).RetiresOnSaturation();
+
+  // Force context lost for MakeCurrent().
+  EXPECT_CALL(*context_, MakeCurrent(surface_.get())).WillOnce(Return(false));
+  // Expect the group to be lost.
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kUnknown)).Times(1);
+
+  decoder_->MakeCurrent();
+  EXPECT_TRUE(decoder_->WasContextLost());
+  EXPECT_EQ(error::kMakeCurrentFailed, GetContextLostReason());
+  ClearCurrentDecoderError();
+  ResetDecoder();
 }
 
 TEST_P(GLES2DecoderLostContextTest, LostFromResetAfterMakeCurrent) {

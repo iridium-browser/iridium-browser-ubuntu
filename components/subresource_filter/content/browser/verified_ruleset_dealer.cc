@@ -4,11 +4,14 @@
 
 #include "components/subresource_filter/content/browser/verified_ruleset_dealer.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "components/subresource_filter/core/common/indexed_ruleset.h"
 #include "components/subresource_filter/core/common/memory_mapped_ruleset.h"
 
@@ -26,6 +29,8 @@ void VerifiedRulesetDealer::SetRulesetFile(base::File ruleset_file) {
 
 scoped_refptr<const MemoryMappedRuleset> VerifiedRulesetDealer::GetRuleset() {
   DCHECK(CalledOnValidSequence());
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("loading"),
+               "VerifiedRulesetDealer::GetRuleset");
 
   // TODO(pkalinnikov): Record verification status to a histogram.
   switch (status_) {
@@ -76,8 +81,8 @@ void VerifiedRulesetDealer::Handle::SetRulesetFile(base::File file) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
   task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&VerifiedRulesetDealer::SetRulesetFile,
-                 base::Unretained(dealer_.get()), base::Passed(&file)));
+      base::BindOnce(&VerifiedRulesetDealer::SetRulesetFile,
+                     base::Unretained(dealer_.get()), std::move(file)));
 }
 
 // VerifiedRuleset and its Handle. ---------------------------------------------

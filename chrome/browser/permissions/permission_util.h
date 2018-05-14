@@ -28,8 +28,6 @@ enum class PermissionAction {
   DISMISSED = 2,
   IGNORED = 3,
   REVOKED = 4,
-  REENABLED = 5,
-  REQUESTED = 6,
 
   // Always keep this at the end.
   NUM,
@@ -61,18 +59,10 @@ class PermissionUtil {
   static bool GetPermissionType(ContentSettingsType type,
                                 content::PermissionType* out);
 
-  // TODO(timloh): The CONTENT_SETTINGS_TYPE_NOTIFICATIONS type is used to
-  // store both push messaging and notifications permissions. Remove this
-  // once we've unified these types (crbug.com/563297).
-  static ContentSettingsType GetContentSettingsStorageType(
-      ContentSettingsType type);
-
   // Checks whether the given ContentSettingsType is a permission. Use this
   // to determine whether a specific ContentSettingsType is supported by the
   // PermissionManager.
   static bool IsPermission(ContentSettingsType type);
-
-  static bool ShouldShowPersistenceToggle(ContentSettingsType type);
 
   // A scoped class that will check the current resolved content setting on
   // construction and report a revocation metric accordingly if the revocation

@@ -19,14 +19,12 @@ AuthAttemptState::AuthAttemptState(const UserContext& user_context,
                                       : AuthFailure::NONE),
       is_first_time_user_(user_is_new),
       cryptohome_complete_(false),
-      cryptohome_outcome_(false),
       cryptohome_code_(cryptohome::MOUNT_ERROR_NONE),
       username_hash_obtained_(true),
       username_hash_valid_(true) {
 }
 
-AuthAttemptState::~AuthAttemptState() {
-}
+AuthAttemptState::~AuthAttemptState() = default;
 
 void AuthAttemptState::RecordOnlineLoginStatus(const AuthFailure& outcome) {
   online_complete_ = true;
@@ -34,10 +32,8 @@ void AuthAttemptState::RecordOnlineLoginStatus(const AuthFailure& outcome) {
 }
 
 void AuthAttemptState::RecordCryptohomeStatus(
-    bool cryptohome_outcome,
     cryptohome::MountError cryptohome_code) {
   cryptohome_complete_ = true;
-  cryptohome_outcome_ = cryptohome_outcome;
   cryptohome_code_ = cryptohome_code;
 }
 
@@ -58,7 +54,6 @@ void AuthAttemptState::UsernameHashRequested() {
 
 void AuthAttemptState::ResetCryptohomeStatus() {
   cryptohome_complete_ = false;
-  cryptohome_outcome_ = false;
   cryptohome_code_ = cryptohome::MOUNT_ERROR_NONE;
 }
 
@@ -76,10 +71,6 @@ bool AuthAttemptState::is_first_time_user() {
 
 bool AuthAttemptState::cryptohome_complete() {
   return cryptohome_complete_;
-}
-
-bool AuthAttemptState::cryptohome_outcome() {
-  return cryptohome_outcome_;
 }
 
 cryptohome::MountError AuthAttemptState::cryptohome_code() {

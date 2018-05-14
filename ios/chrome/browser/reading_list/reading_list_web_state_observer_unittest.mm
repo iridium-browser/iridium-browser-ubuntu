@@ -4,7 +4,8 @@
 
 #include "ios/chrome/browser/reading_list/reading_list_web_state_observer.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/time/default_clock.h"
 #include "components/reading_list/core/reading_list_model_impl.h"
 #include "ios/chrome/browser/reading_list/offline_url_utils.h"
@@ -16,6 +17,10 @@
 #import "ios/web/public/web_state/web_state.h"
 #include "net/base/network_change_notifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 const char kTestURL[] = "http://foo.bar";
@@ -60,19 +65,19 @@ class TestWebState : public web::TestWebState {
 class ReadingListWebStateObserverTest : public web::WebTest {
  public:
   ReadingListWebStateObserverTest() {
-    auto test_navigation_manager = base::MakeUnique<TestNavigationManager>();
+    auto test_navigation_manager = std::make_unique<TestNavigationManager>();
     test_navigation_manager_ = test_navigation_manager.get();
     pending_item_ = web::NavigationItem::Create();
     last_committed_item_ = web::NavigationItem::Create();
     test_navigation_manager->SetPendingItem(pending_item_.get());
     test_navigation_manager->SetLastCommittedItem(last_committed_item_.get());
     test_web_state_.SetNavigationManager(std::move(test_navigation_manager));
-    reading_list_model_ = base::MakeUnique<ReadingListModelImpl>(
-        nullptr, nullptr, base::MakeUnique<base::DefaultClock>());
+    reading_list_model_ = std::make_unique<ReadingListModelImpl>(
+        nullptr, nullptr, std::make_unique<base::DefaultClock>());
     reading_list_model_->AddEntry(GURL(kTestURL), kTestTitle,
                                   reading_list::ADDED_VIA_CURRENT_APP);
-    ReadingListWebStateObserver::FromWebState(&test_web_state_,
-                                              reading_list_model_.get());
+    ReadingListWebStateObserver::CreateForWebState(&test_web_state_,
+                                                   reading_list_model_.get());
   }
 
  protected:
@@ -137,7 +142,7 @@ TEST_F(ReadingListWebStateObserverTest, TestLoadReadingListDistilledCommitted) {
   GURL distilled_url = reading_list::OfflineURLForPath(
       entry->DistilledPath(), entry->URL(), entry->DistilledURL());
 
-  // Test on commited entry, there must be no pending item.
+  // Test on committed entry, there must be no pending item.
   test_navigation_manager_->SetPendingItem(nullptr);
   test_navigation_manager_->GetLastCommittedItem()->SetURL(url);
   test_web_state_.SetLoading(true);

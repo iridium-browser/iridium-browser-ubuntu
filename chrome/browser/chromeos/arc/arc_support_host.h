@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -27,7 +28,6 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
   enum class UIPage {
     NO_PAGE,                // Hide everything.
     TERMS,                  // Terms content page.
-    LSO,                    // LSO page to enter user's credentials.
     ARC_LOADING,            // ARC loading progress page.
     ACTIVE_DIRECTORY_AUTH,  // Active Directory user SAML authentication.
     ERROR,                  // ARC start error page.
@@ -47,12 +47,11 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
   };
 
   // Delegate to handle authentication related events. Currently used for Active
-  // Directory and LSO auth.
+  // Directory.
   class AuthDelegate {
    public:
-    // Called when authentication succeeded. LSO auth returns the auth token
-    // |auth_code|, Active Directory auth returns an empty string.
-    virtual void OnAuthSucceeded(const std::string& auth_code) = 0;
+    // Called when authentication succeeded.
+    virtual void OnAuthSucceeded() = 0;
 
     // Called when authentication failed. |error_msg| contains error details.
     virtual void OnAuthFailed(const std::string& error_msg) = 0;
@@ -105,8 +104,6 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
     virtual ~ErrorDelegate() = default;
   };
 
-  static const char kStorageId[];
-
   using RequestOpenAppCallback = base::Callback<void(Profile* profile)>;
 
   explicit ArcSupportHost(Profile* profile);
@@ -137,9 +134,6 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
 
   // Requests to show the "Terms Of Service" page.
   void ShowTermsOfService();
-
-  // Requests to show the LSO page.
-  void ShowLso();
 
   // Requests to show the "ARC is loading" page.
   void ShowArcLoading();
@@ -175,6 +169,12 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
 
   void SetRequestOpenAppCallbackForTesting(
       const RequestOpenAppCallback& callback);
+
+  // Computes consent IDs based on the content of the Play ToS. Useful as the
+  // Play ToS is not contained within the Chrome binary, but rather fetched
+  // live.
+  // Returns a vector of consent "IDs" based on the Play ToS content.
+  static std::vector<int> ComputePlayToSConsentIds(const std::string& content);
 
  private:
   struct PreferenceCheckboxData {

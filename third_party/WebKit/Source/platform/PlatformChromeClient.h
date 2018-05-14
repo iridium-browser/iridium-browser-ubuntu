@@ -41,9 +41,9 @@ class PLATFORM_EXPORT PlatformChromeClient
   WTF_MAKE_NONCOPYABLE(PlatformChromeClient);
 
  public:
-  PlatformChromeClient() {}
-  virtual ~PlatformChromeClient() {}
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  PlatformChromeClient() = default;
+  virtual ~PlatformChromeClient() = default;
+  virtual void Trace(blink::Visitor* visitor) {}
 
   // Requests the host invalidate the contents.
   virtual void InvalidateRect(const IntRect& update_rect) = 0;
@@ -57,6 +57,8 @@ class PLATFORM_EXPORT PlatformChromeClient
   virtual float WindowToViewportScalar(const float) const = 0;
 
   virtual void ScheduleAnimation(const PlatformFrameView*) = 0;
+
+  virtual bool IsPopup() { return false; }
 };
 
 }  // namespace blink

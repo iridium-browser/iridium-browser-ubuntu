@@ -8,25 +8,32 @@
 
 namespace mojo {
 
-// TODO(iclelland): Make these enums equivalent so that conversion can be a
-// static cast.
-content::ServiceWorkerStatusCode
-TypeConverter<content::ServiceWorkerStatusCode,
-              blink::mojom::ServiceWorkerEventStatus>::
-    Convert(blink::mojom::ServiceWorkerEventStatus status) {
-  content::ServiceWorkerStatusCode status_code;
-  if (status == blink::mojom::ServiceWorkerEventStatus::COMPLETED) {
-    status_code = content::SERVICE_WORKER_OK;
-  } else if (status == blink::mojom::ServiceWorkerEventStatus::REJECTED) {
-    status_code = content::SERVICE_WORKER_ERROR_EVENT_WAITUNTIL_REJECTED;
-  } else if (status == blink::mojom::ServiceWorkerEventStatus::ABORTED) {
-    status_code = content::SERVICE_WORKER_ERROR_ABORT;
-  } else {
-    // We received an unexpected value back. This can theoretically happen as
-    // mojo doesn't validate enum values.
-    status_code = content::SERVICE_WORKER_ERROR_IPC_FAILED;
+blink::WebCanMakePaymentEventData
+TypeConverter<blink::WebCanMakePaymentEventData,
+              payments::mojom::CanMakePaymentEventDataPtr>::
+    Convert(const payments::mojom::CanMakePaymentEventDataPtr& input) {
+  blink::WebCanMakePaymentEventData output;
+
+  output.top_level_origin =
+      blink::WebString::FromUTF8(input->top_level_origin.spec());
+  output.payment_request_origin =
+      blink::WebString::FromUTF8(input->payment_request_origin.spec());
+
+  output.method_data =
+      blink::WebVector<blink::WebPaymentMethodData>(input->method_data.size());
+  for (size_t i = 0; i < input->method_data.size(); i++) {
+    output.method_data[i] = mojo::ConvertTo<blink::WebPaymentMethodData>(
+        std::move(input->method_data[i]));
   }
-  return status_code;
+
+  output.modifiers = blink::WebVector<blink::WebPaymentDetailsModifier>(
+      input->modifiers.size());
+  for (size_t i = 0; i < input->modifiers.size(); i++) {
+    output.modifiers[i] =
+        mojo::ConvertTo<blink::WebPaymentDetailsModifier>(input->modifiers[i]);
+  }
+
+  return output;
 }
 
 blink::WebPaymentRequestEventData

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -51,6 +52,7 @@ POST_KILL_WAIT = 2
 
 MOUNT_RW_COMMAND = 'mount -o remount,rw /'
 LSOF_COMMAND = 'lsof %s/chrome'
+DBUS_RELOAD_COMMAND = 'killall -HUP dbus-daemon'
 
 _ANDROID_DIR = '/system/chrome'
 _ANDROID_DIR_EXTRACT_PATH = 'system/chrome/*'
@@ -96,7 +98,8 @@ class DeployChrome(object):
     self.staging_dir = staging_dir
     if not self.options.staging_only:
       self.device = remote.RemoteDevice(options.to, port=options.port,
-                                        ping=options.ping)
+                                        ping=options.ping,
+                                        private_key=options.private_key)
     self._target_dir_is_still_readonly = multiprocessing.Event()
 
     self.copy_paths = chrome_util.GetCopyPaths('chrome')
@@ -205,7 +208,7 @@ class DeployChrome(object):
       raise DeployFailure(msg)
 
   def _MountRootfsAsWritable(self, error_code_ok=True):
-    """Mount the rootfs as writable.
+    """Mounts the rootfs as writable.
 
     If the command fails, and error_code_ok is True, and the target dir is not
     writable then this function sets self._target_dir_is_still_readonly.
@@ -221,7 +224,16 @@ class DeployChrome(object):
         not self.device.IsDirWritable(self.options.target_dir)):
       self._target_dir_is_still_readonly.set()
 
+  def _EnsureTargetDir(self):
+    """Ensures that the target directory exists on the remote device."""
+    target_dir = self.options.target_dir
+    # Any valid /opt directory should already exist so avoid the remote call.
+    if os.path.commonprefix([target_dir, '/opt']) == '/opt':
+      return
+    self.device.RunCommand(['mkdir', '-p', '--mode', '0775', target_dir])
+
   def _GetDeviceInfo(self):
+    """Returns the disk space used and available for the target diectory."""
     steps = [
         functools.partial(self._GetRemoteDirSize, self.options.target_dir),
         functools.partial(self._GetRemoteMountFree, self.options.target_dir)
@@ -255,8 +267,6 @@ class DeployChrome(object):
       return not self.device.HasGigabitEthernet()
 
   def _Deploy(self):
-    old_dbus_checksums = self._GetDBusChecksums()
-
     logging.info('Copying Chrome to %s on device...', self.options.target_dir)
     # CopyToDevice will fall back to scp if rsync is corrupted on stateful.
     # This does not work for deploy.
@@ -277,16 +287,11 @@ class DeployChrome(object):
         self.device.RunCommand('chmod %o %s/%s' % (
             p.mode, self.options.target_dir, p.src if not p.dest else p.dest))
 
-    new_dbus_checksums = self._GetDBusChecksums()
-    if old_dbus_checksums != new_dbus_checksums:
-      if self.options.target_dir == _CHROME_DIR:
-        logging.info('Detected change to D-Bus service files, rebooting.')
-        self._Reboot()
-        return
-      else:
-        logging.warn('Detected change in D-Bus service files, but target dir '
-                     'is not %s. D-Bus changes will not be picked up by '
-                     'dbus-daemon at boot time.', _CHROME_DIR)
+    # Send SIGHUP to dbus-daemon to tell it to reload its configs. This won't
+    # pick up major changes (bus type, logging, etc.), but all we care about is
+    # getting the latest policy from /opt/google/chrome/dbus so that Chrome will
+    # be authorized to take ownership of its service names.
+    self.device.RunCommand(DBUS_RELOAD_COMMAND, error_code_ok=True)
 
     if self.options.startui:
       logging.info('Starting UI...')
@@ -323,8 +328,8 @@ class DeployChrome(object):
     logging.info('Mounting Chrome...')
 
     # Create directory if does not exist
-    self.device.RunCommand('mkdir -p --mode 0775 %s' % (
-        self.options.mount_dir,))
+    self.device.RunCommand(['mkdir', '-p', '--mode', '0775',
+                            self.options.mount_dir])
     # Umount the existing mount on mount_dir if present first
     self.device.RunCommand(_UMOUNT_DIR_IF_MOUNTPOINT_CMD %
                            {'dir': self.options.mount_dir})
@@ -332,16 +337,6 @@ class DeployChrome(object):
                                                      self.options.mount_dir))
     # Chrome needs partition to have exec and suid flags set
     self.device.RunCommand(_SET_MOUNT_FLAGS_CMD % (self.options.mount_dir,))
-
-  def _GetDBusChecksums(self):
-    """Returns Checksums for D-Bus files deployed with Chrome.
-
-    This is used to determine if a reboot is required after deploying Chrome.
-    """
-    path = os.path.join(_CHROME_DIR, 'dbus/*')
-    result = self.device.RunCommand('md5sum ' + path,
-                                    error_code_ok=True)
-    return result.output
 
   def Cleanup(self):
     """Clean up RemoteDevice."""
@@ -356,8 +351,12 @@ class DeployChrome(object):
       self._PrepareStagingDir()
       return 0
 
+    # Ensure that the target directory exists before running parallel steps.
+    self._EnsureTargetDir()
+
     # Run setup steps in parallel. If any step fails, RunParallelSteps will
     # stop printing output at that point, and halt any running steps.
+    logging.info('Preparing device')
     steps = [self._GetDeviceInfo, self._CheckConnection,
              self._KillProcsIfNeeded, self._MountRootfsAsWritable,
              self._PrepareStagingDir]
@@ -412,6 +411,9 @@ def _CreateParser():
                       help='Target directory on device to deploy Chrome into.')
   parser.add_argument('-g', '--gs-path', type='gs_path',
                       help='GS path that contains the chrome to deploy.')
+  parser.add_argument('--private-key', type='path', default=None,
+                      help='An ssh private key to use when deploying to '
+                           'a CrOS device.')
   parser.add_argument('--nostartui', action='store_false', dest='startui',
                       default=True,
                       help="Don't restart the ui daemon after deployment.")
@@ -551,7 +553,7 @@ def _PostParseCheck(options):
     gn_env = os.getenv('GN_ARGS')
     if gn_env is not None:
       options.gn_args = gn_helpers.FromGNArgs(gn_env)
-      logging.info('GN_ARGS taken from environment: %s', options.gn_args)
+      logging.debug('GN_ARGS taken from environment: %s', options.gn_args)
 
   if not options.staging_flags:
     use_env = os.getenv('USE')

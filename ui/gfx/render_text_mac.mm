@@ -181,7 +181,7 @@ SelectionModel RenderTextMac::AdjacentWordSelectionModel(
   return SelectionModel();
 }
 
-Range RenderTextMac::GetGlyphBounds(size_t index) {
+Range RenderTextMac::GetCursorSpan(const Range& text_range) {
   // TODO(asvitkine): Implement this. http://crbug.com/131618
   return Range();
 }
@@ -360,8 +360,10 @@ base::ScopedCFTypeRef<CFMutableArrayRef> RenderTextMac::ApplyStyles(
                                    kCTForegroundColorAttributeName, foreground);
     CFArrayAppendValue(attributes, foreground);
 
-    if (style.style(UNDERLINE)) {
-      CTUnderlineStyle value = kCTUnderlineStyleSingle;
+    if (style.style(UNDERLINE) || style.style(HEAVY_UNDERLINE)) {
+      CTUnderlineStyle value = style.style(HEAVY_UNDERLINE)
+                                   ? kCTUnderlineStyleThick
+                                   : kCTUnderlineStyleSingle;
       base::ScopedCFTypeRef<CFNumberRef> underline_value(
           CFNumberCreate(NULL, kCFNumberSInt32Type, &value));
       CFAttributedStringSetAttribute(

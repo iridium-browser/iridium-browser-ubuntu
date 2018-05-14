@@ -16,7 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/sequenced_worker_pool.h"
+#include "base/task_scheduler/lazy_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -45,11 +45,6 @@
 #include "storage/common/fileapi/file_system_types.h"
 #include "storage/common/fileapi/file_system_util.h"
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#include "chrome/browser/media_galleries/fileapi/itunes_file_util.h"
-#include "chrome/browser/media_galleries/fileapi/picasa_file_util.h"
-#endif  // defined(OS_WIN) || defined(OS_MACOSX)
-
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 #include "chrome/browser/media_galleries/fileapi/device_media_async_file_util.h"
 #endif
@@ -61,34 +56,35 @@ namespace {
 
 const char kMediaGalleryMountPrefix[] = "media_galleries-";
 
-#if DCHECK_IS_ON()
-base::LazyInstance<base::SequenceChecker>::Leaky g_media_sequence_checker =
-    LAZY_INSTANCE_INITIALIZER;
-#endif
+base::LazySequencedTaskRunner g_media_task_runner =
+    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::MayBlock(),
+                         base::TaskPriority::USER_VISIBLE,
+                         base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN));
 
 void OnPreferencesInit(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const extensions::Extension* extension,
     MediaGalleryPrefId pref_id,
-    const base::Callback<void(base::File::Error result)>& callback) {
+    base::OnceCallback<void(base::File::Error result)> callback) {
   content::WebContents* contents = web_contents_getter.Run();
   if (!contents) {
     content::BrowserThread::PostTask(
         content::BrowserThread::IO, FROM_HERE,
-        base::BindOnce(callback, base::File::FILE_ERROR_FAILED));
+        base::BindOnce(std::move(callback), base::File::FILE_ERROR_FAILED));
     return;
   }
   MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
   registry->RegisterMediaFileSystemForExtension(contents, extension, pref_id,
-                                                callback);
+                                                std::move(callback));
 }
 
 void AttemptAutoMountOnUIThread(
     const content::ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     const std::string& storage_domain,
     const std::string& mount_point,
-    const base::Callback<void(base::File::Error result)>& callback) {
+    base::OnceCallback<void(base::File::Error result)> callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::WebContents* web_contents = web_contents_getter.Run();
   if (web_contents) {
@@ -115,28 +111,23 @@ void AttemptAutoMountOnUIThread(
               profile);
       // Pass the WebContentsGetter to the closure to prevent a use-after-free
       // in the case that the web_contents is destroyed before the closure runs.
-      preferences->EnsureInitialized(
-          base::Bind(&OnPreferencesInit, web_contents_getter,
-                     base::RetainedRef(extension), pref_id, callback));
+      preferences->EnsureInitialized(base::Bind(
+          &OnPreferencesInit, web_contents_getter, base::RetainedRef(extension),
+          pref_id, base::Passed(&callback)));
       return;
     }
   }
 
   content::BrowserThread::PostTask(
       content::BrowserThread::IO, FROM_HERE,
-      base::BindOnce(callback, base::File::FILE_ERROR_NOT_FOUND));
+      base::BindOnce(std::move(callback), base::File::FILE_ERROR_NOT_FOUND));
 }
 
 }  // namespace
 
-const char MediaFileSystemBackend::kMediaTaskRunnerName[] =
-    "media-task-runner";
-
 MediaFileSystemBackend::MediaFileSystemBackend(
-    const base::FilePath& profile_path,
-    base::SequencedTaskRunner* media_task_runner)
+    const base::FilePath& profile_path)
     : profile_path_(profile_path),
-      media_task_runner_(media_task_runner),
       media_path_filter_(new MediaPathFilter),
       media_copy_or_move_file_validator_factory_(new MediaFileValidatorFactory),
       native_media_file_util_(new NativeMediaFileUtil(media_path_filter_.get()))
@@ -145,13 +136,6 @@ MediaFileSystemBackend::MediaFileSystemBackend(
       device_media_async_file_util_(
           DeviceMediaAsyncFileUtil::Create(profile_path_,
                                            APPLY_MEDIA_FILE_VALIDATION))
-#endif
-#if defined(OS_WIN) || defined(OS_MACOSX)
-      ,
-      picasa_file_util_(new picasa::PicasaFileUtil(media_path_filter_.get())),
-      itunes_file_util_(new itunes::ITunesFileUtil(media_path_filter_.get())),
-      picasa_file_util_used_(false),
-      itunes_file_util_used_(false)
 #endif
 {
 }
@@ -162,17 +146,14 @@ MediaFileSystemBackend::~MediaFileSystemBackend() {
 // static
 void MediaFileSystemBackend::AssertCurrentlyOnMediaSequence() {
 #if DCHECK_IS_ON()
-  DCHECK(g_media_sequence_checker.Get().CalledOnValidSequence());
+  DCHECK(g_media_task_runner.Get()->RunsTasksInCurrentSequence());
 #endif
 }
 
 // static
 scoped_refptr<base::SequencedTaskRunner>
 MediaFileSystemBackend::MediaTaskRunner() {
-  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
-  base::SequencedWorkerPool::SequenceToken media_sequence_token =
-      pool->GetNamedSequenceToken(kMediaTaskRunnerName);
-  return pool->GetSequencedTaskRunner(media_sequence_token);
+  return g_media_task_runner.Get();
 }
 
 // static
@@ -186,7 +167,7 @@ std::string MediaFileSystemBackend::ConstructMountName(
   name.append(extension_id);
   name.append("-");
   if (pref_id != kInvalidMediaGalleryPrefId)
-    name.append(base::Uint64ToString(pref_id));
+    name.append(base::NumberToString(pref_id));
   base::ReplaceChars(name, " /", "_", &name);
   return name;
 }
@@ -196,7 +177,7 @@ bool MediaFileSystemBackend::AttemptAutoMountForURLRequest(
     const net::URLRequest* url_request,
     const storage::FileSystemURL& filesystem_url,
     const std::string& storage_domain,
-    const base::Callback<void(base::File::Error result)>& callback) {
+    base::OnceCallback<void(base::File::Error result)> callback) {
   if (storage_domain.empty() ||
       filesystem_url.type() != storage::kFileSystemTypeExternal ||
       storage_domain != filesystem_url.origin().host()) {
@@ -224,7 +205,7 @@ bool MediaFileSystemBackend::AttemptAutoMountForURLRequest(
       content::BrowserThread::UI, FROM_HERE,
       base::BindOnce(&AttemptAutoMountOnUIThread,
                      request_info->GetWebContentsGetterForRequest(),
-                     storage_domain, mount_point, callback));
+                     storage_domain, mount_point, std::move(callback)));
   return true;
 }
 
@@ -232,10 +213,6 @@ bool MediaFileSystemBackend::CanHandleType(storage::FileSystemType type) const {
   switch (type) {
     case storage::kFileSystemTypeNativeMedia:
     case storage::kFileSystemTypeDeviceMedia:
-#if defined(OS_WIN) || defined(OS_MACOSX)
-    case storage::kFileSystemTypePicasa:
-    case storage::kFileSystemTypeItunes:
-#endif  // defined(OS_WIN) || defined(OS_MACOSX)
       return true;
     default:
       return false;
@@ -245,13 +222,12 @@ bool MediaFileSystemBackend::CanHandleType(storage::FileSystemType type) const {
 void MediaFileSystemBackend::Initialize(storage::FileSystemContext* context) {
 }
 
-void MediaFileSystemBackend::ResolveURL(
-    const FileSystemURL& url,
-    storage::OpenFileSystemMode mode,
-    const OpenFileSystemCallback& callback) {
+void MediaFileSystemBackend::ResolveURL(const FileSystemURL& url,
+                                        storage::OpenFileSystemMode mode,
+                                        OpenFileSystemCallback callback) {
   // We never allow opening a new FileSystem via usual ResolveURL.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(callback, GURL(), std::string(),
+      FROM_HERE, base::BindOnce(std::move(callback), GURL(), std::string(),
                                 base::File::FILE_ERROR_SECURITY));
 }
 
@@ -266,20 +242,6 @@ storage::AsyncFileUtil* MediaFileSystemBackend::GetAsyncFileUtil(
     case storage::kFileSystemTypeDeviceMedia:
       return device_media_async_file_util_.get();
 #endif
-#if defined(OS_WIN) || defined(OS_MACOSX)
-    case storage::kFileSystemTypeItunes:
-      if (!itunes_file_util_used_) {
-        media_galleries::UsageCount(media_galleries::ITUNES_FILE_SYSTEM_USED);
-        itunes_file_util_used_ = true;
-      }
-      return itunes_file_util_.get();
-    case storage::kFileSystemTypePicasa:
-      if (!picasa_file_util_used_) {
-        media_galleries::UsageCount(media_galleries::PICASA_FILE_SYSTEM_USED);
-        picasa_file_util_used_ = true;
-      }
-      return picasa_file_util_.get();
-#endif  // defined(OS_WIN) || defined(OS_MACOSX)
     default:
       NOTREACHED();
   }
@@ -300,7 +262,6 @@ MediaFileSystemBackend::GetCopyOrMoveFileValidatorFactory(
   switch (type) {
     case storage::kFileSystemTypeNativeMedia:
     case storage::kFileSystemTypeDeviceMedia:
-    case storage::kFileSystemTypeItunes:
       if (!media_copy_or_move_file_validator_factory_) {
         *error_code = base::File::FILE_ERROR_SECURITY;
         return NULL;
@@ -318,7 +279,7 @@ storage::FileSystemOperation* MediaFileSystemBackend::CreateFileSystemOperation(
     base::File::Error* error_code) const {
   std::unique_ptr<storage::FileSystemOperationContext> operation_context(
       new storage::FileSystemOperationContext(context,
-                                              media_task_runner_.get()));
+                                              MediaTaskRunner().get()));
   return storage::FileSystemOperation::Create(url, context,
                                               std::move(operation_context));
 }
@@ -336,9 +297,7 @@ bool MediaFileSystemBackend::SupportsStreaming(
 bool MediaFileSystemBackend::HasInplaceCopyImplementation(
     storage::FileSystemType type) const {
   DCHECK(type == storage::kFileSystemTypeNativeMedia ||
-         type == storage::kFileSystemTypeDeviceMedia ||
-         type == storage::kFileSystemTypeItunes ||
-         type == storage::kFileSystemTypePicasa);
+         type == storage::kFileSystemTypeDeviceMedia);
   return true;
 }
 

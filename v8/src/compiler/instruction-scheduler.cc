@@ -90,10 +90,10 @@ InstructionScheduler::InstructionScheduler(Zone* zone,
 
 void InstructionScheduler::StartBlock(RpoNumber rpo) {
   DCHECK(graph_.empty());
-  DCHECK(last_side_effect_instr_ == nullptr);
+  DCHECK_NULL(last_side_effect_instr_);
   DCHECK(pending_loads_.empty());
-  DCHECK(last_live_in_reg_marker_ == nullptr);
-  DCHECK(last_deopt_or_trap_ == nullptr);
+  DCHECK_NULL(last_live_in_reg_marker_);
+  DCHECK_NULL(last_deopt_or_trap_);
   DCHECK(operands_map_.empty());
   sequence()->StartBlock(rpo);
 }
@@ -240,9 +240,13 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
     case kArchNop:
     case kArchFramePointer:
     case kArchParentFramePointer:
-    case kArchTruncateDoubleToI:
-    case kArchStackSlot:
+    case kArchStackSlot:  // Despite its name this opcode will produce a
+                          // reference to a frame slot, so it is not affected
+                          // by the arm64 dual stack issues mentioned below.
     case kArchComment:
+      return kNoOpcodeFlags;
+
+    case kArchTruncateDoubleToI:
     case kIeee754Float64Acos:
     case kIeee754Float64Acosh:
     case kIeee754Float64Asin:
@@ -272,16 +276,19 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
       return kIsLoadOperation;
 
     case kArchPrepareCallCFunction:
+    case kArchSaveCallerRegisters:
+    case kArchRestoreCallerRegisters:
     case kArchPrepareTailCall:
     case kArchCallCFunction:
     case kArchCallCodeObject:
     case kArchCallJSFunction:
+    case kArchCallWasmFunction:
       return kHasSideEffect;
 
     case kArchTailCallCodeObjectFromJSFunction:
     case kArchTailCallCodeObject:
-    case kArchTailCallJSFunctionFromJSFunction:
     case kArchTailCallAddress:
+    case kArchTailCallWasm:
       return kHasSideEffect | kIsBlockTerminator;
 
     case kArchDeoptimize:
@@ -289,76 +296,61 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
     case kArchLookupSwitch:
     case kArchTableSwitch:
     case kArchRet:
+    case kArchDebugAbort:
     case kArchDebugBreak:
     case kArchThrowTerminator:
       return kIsBlockTerminator;
 
-    case kCheckedLoadInt8:
-    case kCheckedLoadUint8:
-    case kCheckedLoadInt16:
-    case kCheckedLoadUint16:
-    case kCheckedLoadWord32:
-    case kCheckedLoadWord64:
-    case kCheckedLoadFloat32:
-    case kCheckedLoadFloat64:
-      return kIsLoadOperation;
-
-    case kCheckedStoreWord8:
-    case kCheckedStoreWord16:
-    case kCheckedStoreWord32:
-    case kCheckedStoreWord64:
-    case kCheckedStoreFloat32:
-    case kCheckedStoreFloat64:
     case kArchStoreWithWriteBarrier:
       return kHasSideEffect;
 
-    case kAtomicLoadInt8:
-    case kAtomicLoadUint8:
-    case kAtomicLoadInt16:
-    case kAtomicLoadUint16:
-    case kAtomicLoadWord32:
+    case kWord32AtomicLoadInt8:
+    case kWord32AtomicLoadUint8:
+    case kWord32AtomicLoadInt16:
+    case kWord32AtomicLoadUint16:
+    case kWord32AtomicLoadWord32:
       return kIsLoadOperation;
 
-    case kAtomicStoreWord8:
-    case kAtomicStoreWord16:
-    case kAtomicStoreWord32:
+    case kWord32AtomicStoreWord8:
+    case kWord32AtomicStoreWord16:
+    case kWord32AtomicStoreWord32:
       return kHasSideEffect;
 
-    case kAtomicExchangeInt8:
-    case kAtomicExchangeUint8:
-    case kAtomicExchangeInt16:
-    case kAtomicExchangeUint16:
-    case kAtomicExchangeWord32:
-    case kAtomicCompareExchangeInt8:
-    case kAtomicCompareExchangeUint8:
-    case kAtomicCompareExchangeInt16:
-    case kAtomicCompareExchangeUint16:
-    case kAtomicCompareExchangeWord32:
-    case kAtomicAddInt8:
-    case kAtomicAddUint8:
-    case kAtomicAddInt16:
-    case kAtomicAddUint16:
-    case kAtomicAddWord32:
-    case kAtomicSubInt8:
-    case kAtomicSubUint8:
-    case kAtomicSubInt16:
-    case kAtomicSubUint16:
-    case kAtomicSubWord32:
-    case kAtomicAndInt8:
-    case kAtomicAndUint8:
-    case kAtomicAndInt16:
-    case kAtomicAndUint16:
-    case kAtomicAndWord32:
-    case kAtomicOrInt8:
-    case kAtomicOrUint8:
-    case kAtomicOrInt16:
-    case kAtomicOrUint16:
-    case kAtomicOrWord32:
-    case kAtomicXorInt8:
-    case kAtomicXorUint8:
-    case kAtomicXorInt16:
-    case kAtomicXorUint16:
-    case kAtomicXorWord32:
+    case kWord32AtomicExchangeInt8:
+    case kWord32AtomicExchangeUint8:
+    case kWord32AtomicExchangeInt16:
+    case kWord32AtomicExchangeUint16:
+    case kWord32AtomicExchangeWord32:
+    case kWord32AtomicCompareExchangeInt8:
+    case kWord32AtomicCompareExchangeUint8:
+    case kWord32AtomicCompareExchangeInt16:
+    case kWord32AtomicCompareExchangeUint16:
+    case kWord32AtomicCompareExchangeWord32:
+    case kWord32AtomicAddInt8:
+    case kWord32AtomicAddUint8:
+    case kWord32AtomicAddInt16:
+    case kWord32AtomicAddUint16:
+    case kWord32AtomicAddWord32:
+    case kWord32AtomicSubInt8:
+    case kWord32AtomicSubUint8:
+    case kWord32AtomicSubInt16:
+    case kWord32AtomicSubUint16:
+    case kWord32AtomicSubWord32:
+    case kWord32AtomicAndInt8:
+    case kWord32AtomicAndUint8:
+    case kWord32AtomicAndInt16:
+    case kWord32AtomicAndUint16:
+    case kWord32AtomicAndWord32:
+    case kWord32AtomicOrInt8:
+    case kWord32AtomicOrUint8:
+    case kWord32AtomicOrInt16:
+    case kWord32AtomicOrUint16:
+    case kWord32AtomicOrWord32:
+    case kWord32AtomicXorInt8:
+    case kWord32AtomicXorUint8:
+    case kWord32AtomicXorInt16:
+    case kWord32AtomicXorUint16:
+    case kWord32AtomicXorWord32:
       return kHasSideEffect;
 
 #define CASE(Name) case k##Name:
@@ -373,7 +365,8 @@ int InstructionScheduler::GetInstructionFlags(const Instruction* instr) const {
 
 bool InstructionScheduler::IsBlockTerminator(const Instruction* instr) const {
   return ((GetInstructionFlags(instr) & kIsBlockTerminator) ||
-          (instr->flags_mode() == kFlags_branch));
+          (instr->flags_mode() == kFlags_branch) ||
+          (instr->flags_mode() == kFlags_branch_and_poison));
 }
 
 
@@ -382,7 +375,7 @@ void InstructionScheduler::ComputeTotalLatencies() {
     int max_latency = 0;
 
     for (ScheduleGraphNode* successor : node->successors()) {
-      DCHECK(successor->total_latency() != -1);
+      DCHECK_NE(-1, successor->total_latency());
       if (successor->total_latency() > max_latency) {
         max_latency = successor->total_latency();
       }

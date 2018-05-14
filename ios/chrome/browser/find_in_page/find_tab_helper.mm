@@ -14,24 +14,9 @@
 
 DEFINE_WEB_STATE_USER_DATA_KEY(FindTabHelper);
 
-// static
-void FindTabHelper::CreateForWebState(
-    web::WebState* web_state,
-    id<FindInPageControllerDelegate> controller_delegate) {
-  DCHECK(web_state);
-  if (!FromWebState(web_state)) {
-    web_state->SetUserData(UserDataKey(), base::WrapUnique(new FindTabHelper(
-                                              web_state, controller_delegate)));
-  }
-}
-
-FindTabHelper::FindTabHelper(
-    web::WebState* web_state,
-    id<FindInPageControllerDelegate> controller_delegate)
-    : web::WebStateObserver(web_state) {
-  controller_.reset([[FindInPageController alloc]
-      initWithWebState:web_state
-              delegate:controller_delegate]);
+FindTabHelper::FindTabHelper(web::WebState* web_state) {
+  web_state->AddObserver(this);
+  controller_ = [[FindInPageController alloc] initWithWebState:web_state];
 }
 
 FindTabHelper::~FindTabHelper() {}
@@ -40,14 +25,14 @@ void FindTabHelper::StartFinding(NSString* search_term,
                                  FindInPageCompletionBlock completion) {
   [controller_ findStringInPage:search_term
               completionHandler:^{
-                FindInPageModel* model = controller_.get().findInPageModel;
+                FindInPageModel* model = controller_.findInPageModel;
                 completion(model);
               }];
 }
 
 void FindTabHelper::ContinueFinding(FindDirection direction,
                                     FindInPageCompletionBlock completion) {
-  FindInPageModel* model = controller_.get().findInPageModel;
+  FindInPageModel* model = controller_.findInPageModel;
 
   if (direction == FORWARD) {
     [controller_ findNextStringInPageWithCompletionHandler:^{
@@ -70,7 +55,7 @@ void FindTabHelper::StopFinding(ProceduralBlock completion) {
 }
 
 FindInPageModel* FindTabHelper::GetFindResult() const {
-  return controller_.get().findInPageModel;
+  return controller_.findInPageModel;
 }
 
 bool FindTabHelper::CurrentPageSupportsFindInPage() const {
@@ -78,11 +63,11 @@ bool FindTabHelper::CurrentPageSupportsFindInPage() const {
 }
 
 bool FindTabHelper::IsFindUIActive() const {
-  return controller_.get().findInPageModel.enabled;
+  return controller_.findInPageModel.enabled;
 }
 
 void FindTabHelper::SetFindUIActive(bool active) {
-  controller_.get().findInPageModel.enabled = active;
+  controller_.findInPageModel.enabled = active;
 }
 
 void FindTabHelper::PersistSearchTerm() {
@@ -94,10 +79,12 @@ void FindTabHelper::RestoreSearchTerm() {
 }
 
 void FindTabHelper::NavigationItemCommitted(
+    web::WebState* web_state,
     const web::LoadCommittedDetails& load_details) {
   StopFinding(nil);
 }
 
-void FindTabHelper::WebStateDestroyed() {
+void FindTabHelper::WebStateDestroyed(web::WebState* web_state) {
   [controller_ detachFromWebState];
+  web_state->RemoveObserver(this);
 }

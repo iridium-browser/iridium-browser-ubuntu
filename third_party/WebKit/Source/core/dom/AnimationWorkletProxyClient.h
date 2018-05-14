@@ -5,9 +5,9 @@
 #ifndef AnimationWorkletProxyClient_h
 #define AnimationWorkletProxyClient_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/workers/WorkerClients.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -15,16 +15,16 @@ class WorkletGlobalScope;
 
 class CORE_EXPORT AnimationWorkletProxyClient
     : public Supplement<WorkerClients> {
-  WTF_MAKE_NONCOPYABLE(AnimationWorkletProxyClient);
-
  public:
-  AnimationWorkletProxyClient() {}
+  static const char kSupplementName[];
+
+  AnimationWorkletProxyClient() = default;
 
   static AnimationWorkletProxyClient* From(WorkerClients*);
-  static const char* SupplementName();
 
   virtual void SetGlobalScope(WorkletGlobalScope*) = 0;
   virtual void Dispose() = 0;
+  DISALLOW_COPY_AND_ASSIGN(AnimationWorkletProxyClient);
 };
 
 CORE_EXPORT void ProvideAnimationWorkletProxyClientTo(

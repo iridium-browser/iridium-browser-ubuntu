@@ -51,37 +51,29 @@ class TextResourceDecoder;
 
 class XHRReplayData final : public GarbageCollectedFinalized<XHRReplayData> {
  public:
-  static XHRReplayData* Create(ExecutionContext*,
-                               const AtomicString& method,
+  static XHRReplayData* Create(const AtomicString& method,
                                const KURL&,
                                bool async,
-                               PassRefPtr<EncodedFormData>,
                                bool include_credentials);
 
   void AddHeader(const AtomicString& key, const AtomicString& value);
   const AtomicString& Method() const { return method_; }
   const KURL& Url() const { return url_; }
   bool Async() const { return async_; }
-  PassRefPtr<EncodedFormData> FormData() const { return form_data_; }
   const HTTPHeaderMap& Headers() const { return headers_; }
   bool IncludeCredentials() const { return include_credentials_; }
-  ExecutionContext* GetExecutionContext() const { return execution_context_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*) {}
 
  private:
-  XHRReplayData(ExecutionContext*,
-                const AtomicString& method,
+  XHRReplayData(const AtomicString& method,
                 const KURL&,
                 bool async,
-                PassRefPtr<EncodedFormData>,
                 bool include_credentials);
 
-  Member<ExecutionContext> execution_context_;
   AtomicString method_;
   KURL url_;
   bool async_;
-  RefPtr<EncodedFormData> form_data_;
   HTTPHeaderMap headers_;
   bool include_credentials_;
 };
@@ -94,6 +86,7 @@ class NetworkResourcesData final
 
    public:
     ResourceData(NetworkResourcesData*,
+                 ExecutionContext*,
                  const String& request_id,
                  const String& loader_id,
                  const KURL&);
@@ -132,8 +125,8 @@ class NetworkResourcesData final
       text_encoding_name_ = text_encoding_name;
     }
 
-    PassRefPtr<SharedBuffer> Buffer() const { return buffer_; }
-    void SetBuffer(PassRefPtr<SharedBuffer> buffer) {
+    scoped_refptr<SharedBuffer> Buffer() const { return buffer_; }
+    void SetBuffer(scoped_refptr<SharedBuffer> buffer) {
       buffer_ = std::move(buffer);
     }
 
@@ -146,9 +139,9 @@ class NetworkResourcesData final
     }
 
     BlobDataHandle* DownloadedFileBlob() const {
-      return downloaded_file_blob_.Get();
+      return downloaded_file_blob_.get();
     }
-    void SetDownloadedFileBlob(PassRefPtr<BlobDataHandle> blob) {
+    void SetDownloadedFileBlob(scoped_refptr<BlobDataHandle> blob) {
       downloaded_file_blob_ = std::move(blob);
     }
 
@@ -166,11 +159,15 @@ class NetworkResourcesData final
     void AddPendingEncodedDataLength(int encoded_data_length) {
       pending_encoded_data_length_ += encoded_data_length;
     }
-
-    DECLARE_TRACE();
+    void SetPostData(scoped_refptr<EncodedFormData> post_data) {
+      post_data_ = post_data;
+    }
+    scoped_refptr<EncodedFormData> PostData() const { return post_data_; }
+    ExecutionContext* GetExecutionContext() const { return execution_context_; }
+    void Trace(blink::Visitor*);
 
    private:
-    bool HasData() const { return data_buffer_.Get(); }
+    bool HasData() const { return data_buffer_.get(); }
     size_t DataLength() const;
     void AppendData(const char* data, size_t data_length);
     size_t DecodeDataToContent();
@@ -184,7 +181,7 @@ class NetworkResourcesData final
     String content_;
     Member<XHRReplayData> xhr_replay_data_;
     bool base64_encoded_;
-    RefPtr<SharedBuffer> data_buffer_;
+    scoped_refptr<SharedBuffer> data_buffer_;
     bool is_content_evicted_;
     InspectorPageAgent::ResourceType type_;
     int http_status_code_;
@@ -194,10 +191,12 @@ class NetworkResourcesData final
     int raw_header_size_;
     int pending_encoded_data_length_;
 
-    RefPtr<SharedBuffer> buffer_;
+    scoped_refptr<SharedBuffer> buffer_;
     WeakMember<Resource> cached_resource_;
-    RefPtr<BlobDataHandle> downloaded_file_blob_;
+    scoped_refptr<BlobDataHandle> downloaded_file_blob_;
     Vector<AtomicString> certificate_;
+    scoped_refptr<EncodedFormData> post_data_;
+    Member<ExecutionContext> execution_context_;
   };
 
   static NetworkResourcesData* Create(size_t total_buffer_size,
@@ -206,9 +205,11 @@ class NetworkResourcesData final
   }
   ~NetworkResourcesData();
 
-  void ResourceCreated(const String& request_id,
+  void ResourceCreated(ExecutionContext*,
+                       const String& request_id,
                        const String& loader_id,
-                       const KURL&);
+                       const KURL&,
+                       scoped_refptr<EncodedFormData>);
   void ResponseReceived(const String& request_id,
                         const String& frame_id,
                         const ResourceResponse&);
@@ -237,20 +238,21 @@ class NetworkResourcesData final
   int GetAndClearPendingEncodedDataLength(const String& request_id);
   void AddPendingEncodedDataLength(const String& request_id,
                                    int encoded_data_length);
-
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   NetworkResourcesData(size_t total_buffer_size, size_t resource_buffer_size);
 
-  ResourceData* ResourceDataForRequestId(const String& request_id);
+  ResourceData* ResourceDataForRequestId(const String& request_id) const;
   void EnsureNoDataForRequestId(const String& request_id);
   bool EnsureFreeSpace(size_t);
+  ResourceData* PrepareToAddResourceData(const String& request_id,
+                                         size_t data_length);
+  void MaybeAddResourceData(const String& request_id,
+                            scoped_refptr<const SharedBuffer>);
 
   Deque<String> request_ids_deque_;
 
-  typedef HashMap<String, String> ReusedRequestIds;
-  ReusedRequestIds reused_xhr_replay_data_request_ids_;
   typedef HeapHashMap<String, Member<ResourceData>> ResourceDataMap;
   ResourceDataMap request_id_to_resource_data_map_;
   size_t content_size_;

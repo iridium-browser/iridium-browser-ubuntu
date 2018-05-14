@@ -25,6 +25,7 @@
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/extension_toolbar_menu_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -198,7 +199,7 @@ void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
   gfx::NativeWindow window = browser->window()->GetNativeWindow();
   views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
   views::FocusManager* focus_manager = widget->GetFocusManager();
-  CommandUpdater* updater = browser->command_controller()->command_updater();
+  CommandUpdater* updater = browser->command_controller();
 
   // Send focus to the toolbar as if the user pressed Alt+Shift+T.
   updater->ExecuteCommand(IDC_FOCUS_TOOLBAR);
@@ -256,14 +257,12 @@ void ToolbarViewTest::RunToolbarCycleFocusTest(Browser* browser) {
     EXPECT_EQ(ids[i], reverse_ids[count - 2 - i]);
 }
 
-// The test is flaky on Win (http://crbug.com/152938) and crashes on CrOS under
-// AddressSanitizer (http://crbug.com/154657).
-IN_PROC_BROWSER_TEST_F(ToolbarViewTest, DISABLED_ToolbarCycleFocus) {
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocus) {
   RunToolbarCycleFocusTest(browser());
 }
 
 IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocusWithBookmarkBar) {
-  CommandUpdater* updater = browser()->command_controller()->command_updater();
+  CommandUpdater* updater = browser()->command_controller();
   updater->ExecuteCommand(IDC_SHOW_BOOKMARK_BAR);
 
   BookmarkModel* model =
@@ -276,4 +275,23 @@ IN_PROC_BROWSER_TEST_F(ToolbarViewTest, ToolbarCycleFocusWithBookmarkBar) {
   // window with the same profile.
   Browser* second_browser = CreateBrowser(browser()->profile());
   RunToolbarCycleFocusTest(second_browser);
+}
+
+IN_PROC_BROWSER_TEST_F(ToolbarViewTest, BackButtonUpdate) {
+  ToolbarView* toolbar =
+      BrowserView::GetBrowserViewForBrowser(browser())->toolbar();
+  EXPECT_FALSE(toolbar->back_button()->enabled());
+
+  // Navigate to title1.html. Back button should be enabled.
+  GURL url = ui_test_utils::GetTestUrl(
+      base::FilePath(), base::FilePath(FILE_PATH_LITERAL("title1.html")));
+  ui_test_utils::NavigateToURL(browser(), url);
+  EXPECT_TRUE(toolbar->back_button()->enabled());
+
+  // Delete old navigations. Back button will be disabled.
+  auto& controller =
+      browser()->tab_strip_model()->GetActiveWebContents()->GetController();
+  controller.DeleteNavigationEntries(base::BindRepeating(
+      [&](const content::NavigationEntry& entry) { return true; }));
+  EXPECT_FALSE(toolbar->back_button()->enabled());
 }

@@ -13,7 +13,7 @@
 class PrefRegistrySimple;
 
 class ChromeTracingDelegate : public content::TracingDelegate,
-                              public chrome::BrowserListObserver {
+                              public BrowserListObserver {
  public:
   ChromeTracingDelegate();
   ~ChromeTracingDelegate() override;
@@ -31,12 +31,14 @@ class ChromeTracingDelegate : public content::TracingDelegate,
       const content::BackgroundTracingConfig& config,
       bool requires_anonymized_data) override;
 
-  void GenerateMetadataDict(base::DictionaryValue* metadata_dict) override;
+  bool IsProfileLoaded() override;
+
+  std::unique_ptr<base::DictionaryValue> GenerateMetadataDict() override;
 
   content::MetadataFilterPredicate GetMetadataFilterPredicate() override;
 
  private:
-  // chrome::BrowserListObserver implementation.
+  // BrowserListObserver implementation.
   void OnBrowserAdded(Browser* browser) override;
 
   bool incognito_launched_;

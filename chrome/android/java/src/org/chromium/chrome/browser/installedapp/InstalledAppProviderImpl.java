@@ -144,7 +144,8 @@ public class InstalledAppProviderImpl implements InstalledAppProvider {
             if (app.platform.equals(RELATED_APP_PLATFORM_ANDROID) && app.id != null) {
                 if (isInstantAppId(app.id)) {
                     if (mInstantAppsHandler.isInstantAppAvailable(frameUrl.toString(),
-                                INSTANT_APP_HOLDBACK_ID_STRING.equals(app.id))) {
+                                INSTANT_APP_HOLDBACK_ID_STRING.equals(app.id),
+                                true /* includeUserPrefersBrowser */)) {
                         installedApps.add(app);
                     }
                     continue;
@@ -194,8 +195,10 @@ public class InstalledAppProviderImpl implements InstalledAppProvider {
      * @param frameUrl Returns false if the Android package does not declare association with the
      *                origin of this URL. Can be null.
      */
-    private boolean isAppInstalledAndAssociatedWithOrigin(
+    public static boolean isAppInstalledAndAssociatedWithOrigin(
             String packageName, URI frameUrl, PackageManager pm) {
+        // TODO(yusufo): Move this to a better/shared location before crbug.com/749876 is closed.
+
         ThreadUtils.assertOnBackgroundThread();
 
         if (frameUrl == null) return false;
@@ -247,6 +250,10 @@ public class InstalledAppProviderImpl implements InstalledAppProvider {
         // Get the <meta-data> from this app's manifest.
         // Throws NameNotFoundException if the application is not installed.
         ApplicationInfo appInfo = pm.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
+        if (appInfo == null || appInfo.metaData == null) {
+            return new JSONArray();
+        }
+
         int identifier = appInfo.metaData.getInt(ASSET_STATEMENTS_KEY);
         if (identifier == 0) {
             return new JSONArray();

@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Фарьорска клавиатура</translation>
 <translation id="1646136617204068573">Унгарска клавиатура</translation>
 <translation id="164729547906544836">Тамилска клавиатура (itrans)</translation>
+<translation id="164969095109328410">Устройство с Chrome</translation>
 <translation id="1829129547161959350">Пингвин</translation>
 <translation id="184633654410729720">Тайландска клавиатура (кедмани)</translation>
 <translation id="1921986354447415460">Турска клавиатура от тип „F“</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Маймуна</translation>
 <translation id="4711094779914110278">турски</translation>
 <translation id="4725511304875193254">Корги</translation>
+<translation id="4737050008115666127">Приземяване</translation>
 <translation id="4747271164117300400">македонски</translation>
 <translation id="4749157430980974800">Грузинска клавиатура</translation>
 <translation id="4755240240651974342">Финландска клавиатура</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Футболна топка</translation>
 <translation id="497244430928947428">Малаялам клавиатура (фонетична)</translation>
 <translation id="498902553138568924">Червена пеперуда</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Пица</translation>
 <translation id="5098629044894065541">иврит</translation>
 <translation id="5123433949759960244">Баскетболна топка</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Непалска клавиатура (InScript)</translation>
 <translation id="5469868506864199649">италиански</translation>
 <translation id="5500122897333236901">исландски</translation>
+<translation id="5508696409934741614">Точки</translation>
 <translation id="5533555070048896610">Транслитерация (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Американска (Дворак) клавиатура</translation>
 <translation id="5640179856859982418">Швейцарска клавиатура</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Хангъл, 3 набора (окончателна)</translation>
 <translation id="5838825566232597749">Американска (Уъркман) международна клавиатура</translation>
 <translation id="5892290200158927959">Френска (BÉPO) клавиатура</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">Латиноамериканска клавиатура</translation>
+<translation id="6012987430370760224">Клавиатура на марати (фонетична)</translation>
 <translation id="60357267506638014">Чешка (QWERTY) клавиатура</translation>
 <translation id="6054173164583630569">Френска клавиатура</translation>
 <translation id="6111770213269631447">Транслитерация (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Колело</translation>
 <translation id="6878261347041253038">Деванагари клавиатура (фонетична)</translation>
 <translation id="6885780034956018177">Охлюв</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">Американска (Уъркман) клавиатура</translation>
 <translation id="6935521024859866267">Наопаки</translation>
 <translation id="6937152069980083337">Google Редактор с метод за въвеждане на японски (за американска клавиатура)</translation>
 <translation id="6939777852457331078">Американска (Уъркман) клавиатура</translation>
 <translation id="6970230597523682626">български</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Транслитерация (salam → ሰላም)</translation>
 <translation id="7172053773111046550">Естонска клавиатура</translation>
 <translation id="719009910964971313">Американска (Дворак) клавиатура за програмисти</translation>
 <translation id="7222624196722476520">Българска фонетична клавиатура</translation>
 <translation id="7348749398828259943">Американска (Уъркман) международна клавиатура</translation>
 <translation id="7389722738210761877">Тайландска клавиатура (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Клавиатура на хинди (фонетична)</translation>
 <translation id="7417453074306512035">Етиопска клавиатура</translation>
 <translation id="7419631653042041064">Каталонска клавиатура</translation>
 <translation id="7434823369735508263">Британска (Дворак) клавиатура</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">Канадска (английски) клавиатура</translation>
 <translation id="751507702149411736">белоруски</translation>
 <translation id="7547811415869834682">нидерландски</translation>
+<translation id="7603724359189955920">Решетки</translation>
 <translation id="770015031906360009">гръцки</translation>
 <translation id="7706319470528945664">Португалска клавиатура</translation>
 <translation id="7774365994322694683">Птица</translation>
 <translation id="7825423931463735974">Тамилска клавиатура (Tamil99)</translation>
 <translation id="7853966320808728790">френски (BÉPO)</translation>
 <translation id="7896906914454843592">Американска разширена клавиатура</translation>
+<translation id="7898607018410277265">Клавиатура на гуджарати (нова, фонетична)</translation>
 <translation id="7917972308273378936">Литовска клавиатура</translation>
 <translation id="7943385054491506837">Американска (Коулмак) клавиатура</translation>
 <translation id="7969525169268594403">словенски</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">Американска (Коулмак) клавиатура</translation>
 <translation id="8437209419043462667">Американска клавиатура</translation>
 <translation id="8467473010914675605">Метод за въвеждане на корейски</translation>
+<translation id="8477649328507734757">Кръгове</translation>
 <translation id="8521441079177373948">Британска клавиатура</translation>
 <translation id="8551494947769799688">латвийски</translation>
 <translation id="8561206103590473338">Слон</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Бирманска клавиатура (Myansan)</translation>
 <translation id="9153744823707037316">Табличен метод на въвеждане</translation>
 <translation id="9206487995878691001">Метод на въвеждане за цандзие</translation>
+<translation id="9219908252191632183">Лунен пейзаж</translation>
 </translationbundle>

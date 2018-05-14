@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_coding/neteq/tools/neteq_test.h"
+#include "modules/audio_coding/neteq/tools/neteq_test.h"
 
 #include <iostream>
 
-#include "webrtc/api/audio_codecs/builtin_audio_decoder_factory.h"
+#include "api/audio_codecs/builtin_audio_decoder_factory.h"
 
 namespace webrtc {
 namespace test {
@@ -109,6 +109,10 @@ NetEqNetworkStatistics NetEqTest::SimulationStats() {
   NetEqNetworkStatistics stats;
   RTC_CHECK_EQ(neteq_->NetworkStatistics(&stats), 0);
   return stats;
+}
+
+NetEqLifetimeStatistics NetEqTest::LifetimeStats() const {
+  return neteq_->GetLifetimeStatistics();
 }
 
 void NetEqTest::RegisterDecoders(const DecoderMap& codecs) {

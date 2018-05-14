@@ -4,7 +4,10 @@
 
 #include "chrome/browser/ui/views/passwords/account_chooser_dialog_view.h"
 
+#include <memory>
+
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
@@ -14,16 +17,20 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_features.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/border.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/styled_label.h"
 #include "ui/views/layout/box_layout.h"
-#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_provider.h"
 #include "ui/views/style/typography.h"
 #include "ui/views/widget/widget.h"
@@ -32,30 +39,6 @@ namespace {
 
 // Maximum height of the credential list. The unit is one row's height.
 constexpr double kMaxHeightAccounts = 3.5;
-
-// An identifier for views::ColumnSet.
-enum ColumnSetType {
-  SINGLE_VIEW_COLUMN_SET,
-  SINGLE_VIEW_COLUMN_SET_NO_PADDING,
-};
-
-// Construct a |type| ColumnSet and add it to |layout|.
-void BuildColumnSet(ColumnSetType type, views::GridLayout* layout) {
-  views::ColumnSet* column_set = layout->AddColumnSet(type);
-  const gfx::Insets horizontal_insets =
-      type == SINGLE_VIEW_COLUMN_SET
-          ? ChromeLayoutProvider::Get()->GetInsetsMetric(
-                views::INSETS_DIALOG_TITLE)
-          : gfx::Insets();
-  column_set->AddPaddingColumn(0, horizontal_insets.left());
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::FILL,
-                        1,
-                        views::GridLayout::USE_PREF,
-                        0,
-                        0);
-  column_set->AddPaddingColumn(0, horizontal_insets.right());
-}
 
 views::StyledLabel::RangeStyleInfo GetLinkStyle() {
   auto result = views::StyledLabel::RangeStyleInfo::CreateForLink();
@@ -73,26 +56,25 @@ Profile* GetProfileFromWebContents(content::WebContents* web_contents) {
 views::ScrollView* CreateCredentialsView(
     const PasswordDialogController::FormsVector& forms,
     views::ButtonListener* button_listener,
-    net::URLRequestContextGetter* request_context) {
+    network::mojom::URLLoaderFactory* loader_factory) {
   views::View* list_view = new views::View;
   list_view->SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical));
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   int item_height = 0;
   for (const auto& form : forms) {
     std::pair<base::string16, base::string16> titles =
         GetCredentialLabelsForAccountChooser(*form);
-    CredentialsItemView* credential_view = new CredentialsItemView(
-        button_listener, titles.first, titles.second, kButtonHoverColor,
-        form.get(), request_context);
+    CredentialsItemView* credential_view =
+        new CredentialsItemView(button_listener, titles.first, titles.second,
+                                kButtonHoverColor, form.get(), loader_factory);
     credential_view->SetLowerLabelColor(kAutoSigninTextColor);
     ChromeLayoutProvider* layout_provider = ChromeLayoutProvider::Get();
-    gfx::Insets dialog_insets =
-        layout_provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS);
+    gfx::Insets insets =
+        layout_provider->GetInsetsMetric(views::INSETS_DIALOG_SUBSECTION);
     const int vertical_padding = layout_provider->GetDistanceMetric(
         views::DISTANCE_RELATED_CONTROL_VERTICAL);
-    credential_view->SetBorder(
-        views::CreateEmptyBorder(vertical_padding, dialog_insets.left(),
-                                 vertical_padding, dialog_insets.right()));
+    credential_view->SetBorder(views::CreateEmptyBorder(
+        vertical_padding, insets.left(), vertical_padding, insets.right()));
     item_height = std::max(item_height, credential_view->GetPreferredHeight());
     list_view->AddChildView(credential_view);
   }
@@ -112,6 +94,9 @@ AccountChooserDialogView::AccountChooserDialogView(
       show_signin_button_(false) {
   DCHECK(controller);
   DCHECK(web_contents);
+  set_close_on_deactivate(false);
+  set_arrow(views::BubbleBorder::NONE);
+  set_margins(gfx::Insets(margins().top(), 0, margins().bottom(), 0));
   chrome::RecordDialogCreation(chrome::DialogIdentifier::ACCOUNT_CHOOSER);
 }
 
@@ -124,8 +109,10 @@ void AccountChooserDialogView::ShowAccountChooser() {
 }
 
 void AccountChooserDialogView::ControllerGone() {
-  controller_ = nullptr;
+  // During Widget::Close() phase some accessibility event may occur. Thus,
+  // |controller_| should be kept around.
   GetWidget()->Close();
+  controller_ = nullptr;
 }
 
 ui::ModalType AccountChooserDialogView::GetModalType() const {
@@ -136,13 +123,19 @@ base::string16 AccountChooserDialogView::GetWindowTitle() const {
   return controller_->GetAccoutChooserTitle().first;
 }
 
-bool AccountChooserDialogView::ShouldShowWindowTitle() const {
-  // The title may contain a hyperlink.
+bool AccountChooserDialogView::ShouldShowCloseButton() const {
   return false;
 }
 
-bool AccountChooserDialogView::ShouldShowCloseButton() const {
-  return false;
+void AccountChooserDialogView::AddedToWidget() {
+  std::pair<base::string16, gfx::Range> title_content =
+      controller_->GetAccoutChooserTitle();
+  std::unique_ptr<views::StyledLabel> title_label =
+      std::make_unique<views::StyledLabel>(title_content.first, this);
+  title_label->SetTextContext(views::style::CONTEXT_DIALOG_TITLE);
+  if (!title_content.second.is_empty())
+    title_label->AddStyleRange(title_content.second, GetLinkStyle());
+  GetBubbleFrameView()->SetTitleView(std::move(title_label));
 }
 
 void AccountChooserDialogView::WindowClosing() {
@@ -179,53 +172,37 @@ base::string16 AccountChooserDialogView::GetDialogButtonLabel(
 void AccountChooserDialogView::StyledLabelLinkClicked(views::StyledLabel* label,
                                                       const gfx::Range& range,
                                                       int event_flags) {
-  controller_->OnSmartLockLinkClicked();
+  // On Mac the button click event may be dispatched after the dialog was
+  // hidden. Thus, the controller can be NULL.
+  if (controller_)
+    controller_->OnSmartLockLinkClicked();
 }
 
 void AccountChooserDialogView::ButtonPressed(views::Button* sender,
                                              const ui::Event& event) {
   CredentialsItemView* view = static_cast<CredentialsItemView*>(sender);
-  controller_->OnChooseCredentials(
-      *view->form(),
-      password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
+  // On Mac the button click event may be dispatched after the dialog was
+  // hidden. Thus, the controller can be NULL.
+  if (controller_) {
+    controller_->OnChooseCredentials(
+        *view->form(),
+        password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD);
+  }
 }
 
 void AccountChooserDialogView::InitWindow() {
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
-  BuildColumnSet(SINGLE_VIEW_COLUMN_SET, layout);
-
-  // Create the title.
-  std::pair<base::string16, gfx::Range> title_content =
-      controller_->GetAccoutChooserTitle();
-  views::StyledLabel* title_label =
-      new views::StyledLabel(title_content.first, this);
-  title_label->SetBaseFontList(views::style::GetFont(
-      views::style::CONTEXT_DIALOG_TITLE, views::style::STYLE_PRIMARY));
-  if (!title_content.second.is_empty())
-    title_label->AddStyleRange(title_content.second, GetLinkStyle());
-
-  // Show the title.
-  ChromeLayoutProvider* layout_provider = ChromeLayoutProvider::Get();
-  layout->StartRowWithPadding(
-      0, SINGLE_VIEW_COLUMN_SET, 0,
-      layout_provider->GetInsetsMetric(views::INSETS_DIALOG_TITLE).top());
-  layout->AddView(title_label);
-
-  // Show credentials.
-  gfx::Insets dialog_insets =
-      layout_provider->GetInsetsMetric(views::INSETS_DIALOG_CONTENTS);
-  BuildColumnSet(SINGLE_VIEW_COLUMN_SET_NO_PADDING, layout);
-  layout->StartRowWithPadding(0, SINGLE_VIEW_COLUMN_SET_NO_PADDING, 0,
-                              dialog_insets.top());
-  layout->AddView(CreateCredentialsView(
-      controller_->GetLocalForms(),
-      this,
-      GetProfileFromWebContents(web_contents_)->GetRequestContext()));
-  layout->AddPaddingRow(0, dialog_insets.bottom());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
+  AddChildView(
+      CreateCredentialsView(controller_->GetLocalForms(), this,
+                            content::BrowserContext::GetDefaultStoragePartition(
+                                GetProfileFromWebContents(web_contents_))
+                                ->GetURLLoaderFactoryForBrowserProcess()
+                                .get()));
 }
 
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 AccountChooserPrompt* CreateAccountChooserPromptView(
     PasswordDialogController* controller, content::WebContents* web_contents) {
   return new AccountChooserDialogView(controller, web_contents);
 }
+#endif

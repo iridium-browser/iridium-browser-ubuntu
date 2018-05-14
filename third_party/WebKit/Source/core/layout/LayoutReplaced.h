@@ -27,6 +27,8 @@
 
 namespace blink {
 
+struct IntrinsicSizingInfo;
+
 // LayoutReplaced is the base class for a replaced element as defined by CSS:
 //
 // "An element whose content is outside the scope of the CSS formatting model,
@@ -72,7 +74,8 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   LayoutRect LocalSelectionRect() const final;
 
   bool HasObjectFit() const {
-    return Style()->GetObjectFit() != ComputedStyle::InitialObjectFit();
+    return Style()->GetObjectFit() !=
+           ComputedStyleInitialValues::InitialObjectFit();
   }
 
   void Paint(const PaintInfo&, const LayoutPoint&) const override;
@@ -82,17 +85,9 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
     return false;
   }
 
-  struct IntrinsicSizingInfo {
-    STACK_ALLOCATED();
-    IntrinsicSizingInfo() : has_width(true), has_height(true) {}
-
-    FloatSize size;
-    FloatSize aspect_ratio;
-    bool has_width;
-    bool has_height;
-
-    void Transpose();
-  };
+  // This function is public only so we can call it when computing
+  // intrinsic size in LayoutNG.
+  virtual void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
 
  protected:
   void WillBeDestroyed() override;
@@ -100,7 +95,6 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   void UpdateLayout() override;
 
   LayoutSize IntrinsicSize() const final { return intrinsic_size_; }
-  virtual void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
 
   void ComputePositionedLogicalWidth(
       LogicalExtentComputedValues&) const override;
@@ -110,19 +104,24 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   void ComputeIntrinsicLogicalWidths(LayoutUnit& min_logical_width,
                                      LayoutUnit& max_logical_width) const final;
 
+  // Extract intrinsic sizing info from a potential nested layout
+  // context. Returns true if successful, and populates the IntrinsicSizingInfo
+  // structure if so.
+  virtual bool GetNestedIntrinsicSizingInfo(IntrinsicSizingInfo&) const {
+    return false;
+  }
+
   // This function calculates the placement of the replaced contents. It takes
   // intrinsic size of the replaced contents, stretch to fit CSS content box
   // according to object-fit.
   LayoutRect ComputeObjectFit(
       const LayoutSize* overridden_intrinsic_size = nullptr) const;
 
-  virtual LayoutUnit IntrinsicContentLogicalHeight() const {
+  LayoutUnit IntrinsicContentLogicalHeight() const override {
     return IntrinsicLogicalHeight();
   }
 
   virtual LayoutUnit MinimumReplacedHeight() const { return LayoutUnit(); }
-
-  void SetSelectionState(SelectionState) final;
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
@@ -137,9 +136,7 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
   // CSS properties like 'zoom' or 'image-orientation'.
   virtual void IntrinsicSizeChanged();
 
-  virtual LayoutReplaced* EmbeddedReplacedContent() const { return nullptr; }
-
-  PositionWithAffinity PositionForPoint(const LayoutPoint&) override;
+  PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
 
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectLayoutReplaced || LayoutBox::IsOfType(type);
@@ -148,16 +145,15 @@ class CORE_EXPORT LayoutReplaced : public LayoutBox {
  private:
   void ComputePreferredLogicalWidths() final;
 
-  bool CanBeSelectionLeaf() const override { return true; }
-
-  void ComputeIntrinsicSizingInfoForReplacedContent(LayoutReplaced*,
-                                                    IntrinsicSizingInfo&) const;
+  void ComputeIntrinsicSizingInfoForReplacedContent(IntrinsicSizingInfo&) const;
   FloatSize ConstrainIntrinsicSizeToMinMax(const IntrinsicSizingInfo&) const;
 
   LayoutUnit ComputeConstrainedLogicalWidth(ShouldComputePreferred) const;
 
   mutable LayoutSize intrinsic_size_;
 };
+
+DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutReplaced, IsLayoutReplaced());
 
 }  // namespace blink
 

@@ -70,7 +70,7 @@ TextEvent::TextEvent(AbstractView* view,
               true,
               true,
               ComposedMode::kComposed,
-              TimeTicks::Now(),
+              CurrentTimeTicks(),
               view,
               0,
               nullptr),
@@ -89,7 +89,7 @@ TextEvent::TextEvent(AbstractView* view,
               true,
               true,
               ComposedMode::kComposed,
-              TimeTicks::Now(),
+              CurrentTimeTicks(),
               view,
               0,
               nullptr),
@@ -99,7 +99,7 @@ TextEvent::TextEvent(AbstractView* view,
       should_smart_replace_(should_smart_replace),
       should_match_style_(should_match_style) {}
 
-TextEvent::~TextEvent() {}
+TextEvent::~TextEvent() = default;
 
 void TextEvent::initTextEvent(const AtomicString& type,
                               bool can_bubble,
@@ -118,7 +118,7 @@ const AtomicString& TextEvent::InterfaceName() const {
   return EventNames::TextEvent;
 }
 
-DEFINE_TRACE(TextEvent) {
+void TextEvent::Trace(blink::Visitor* visitor) {
   visitor->Trace(pasting_fragment_);
   UIEvent::Trace(visitor);
 }

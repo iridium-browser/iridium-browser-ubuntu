@@ -47,12 +47,6 @@ BluetoothRemoteGattServiceAndroid::~BluetoothRemoteGattServiceAndroid() {
       AttachCurrentThread(), j_service_);
 }
 
-// static
-bool BluetoothRemoteGattServiceAndroid::RegisterJNI(JNIEnv* env) {
-  return RegisterNativesImpl(
-      env);  // Generated in ChromeBluetoothRemoteGattService_jni.h
-}
-
 base::android::ScopedJavaLocalRef<jobject>
 BluetoothRemoteGattServiceAndroid::GetJavaObject() {
   return base::android::ScopedJavaLocalRef<jobject>(j_service_);
@@ -154,6 +148,19 @@ BluetoothRemoteGattServiceAndroid::GetCharacteristic(
   if (iter == characteristics_.end())
     return nullptr;
   return iter->second.get();
+}
+
+bool BluetoothRemoteGattServiceAndroid::IsDiscoveryComplete() const {
+  // Not used on Android, because Android sends an event when service discovery
+  // is complete for the entire device.
+  NOTIMPLEMENTED();
+  return true;
+}
+
+void BluetoothRemoteGattServiceAndroid::SetDiscoveryComplete(bool complete) {
+  // Not used on Android, because Android sends an event when service discovery
+  // is complete for the entire device.
+  NOTIMPLEMENTED();
 }
 
 void BluetoothRemoteGattServiceAndroid::CreateGattRemoteCharacteristic(

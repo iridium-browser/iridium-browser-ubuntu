@@ -11,12 +11,13 @@
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
-#include "cc/base/filter_operation.h"
-#include "cc/base/filter_operations.h"
-#include "cc/base/render_surface_filters.h"
+#include "cc/paint/filter_operation.h"
+#include "cc/paint/filter_operations.h"
 #include "cc/paint/paint_canvas.h"
 #include "cc/paint/paint_flags.h"
+#include "cc/paint/paint_image_builder.h"
 #include "cc/paint/paint_record.h"
+#include "cc/paint/render_surface_filters.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/pixel_test_utils.h"
@@ -27,8 +28,6 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/effects/SkColorMatrixFilter.h"
-#include "third_party/skia/include/effects/SkImageSource.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
@@ -72,18 +71,17 @@ TEST(DisplayItemListTest, SingleUnpairedRange) {
   PaintFlags red_paint;
   red_paint.setColor(SK_ColorRED);
   unsigned char pixels[4 * 100 * 100] = {0};
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   gfx::Point offset(8, 9);
 
-  PaintOpBuffer* buffer = list->StartPaint();
-  buffer->push<SaveOp>();
-  buffer->push<TranslateOp>(static_cast<float>(offset.x()),
-                            static_cast<float>(offset.y()));
-  buffer->push<DrawRectOp>(SkRect::MakeLTRB(0.f, 0.f, 60.f, 60.f), red_paint);
-  buffer->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f),
-                           blue_flags);
-  buffer->push<RestoreOp>();
+  list->StartPaint();
+  list->push<SaveOp>();
+  list->push<TranslateOp>(static_cast<float>(offset.x()),
+                          static_cast<float>(offset.y()));
+  list->push<DrawRectOp>(SkRect::MakeLTRB(0.f, 0.f, 60.f, 60.f), red_paint);
+  list->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f), blue_flags);
+  list->push<RestoreOp>();
   list->EndPaintOfUnpaired(gfx::Rect(offset, layer_rect.size()));
   list->Finalize();
   DrawDisplayList(pixels, layer_rect, list);
@@ -109,7 +107,7 @@ TEST(DisplayItemListTest, SingleUnpairedRange) {
 
 TEST(DisplayItemListTest, EmptyUnpairedRangeDoesNotAddVisualRect) {
   gfx::Rect layer_rect(100, 100);
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   {
     list->StartPaint();
@@ -119,9 +117,9 @@ TEST(DisplayItemListTest, EmptyUnpairedRangeDoesNotAddVisualRect) {
   EXPECT_EQ(0u, list->op_count());
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<RestoreOp>();
     list->EndPaintOfUnpaired(layer_rect);
   }
   // Two ops.
@@ -135,46 +133,46 @@ TEST(DisplayItemListTest, ClipPairedRange) {
   PaintFlags red_paint;
   red_paint.setColor(SK_ColorRED);
   unsigned char pixels[4 * 100 * 100] = {0};
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   gfx::Point first_offset(8, 9);
   gfx::Rect first_recording_rect(first_offset, layer_rect.size());
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(static_cast<float>(first_offset.x()),
-                              static_cast<float>(first_offset.y()));
-    buffer->push<DrawRectOp>(SkRect::MakeWH(60, 60), red_paint);
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(static_cast<float>(first_offset.x()),
+                            static_cast<float>(first_offset.y()));
+    list->push<DrawRectOp>(SkRect::MakeWH(60, 60), red_paint);
+    list->push<RestoreOp>();
     list->EndPaintOfUnpaired(first_recording_rect);
   }
 
   gfx::Rect clip_rect(60, 60, 10, 10);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_rect), SkClipOp::kIntersect,
-                             true);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_rect), SkClipOp::kIntersect,
+                           true);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Point second_offset(2, 3);
   gfx::Rect second_recording_rect(second_offset, layer_rect.size());
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(static_cast<float>(second_offset.x()),
-                              static_cast<float>(second_offset.y()));
-    buffer->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f),
-                             blue_flags);
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(static_cast<float>(second_offset.x()),
+                            static_cast<float>(second_offset.y()));
+    list->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f),
+                           blue_flags);
+    list->push<RestoreOp>();
     list->EndPaintOfUnpaired(second_recording_rect);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -209,45 +207,45 @@ TEST(DisplayItemListTest, TransformPairedRange) {
   PaintFlags red_paint;
   red_paint.setColor(SK_ColorRED);
   unsigned char pixels[4 * 100 * 100] = {0};
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   gfx::Point first_offset(8, 9);
   gfx::Rect first_recording_rect(first_offset, layer_rect.size());
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(static_cast<float>(first_offset.x()),
-                              static_cast<float>(first_offset.y()));
-    buffer->push<DrawRectOp>(SkRect::MakeWH(60, 60), red_paint);
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(static_cast<float>(first_offset.x()),
+                            static_cast<float>(first_offset.y()));
+    list->push<DrawRectOp>(SkRect::MakeWH(60, 60), red_paint);
+    list->push<RestoreOp>();
     list->EndPaintOfUnpaired(first_recording_rect);
   }
 
   gfx::Transform transform;
   transform.Rotate(45.0);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(static_cast<SkMatrix>(transform.matrix()));
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(static_cast<SkMatrix>(transform.matrix()));
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Point second_offset(2, 3);
   gfx::Rect second_recording_rect(second_offset, layer_rect.size());
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(static_cast<float>(second_offset.x()),
-                              static_cast<float>(second_offset.y()));
-    buffer->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f),
-                             blue_flags);
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(static_cast<float>(second_offset.x()),
+                            static_cast<float>(second_offset.y()));
+    list->push<DrawRectOp>(SkRect::MakeLTRB(50.f, 50.f, 75.f, 75.f),
+                           blue_flags);
+    list->push<RestoreOp>();
     list->EndPaintOfUnpaired(second_recording_rect);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   list->Finalize();
@@ -278,12 +276,16 @@ TEST(DisplayItemListTest, FilterPairedRange) {
   gfx::Rect layer_rect(100, 100);
   FilterOperations filters;
   unsigned char pixels[4 * 100 * 100] = {0};
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   sk_sp<SkSurface> source_surface = SkSurface::MakeRasterN32Premul(50, 50);
   SkCanvas* source_canvas = source_surface->getCanvas();
   source_canvas->clear(SkColorSetRGB(128, 128, 128));
-  sk_sp<SkImage> source_image = source_surface->makeImageSnapshot();
+  PaintImage source_image = PaintImageBuilder::WithDefault()
+                                .set_id(PaintImage::GetNextId())
+                                .set_image(source_surface->makeImageSnapshot(),
+                                           PaintImage::GetNextContentId())
+                                .TakePaintImage();
 
   // For most SkImageFilters, the |dst| bounds computed by computeFastBounds are
   // dependent on the provided |src| bounds. This means, for example, that
@@ -296,14 +298,16 @@ TEST(DisplayItemListTest, FilterPairedRange) {
   // incorrect clipping of filter output. To test for this, we include an
   // SkImageSource filter in |filters|. Here, |src| is |filter_bounds|, defined
   // below.
-  sk_sp<SkImageFilter> image_filter = SkImageSource::Make(source_image);
+  SkRect rect = SkRect::MakeWH(source_image.width(), source_image.height());
+  sk_sp<PaintFilter> image_filter = sk_make_sp<ImagePaintFilter>(
+      source_image, rect, rect, kHigh_SkFilterQuality);
   filters.Append(FilterOperation::CreateReferenceFilter(image_filter));
   filters.Append(FilterOperation::CreateBrightnessFilter(0.5f));
   gfx::RectF filter_bounds(10.f, 10.f, 50.f, 50.f);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(filter_bounds.x(), filter_bounds.y());
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(filter_bounds.x(), filter_bounds.y());
 
     PaintFlags flags;
     flags.setImageFilter(
@@ -311,20 +315,20 @@ TEST(DisplayItemListTest, FilterPairedRange) {
 
     SkRect layer_bounds = gfx::RectFToSkRect(filter_bounds);
     layer_bounds.offset(-filter_bounds.x(), -filter_bounds.y());
-    buffer->push<SaveLayerOp>(&layer_bounds, &flags);
-    buffer->push<TranslateOp>(-filter_bounds.x(), -filter_bounds.y());
+    list->push<SaveLayerOp>(&layer_bounds, &flags);
+    list->push<TranslateOp>(-filter_bounds.x(), -filter_bounds.y());
 
     list->EndPaintOfPairedBegin();
   }
 
   // Include a rect drawing so that filter is actually applied to something.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
+    list->StartPaint();
 
     PaintFlags red_flags;
     red_flags.setColor(SK_ColorRED);
 
-    buffer->push<DrawRectOp>(
+    list->push<DrawRectOp>(
         SkRect::MakeLTRB(filter_bounds.x(), filter_bounds.y(),
                          filter_bounds.right(), filter_bounds.bottom()),
         red_flags);
@@ -333,9 +337,9 @@ TEST(DisplayItemListTest, FilterPairedRange) {
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();  // For SaveLayerOp.
-    buffer->push<RestoreOp>();  // For SaveOp.
+    list->StartPaint();
+    list->push<RestoreOp>();  // For SaveLayerOp.
+    list->push<RestoreOp>();  // For SaveOp.
     list->EndPaintOfPairedEnd();
   }
 
@@ -360,16 +364,16 @@ TEST(DisplayItemListTest, BytesUsed) {
   const int kNumPaintOps = 1000;
   size_t memory_usage;
 
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   gfx::Rect layer_rect(100, 100);
   PaintFlags blue_flags;
   blue_flags.setColor(SK_ColorBLUE);
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
+    list->StartPaint();
     for (int i = 0; i < kNumPaintOps; i++)
-      buffer->push<DrawRectOp>(SkRect::MakeWH(1, 1), blue_flags);
+      list->push<DrawRectOp>(SkRect::MakeWH(1, 1), blue_flags);
     list->EndPaintOfUnpaired(layer_rect);
   }
 
@@ -379,7 +383,7 @@ TEST(DisplayItemListTest, BytesUsed) {
 }
 
 TEST(DisplayItemListTest, AsValueWithNoOps) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
   list->Finalize();
 
   // Pass |true| to ask for PaintOps even though there are none.
@@ -440,36 +444,36 @@ TEST(DisplayItemListTest, AsValueWithNoOps) {
 
 TEST(DisplayItemListTest, AsValueWithOps) {
   gfx::Rect layer_rect = gfx::Rect(1, 2, 8, 9);
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
   gfx::Transform transform;
   transform.Translate(6.f, 7.f);
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(static_cast<SkMatrix>(transform.matrix()));
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(static_cast<SkMatrix>(transform.matrix()));
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Point offset(2, 3);
   gfx::Rect bounds(offset, layer_rect.size());
   {
-    PaintOpBuffer* buffer = list->StartPaint();
+    list->StartPaint();
 
     PaintFlags red_paint;
     red_paint.setColor(SK_ColorRED);
 
-    buffer->push<SaveOp>();
-    buffer->push<TranslateOp>(static_cast<float>(offset.x()),
-                              static_cast<float>(offset.y()));
-    buffer->push<DrawRectOp>(SkRect::MakeWH(4, 4), red_paint);
+    list->push<SaveOp>();
+    list->push<TranslateOp>(static_cast<float>(offset.x()),
+                            static_cast<float>(offset.y()));
+    list->push<DrawRectOp>(SkRect::MakeWH(4, 4), red_paint);
 
     list->EndPaintOfUnpaired(bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   list->Finalize();
@@ -541,48 +545,48 @@ TEST(DisplayItemListTest, AsValueWithOps) {
 }
 
 TEST(DisplayItemListTest, SizeEmpty) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
   EXPECT_EQ(0u, list->op_count());
 }
 
 TEST(DisplayItemListTest, SizeOne) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
   gfx::Rect drawing_bounds(5, 6, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_bounds);
   }
   EXPECT_EQ(1u, list->op_count());
 }
 
 TEST(DisplayItemListTest, SizeMultiple) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   EXPECT_EQ(3u, list->op_count());
 }
 
 TEST(DisplayItemListTest, AppendVisualRectSimple) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // One drawing: D.
 
   gfx::Rect drawing_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_bounds);
   }
 
@@ -591,21 +595,21 @@ TEST(DisplayItemListTest, AppendVisualRectSimple) {
 }
 
 TEST(DisplayItemListTest, AppendVisualRectEmptyBlock) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // One block: B1, E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -616,33 +620,33 @@ TEST(DisplayItemListTest, AppendVisualRectEmptyBlock) {
 }
 
 TEST(DisplayItemListTest, AppendVisualRectEmptyBlockContainingEmptyBlock) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // Two nested blocks: B1, B2, E2, E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
+    list->StartPaint();
+    list->push<SaveOp>();
     list->EndPaintOfPairedBegin();
   }
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -655,29 +659,29 @@ TEST(DisplayItemListTest, AppendVisualRectEmptyBlockContainingEmptyBlock) {
 }
 
 TEST(DisplayItemListTest, AppendVisualRectBlockContainingDrawing) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // One block with one drawing: B1, Da, E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_bounds(5, 6, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -689,29 +693,29 @@ TEST(DisplayItemListTest, AppendVisualRectBlockContainingDrawing) {
 }
 
 TEST(DisplayItemListTest, AppendVisualRectBlockContainingEscapedDrawing) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // One block with one drawing: B1, Da (escapes), E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_bounds(1, 2, 3, 4);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -724,37 +728,37 @@ TEST(DisplayItemListTest, AppendVisualRectBlockContainingEscapedDrawing) {
 
 TEST(DisplayItemListTest,
      AppendVisualRectDrawingFollowedByBlockContainingEscapedDrawing) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // One drawing followed by one block with one drawing: Da, B1, Db (escapes),
   // E1.
 
   gfx::Rect drawing_a_bounds(1, 2, 3, 4);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_a_bounds);
   }
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_b_bounds(13, 14, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_b_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -767,50 +771,50 @@ TEST(DisplayItemListTest,
 }
 
 TEST(DisplayItemListTest, AppendVisualRectTwoBlocksTwoDrawings) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // Multiple nested blocks with drawings amidst: B1, Da, B2, Db, E2, E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_a_bounds(5, 6, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_a_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(SkMatrix::I());
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(SkMatrix::I());
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_b_bounds(7, 8, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_b_bounds);
   }
 
   // End transform.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   // End clip.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -829,51 +833,51 @@ TEST(DisplayItemListTest, AppendVisualRectTwoBlocksTwoDrawings) {
 
 TEST(DisplayItemListTest,
      AppendVisualRectTwoBlocksTwoDrawingsInnerDrawingEscaped) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // Multiple nested blocks with drawings amidst: B1, Da, B2, Db (escapes), E2,
   // E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_a_bounds(5, 6, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_a_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(SkMatrix::I());
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(SkMatrix::I());
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_b_bounds(1, 2, 3, 4);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_b_bounds);
   }
 
   // End transform.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   // End clip.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -892,51 +896,51 @@ TEST(DisplayItemListTest,
 
 TEST(DisplayItemListTest,
      AppendVisualRectTwoBlocksTwoDrawingsOuterDrawingEscaped) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // Multiple nested blocks with drawings amidst: B1, Da (escapes), B2, Db, E2,
   // E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_a_bounds(1, 2, 3, 4);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_a_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(SkMatrix::I());
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(SkMatrix::I());
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_b_bounds(7, 8, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_b_bounds);
   }
 
   // End transform.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   // End clip.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -955,51 +959,51 @@ TEST(DisplayItemListTest,
 
 TEST(DisplayItemListTest,
      AppendVisualRectTwoBlocksTwoDrawingsBothDrawingsEscaped) {
-  auto list = make_scoped_refptr(new DisplayItemList);
+  auto list = base::MakeRefCounted<DisplayItemList>();
 
   // Multiple nested blocks with drawings amidst:
   // B1, Da (escapes to the right), B2, Db (escapes to the left), E2, E1.
 
   gfx::Rect clip_bounds(5, 6, 7, 8);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds),
-                             SkClipOp::kIntersect, false);
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ClipRectOp>(gfx::RectToSkRect(clip_bounds), SkClipOp::kIntersect,
+                           false);
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_a_bounds(13, 14, 1, 1);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_a_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_a_bounds);
   }
 
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<SaveOp>();
-    buffer->push<ConcatOp>(SkMatrix::I());
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<ConcatOp>(SkMatrix::I());
     list->EndPaintOfPairedBegin();
   }
 
   gfx::Rect drawing_b_bounds(1, 2, 3, 4);
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
+    list->StartPaint();
+    list->push<DrawRectOp>(gfx::RectToSkRect(drawing_b_bounds), PaintFlags());
     list->EndPaintOfUnpaired(drawing_b_bounds);
   }
 
   // End transform.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
   // End clip.
   {
-    PaintOpBuffer* buffer = list->StartPaint();
-    buffer->push<RestoreOp>();
+    list->StartPaint();
+    list->push<RestoreOp>();
     list->EndPaintOfPairedEnd();
   }
 
@@ -1014,6 +1018,37 @@ TEST(DisplayItemListTest,
   EXPECT_RECT_EQ(drawing_b_bounds, list->VisualRectForTesting(5));
   EXPECT_RECT_EQ(drawing_b_bounds, list->VisualRectForTesting(6));
   EXPECT_RECT_EQ(merged_drawing_bounds, list->VisualRectForTesting(7));
+}
+
+TEST(DisplayItemListTest, VisualRectForPairsEnclosingEmptyPainting) {
+  auto list = base::MakeRefCounted<DisplayItemList>();
+
+  // Some paired operations have drawing effect (e.g. some image filters),
+  // so we should not ignore visual rect for empty painting.
+
+  gfx::Rect visual_rect(11, 22, 33, 44);
+  {
+    list->StartPaint();
+    list->push<SaveOp>();
+    list->push<TranslateOp>(10.f, 20.f);
+    list->EndPaintOfPairedBegin();
+  }
+
+  {
+    list->StartPaint();
+    list->EndPaintOfUnpaired(visual_rect);
+  }
+
+  {
+    list->StartPaint();
+    list->push<RestoreOp>();
+    list->EndPaintOfPairedEnd();
+  }
+
+  EXPECT_EQ(3u, list->op_count());
+  EXPECT_RECT_EQ(visual_rect, list->VisualRectForTesting(0));
+  EXPECT_RECT_EQ(visual_rect, list->VisualRectForTesting(1));
+  EXPECT_RECT_EQ(visual_rect, list->VisualRectForTesting(2));
 }
 
 }  // namespace cc

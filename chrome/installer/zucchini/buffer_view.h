@@ -5,15 +5,50 @@
 #ifndef CHROME_INSTALLER_ZUCCHINI_BUFFER_VIEW_H_
 #define CHROME_INSTALLER_ZUCCHINI_BUFFER_VIEW_H_
 
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <algorithm>
 #include <type_traits>
 
 #include "base/logging.h"
+#include "chrome/installer/zucchini/algorithm.h"
 
 namespace zucchini {
+
+// Describes a region within a buffer, with starting offset and size.
+struct BufferRegion {
+  // The region data are stored as |offset| and |size|, but often it is useful
+  // to represent it as an interval [lo(), hi()) = [offset, offset + size).
+  size_t lo() const { return offset; }
+  size_t hi() const { return offset + size; }
+
+  // Returns whether the Region fits in |[0, container_size)|. Special case:
+  // a size-0 region starting at |container_size| does not fit.
+  bool FitsIn(size_t container_size) const {
+    return offset < container_size && container_size - offset >= size;
+  }
+
+  // Returns |v| clipped to the inclusive range |[lo(), hi()]|.
+  size_t InclusiveClamp(size_t v) const {
+    return zucchini::InclusiveClamp(v, lo(), hi());
+  }
+  friend bool operator==(const BufferRegion& a, const BufferRegion& b) {
+    return a.offset == b.offset && a.size == b.size;
+  }
+  friend bool operator!=(const BufferRegion& a, const BufferRegion& b) {
+    return !(a == b);
+  }
+
+  // Region data use size_t to match BufferViewBase::size_type, to make it
+  // convenient to index into buffer view.
+  size_t offset;
+  size_t size;
+};
+
 namespace internal {
 
+// TODO(huangs): Rename to BasicBufferView.
 // BufferViewBase should not be used directly; it is an implementation used for
 // both BufferView and MutableBufferView.
 template <class T>
@@ -42,6 +77,14 @@ class BufferViewBase {
     DCHECK_GE(last_, first_);
   }
 
+  template <class U>
+  BufferViewBase(const BufferViewBase<U>& that)
+      : first_(that.begin()), last_(that.end()) {}
+
+  template <class U>
+  BufferViewBase(BufferViewBase<U>&& that)
+      : first_(that.begin()), last_(that.end()) {}
+
   BufferViewBase(const BufferViewBase&) = default;
   BufferViewBase& operator=(const BufferViewBase&) = default;
 
@@ -52,19 +95,57 @@ class BufferViewBase {
   const_iterator cbegin() const { return begin(); }
   const_iterator cend() const { return end(); }
 
+  // Capacity
+
+  bool empty() const { return first_ == last_; }
+  size_type size() const { return last_ - first_; }
+
+  // Returns whether the buffer is large enough to cover |region|.
+  bool covers(const BufferRegion& region) const {
+    return region.FitsIn(size());
+  }
+
   // Element access
 
   // Returns the raw value at specified location |pos|.
   // If |pos| is not within the range of the buffer, the process is terminated.
   reference operator[](size_type pos) const {
-    CHECK_LT(first_ + pos, last_);
+    CHECK_LT(pos, size());
     return first_[pos];
   }
 
-  // Capacity
+  // Returns a sub-buffer described by |region|.
+  BufferViewBase operator[](BufferRegion region) const {
+    DCHECK_LE(region.offset, size());
+    DCHECK_LE(region.size, size() - region.offset);
+    return {begin() + region.offset, region.size};
+  }
 
-  bool empty() const { return first_ == last_; }
-  size_type size() const { return last_ - first_; }
+  template <class U>
+  const U& read(size_type pos) const {
+    CHECK_LE(pos + sizeof(U), size());
+    return *reinterpret_cast<const U*>(begin() + pos);
+  }
+
+  template <class U>
+  void write(size_type pos, const U& value) {
+    CHECK_LE(pos + sizeof(U), size());
+    *reinterpret_cast<U*>(begin() + pos) = value;
+  }
+
+  template <class U>
+  bool can_access(size_type pos) const {
+    return pos < size() && size() - pos >= sizeof(U);
+  }
+
+  // Returns a BufferRegion describing the full view, with offset = 0. If the
+  // BufferViewBase is derived from another, this does *not* return the
+  // original region used for its definition (hence "local").
+  BufferRegion local_region() const { return BufferRegion{0, size()}; }
+
+  bool equals(BufferViewBase other) const {
+    return size() == other.size() && std::equal(begin(), end(), other.begin());
+  }
 
   // Modifiers
 
@@ -77,6 +158,29 @@ class BufferViewBase {
   void remove_prefix(size_type n) {
     DCHECK_LE(n, size());
     first_ += n;
+  }
+
+  // Moves the start of the view to |it|, which is in range [begin(), end()).
+  void seek(iterator it) {
+    DCHECK_GE(it, begin());
+    DCHECK_LE(it, end());
+    first_ = it;
+  }
+
+  // Given |origin| that contains |*this|, minimally increase |first_| (possibly
+  // by 0) so that |first_ <= last_|, and |first_ - origin.first_| is a multiple
+  // of |alignment|. On success, updates |first_| and returns true. Otherwise
+  // returns false.
+  bool AlignOn(BufferViewBase origin, size_type alignment) {
+    DCHECK_GT(alignment, 0U);
+    DCHECK_LE(origin.first_, first_);
+    DCHECK_GE(origin.last_, last_);
+    size_type aligned_size =
+        ceil(static_cast<size_type>(first_ - origin.first_), alignment);
+    if (aligned_size > static_cast<size_type>(last_ - origin.first_))
+      return false;
+    first_ = origin.first_ + aligned_size;
+    return true;
   }
 
  private:

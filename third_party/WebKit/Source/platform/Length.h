@@ -64,7 +64,7 @@ class PLATFORM_EXPORT Length {
  public:
   Length() : int_value_(0), quirk_(false), type_(kAuto), is_float_(false) {}
 
-  Length(LengthType t)
+  explicit Length(LengthType t)
       : int_value_(0), quirk_(false), type_(t), is_float_(false) {
     DCHECK_NE(t, kCalculated);
   }
@@ -89,7 +89,7 @@ class PLATFORM_EXPORT Length {
     float_value_ = static_cast<float>(v);
   }
 
-  explicit Length(PassRefPtr<CalculationValue>);
+  explicit Length(scoped_refptr<CalculationValue>);
 
   Length(const Length& length) {
     memcpy(this, &length, sizeof(Length));

@@ -114,10 +114,12 @@ chrome.system.display.DisplayLayout;
  *   id: string,
  *   name: string,
  *   mirroringSourceId: string,
+ *   mirroringDestinationIds: !Array<string>,
  *   isPrimary: boolean,
  *   isInternal: boolean,
  *   isEnabled: boolean,
  *   isUnified: boolean,
+ *   isTabletMode: (boolean|undefined),
  *   dpiX: number,
  *   dpiY: number,
  *   rotation: number,
@@ -125,7 +127,9 @@ chrome.system.display.DisplayLayout;
  *   overscan: !chrome.system.display.Insets,
  *   workArea: !chrome.system.display.Bounds,
  *   modes: !Array<!chrome.system.display.DisplayMode>,
- *   hasTouchSupport: boolean
+ *   hasTouchSupport: boolean,
+ *   hasAccelerometerSupport: boolean,
+ *   displayZoomFactor: number
  * }}
  * @see https://developer.chrome.com/extensions/system.display#type-DisplayUnitInfo
  */
@@ -140,7 +144,8 @@ chrome.system.display.DisplayUnitInfo;
  *   rotation: (number|undefined),
  *   boundsOriginX: (number|undefined),
  *   boundsOriginY: (number|undefined),
- *   displayMode: (!chrome.system.display.DisplayMode|undefined)
+ *   displayMode: (!chrome.system.display.DisplayMode|undefined),
+ *   displayZoomFactor: (number|undefined)
  * }}
  * @see https://developer.chrome.com/extensions/system.display#type-DisplayProperties
  */
@@ -153,6 +158,26 @@ chrome.system.display.DisplayProperties;
  * @see https://developer.chrome.com/extensions/system.display#type-GetInfoFlags
  */
 chrome.system.display.GetInfoFlags;
+
+/**
+ * @enum {string}
+ * @see https://developer.chrome.com/extensions/system.display#type-MirrorMode
+ */
+chrome.system.display.MirrorMode = {
+  OFF: 'off',
+  NORMAL: 'normal',
+  MIXED: 'mixed',
+};
+
+/**
+ * @typedef {{
+ *   mode: !chrome.system.display.MirrorMode,
+ *   mirroringSourceId: (string|undefined),
+ *   mirroringDestinationIds: (!Array<string>|undefined),
+ * }}
+ * @see https://developer.chrome.com/extensions/system.display#type-MirrorModeInfo
+ */
+chrome.system.display.MirrorModeInfo;
 
 /**
  * Requests the information for all attached display devices.
@@ -295,6 +320,20 @@ chrome.system.display.completeCustomTouchCalibration = function(pairs, bounds) {
  * @see https://developer.chrome.com/extensions/system.display#method-clearTouchCalibration
  */
 chrome.system.display.clearTouchCalibration = function(id) {};
+
+/**
+ * Sets the display mode to the specified mirror mode. Each call resets the
+ * state from previous calls. Calling setDisplayProperties() will fail for
+ * the mirroring destination displays.
+ * NOTE: This is only available to Chrome OS Kiosk apps and Web UI.
+ * @param {!chrome.system.display.MirrorModeInfo} info The information of the
+ *     mirror mode that should be applied to the display mode.
+ * @param {function():void=} callback Empty function called when the function
+ *     finishes. To find out     whether the function succeeded,
+ *     $(ref:runtime.lastError) should be     queried.
+ * @see https://developer.chrome.com/extensions/system.display#method-setMirrorMode
+ */
+chrome.system.display.setMirrorMode = function(info, callback) {};
 
 /**
  * Fired when anything changes to the display configuration.

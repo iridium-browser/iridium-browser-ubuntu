@@ -5,6 +5,7 @@
 #include "remoting/protocol/audio_decode_scheduler.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
@@ -25,7 +26,7 @@ const uint8_t kDummyAudioData = 0x8B;
 class FakeAudioConsumer : public AudioStub {
  public:
   FakeAudioConsumer(): weak_factory_(this) {}
-  ~FakeAudioConsumer() override {}
+  ~FakeAudioConsumer() override = default;
 
   base::WeakPtr<FakeAudioConsumer> GetWeakPtr(){
     return weak_factory_.GetWeakPtr();
@@ -48,7 +49,7 @@ class FakeAudioConsumer : public AudioStub {
 
 class AudioDecodeSchedulerTest : public ::testing::Test {
  public:
-  AudioDecodeSchedulerTest() {}
+  AudioDecodeSchedulerTest() = default;
 
   void SetUp() override;
   void TearDown() override;
@@ -115,7 +116,7 @@ TEST_F(AudioDecodeSchedulerTest, Shutdown) {
   audio_scheduler->Initialize(*session_config_);
 
   audio_scheduler->ProcessAudioPacket(CreatePacket44100Hz_(1000),
-                                      base::Bind(&base::DoNothing));
+                                      base::DoNothing());
 
   audio_scheduler.reset();
   audio_consumer.reset();

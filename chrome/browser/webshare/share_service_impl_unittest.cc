@@ -66,8 +66,8 @@ class ShareServiceTestImpl : public ShareServiceImpl {
     std::unique_ptr<base::DictionaryValue> origin_dict(
         new base::DictionaryValue);
 
-    origin_dict->SetStringWithoutPathExpansion(kUrlTemplateKey, url_template);
-    origin_dict->SetStringWithoutPathExpansion(kNameKey, name);
+    origin_dict->SetKey(kUrlTemplateKey, base::Value(url_template));
+    origin_dict->SetKey(kNameKey, base::Value(name));
 
     share_target_dict->SetWithoutPathExpansion(manifest_url,
                                                std::move(origin_dict));
@@ -149,7 +149,7 @@ class ShareServiceImplUnittest : public ChromeRenderViewHostTestHarness {
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
-    share_service_helper_ = base::MakeUnique<ShareServiceTestImpl>(
+    share_service_helper_ = std::make_unique<ShareServiceTestImpl>(
         mojo::MakeRequest(&share_service_));
 
     share_service_helper_->SetEngagementForTarget(
@@ -186,6 +186,9 @@ TEST_F(ShareServiceImplUnittest, ShareCallbackParams) {
                                                 kUrlTemplate);
   share_service_helper()->AddShareTargetToPrefs(kManifestUrlHigh, kTargetName,
                                                 kUrlTemplate);
+  // Expect this invalid URL to be ignored (not crash);
+  // https://crbug.com/762388.
+  share_service_helper()->AddShareTargetToPrefs("", kTargetName, kUrlTemplate);
 
   base::Callback<void(blink::mojom::ShareError)> callback =
       base::Bind(&DidShare, blink::mojom::ShareError::OK);

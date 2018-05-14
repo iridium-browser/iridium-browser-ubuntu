@@ -6,11 +6,13 @@
 // https://w3c.github.io/ambient-light/#ambient-light-sensor-interface
 
 [
-    RuntimeEnabled=Sensor,
+    RuntimeEnabled=SensorExtraClasses,
     Constructor(optional SensorOptions sensorOptions),
     ConstructorCallWith=ExecutionContext,
+    SecureContext,
     RaisesException=Constructor,
-    MeasureAs=AmbientLightSensorConstructor
+    MeasureAs=AmbientLightSensorConstructor,
+    Exposed=Window
 ] interface AmbientLightSensor : Sensor {
     readonly attribute unrestricted double? illuminance;
 };

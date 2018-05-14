@@ -26,7 +26,8 @@ namespace headless {
 class HeadlessWindowTreeHost : public aura::WindowTreeHost,
                                public ui::PlatformEventDispatcher {
  public:
-  explicit HeadlessWindowTreeHost(const gfx::Rect& bounds);
+  HeadlessWindowTreeHost(const gfx::Rect& bounds,
+                         bool external_begin_frames_enabled);
   ~HeadlessWindowTreeHost() override;
 
   void SetParentWindow(gfx::NativeWindow window);
@@ -45,6 +46,9 @@ class HeadlessWindowTreeHost : public aura::WindowTreeHost,
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
+  bool CaptureSystemKeyEventsImpl(
+      base::Optional<base::flat_set<int>> keys) override;
+  void ReleaseSystemKeyEventCapture() override;
   void SetCursorNative(gfx::NativeCursor cursor_type) override;
   void MoveCursorToScreenLocationInPixels(const gfx::Point& location) override;
   void OnCursorVisibilityChangedNative(bool show) override;

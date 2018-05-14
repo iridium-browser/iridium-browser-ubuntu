@@ -36,8 +36,7 @@ GainHandler::GainHandler(AudioNode& node,
                          float sample_rate,
                          AudioParamHandler& gain)
     : AudioHandler(kNodeTypeGain, node, sample_rate),
-      last_gain_(1.0),
-      gain_(gain),
+      gain_(&gain),
       sample_accurate_gain_values_(
           AudioUtilities::kRenderQuantumFrames)  // FIXME: can probably
                                                  // share temp buffer
@@ -49,10 +48,10 @@ GainHandler::GainHandler(AudioNode& node,
   Initialize();
 }
 
-PassRefPtr<GainHandler> GainHandler::Create(AudioNode& node,
-                                            float sample_rate,
-                                            AudioParamHandler& gain) {
-  return AdoptRef(new GainHandler(node, sample_rate, gain));
+scoped_refptr<GainHandler> GainHandler::Create(AudioNode& node,
+                                               float sample_rate,
+                                               AudioParamHandler& gain) {
+  return base::AdoptRef(new GainHandler(node, sample_rate, gain));
 }
 
 void GainHandler::Process(size_t frames_to_process) {
@@ -77,20 +76,14 @@ void GainHandler::Process(size_t frames_to_process) {
         gain_->CalculateSampleAccurateValues(gain_values, frames_to_process);
         output_bus->CopyWithSampleAccurateGainValuesFrom(
             *input_bus, gain_values, frames_to_process);
-        // Update m_lastGain so if the timeline ever ends, we get
-        // consistent data for the smoothing below.  (Without this,
-        // m_lastGain was the last value before the timeline started
-        // procesing.
-        last_gain_ = gain_values[frames_to_process - 1];
       }
     } else {
-      // Apply the gain with de-zippering into the output bus.
-      if (!last_gain_ && last_gain_ == gain_->Value()) {
-        // If the gain is 0 (and we've converged on dezippering), just zero the
-        // bus and set the silence hint.
+      // Apply the gain.
+      if (gain_->Value() == 0) {
+        // If the gain is 0, just zero the bus and set the silence hint.
         output_bus->Zero();
       } else {
-        output_bus->CopyWithGainFrom(*input_bus, &last_gain_, gain_->Value());
+        output_bus->CopyWithGainFrom(*input_bus, gain_->Value());
       }
     }
   }
@@ -142,7 +135,7 @@ void GainHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
 
 GainNode::GainNode(BaseAudioContext& context)
     : AudioNode(context),
-      gain_(AudioParam::Create(context, kParamTypeGainGain, 1.0)) {
+      gain_(AudioParam::Create(context, kParamTypeGainGain, "Gain.gain", 1.0)) {
   SetHandler(
       GainHandler::Create(*this, context.sampleRate(), gain_->Handler()));
 }
@@ -178,7 +171,7 @@ AudioParam* GainNode::gain() const {
   return gain_;
 }
 
-DEFINE_TRACE(GainNode) {
+void GainNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(gain_);
   AudioNode::Trace(visitor);
 }

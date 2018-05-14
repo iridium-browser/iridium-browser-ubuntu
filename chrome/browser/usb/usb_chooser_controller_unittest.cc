@@ -14,7 +14,7 @@
 #include "device/base/mock_device_client.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
-#include "device/usb/public/interfaces/device_manager.mojom.h"
+#include "device/usb/public/mojom/device_manager.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -54,7 +54,7 @@ class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
         content::WebContentsTester::For(web_contents());
     web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
     usb_chooser_controller_.reset(new UsbChooserController(
-        main_rfh(), std::move(device_filters), callback));
+        main_rfh(), std::move(device_filters), std::move(callback)));
     mock_usb_chooser_view_.reset(new MockUsbChooserView());
     usb_chooser_controller_->set_view(mock_usb_chooser_view_.get());
   }
@@ -154,4 +154,14 @@ TEST_F(UsbChooserControllerTest, AddAndRemoveDeviceWithSameName) {
   device_client_.usb_service()->RemoveDevice(device_a_1);
   EXPECT_EQ(base::ASCIIToUTF16("b"), usb_chooser_controller_->GetOption(0));
   EXPECT_EQ(base::ASCIIToUTF16("a"), usb_chooser_controller_->GetOption(1));
+}
+
+TEST_F(UsbChooserControllerTest, UnknownDeviceName) {
+  uint16_t vendor_id = 123;
+  uint16_t product_id = 456;
+  scoped_refptr<device::MockUsbDevice> device =
+      new device::MockUsbDevice(vendor_id, product_id);
+  device_client_.usb_service()->AddDevice(device);
+  EXPECT_EQ(base::ASCIIToUTF16("Unknown device [007b:01c8]"),
+            usb_chooser_controller_->GetOption(0));
 }

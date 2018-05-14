@@ -12,6 +12,7 @@
 #include "src/objects/map-inl.h"
 #include "src/objects/regexp-match-info.h"
 #include "src/objects/shared-function-info-inl.h"
+#include "src/objects/template-objects.h"
 
 namespace v8 {
 namespace internal {
@@ -23,10 +24,10 @@ ScriptContextTable* ScriptContextTable::cast(Object* context) {
   return reinterpret_cast<ScriptContextTable*>(context);
 }
 
-int ScriptContextTable::used() const { return Smi::ToInt(get(kUsedSlot)); }
+int ScriptContextTable::used() const { return Smi::ToInt(get(kUsedSlotIndex)); }
 
 void ScriptContextTable::set_used(int used) {
-  set(kUsedSlot, Smi::FromInt(used));
+  set(kUsedSlotIndex, Smi::FromInt(used));
 }
 
 
@@ -35,7 +36,7 @@ Handle<Context> ScriptContextTable::GetContext(Handle<ScriptContextTable> table,
                                                int i) {
   DCHECK(i < table->used());
   return Handle<Context>::cast(
-      FixedArray::get(*table, i + kFirstContextSlot, table->GetIsolate()));
+      FixedArray::get(*table, i + kFirstContextSlotIndex, table->GetIsolate()));
 }
 
 
@@ -67,8 +68,7 @@ void Context::set_extension(HeapObject* object) {
   set(EXTENSION_INDEX, object);
 }
 
-
-Context* Context::native_context() {
+Context* Context::native_context() const {
   Object* result = get(NATIVE_CONTEXT_INDEX);
   DCHECK(IsBootstrappingOrNativeContext(this->GetIsolate(), result));
   return reinterpret_cast<Context*>(result);
@@ -79,72 +79,66 @@ void Context::set_native_context(Context* context) {
   set(NATIVE_CONTEXT_INDEX, context);
 }
 
-
-bool Context::IsNativeContext() {
+bool Context::IsNativeContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->native_context_map();
 }
 
-
-bool Context::IsFunctionContext() {
+bool Context::IsFunctionContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->function_context_map();
 }
 
-
-bool Context::IsCatchContext() {
+bool Context::IsCatchContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->catch_context_map();
 }
 
-
-bool Context::IsWithContext() {
+bool Context::IsWithContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->with_context_map();
 }
 
-bool Context::IsDebugEvaluateContext() {
+bool Context::IsDebugEvaluateContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->debug_evaluate_context_map();
 }
 
-bool Context::IsBlockContext() {
+bool Context::IsBlockContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->block_context_map();
 }
 
-
-bool Context::IsModuleContext() {
+bool Context::IsModuleContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->module_context_map();
 }
 
-bool Context::IsEvalContext() {
+bool Context::IsEvalContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->eval_context_map();
 }
 
-bool Context::IsScriptContext() {
+bool Context::IsScriptContext() const {
   Map* map = this->map();
   return map == map->GetHeap()->script_context_map();
 }
 
-bool Context::HasSameSecurityTokenAs(Context* that) {
+bool Context::HasSameSecurityTokenAs(Context* that) const {
   return this->native_context()->security_token() ==
          that->native_context()->security_token();
 }
-
 
 #define NATIVE_CONTEXT_FIELD_ACCESSORS(index, type, name) \
   void Context::set_##name(type* value) {                 \
     DCHECK(IsNativeContext());                            \
     set(index, value);                                    \
   }                                                       \
-  bool Context::is_##name(type* value) {                  \
+  bool Context::is_##name(type* value) const {            \
     DCHECK(IsNativeContext());                            \
     return type::cast(get(index)) == value;               \
   }                                                       \
-  type* Context::name() {                                 \
+  type* Context::name() const {                           \
     DCHECK(IsNativeContext());                            \
     return type::cast(get(index));                        \
   }
@@ -158,7 +152,8 @@ NATIVE_CONTEXT_FIELDS(NATIVE_CONTEXT_FIELD_ACCESSORS)
   CHECK_FOLLOWS2(v3, v4)
 
 int Context::FunctionMapIndex(LanguageMode language_mode, FunctionKind kind,
-                              bool has_shared_name, bool needs_home_object) {
+                              bool has_prototype_slot, bool has_shared_name,
+                              bool needs_home_object) {
   if (IsClassConstructor(kind)) {
     // Like the strict function map, but with no 'name' accessor. 'name'
     // needs to be the last property and it is added during instantiation,
@@ -217,6 +212,15 @@ int Context::FunctionMapIndex(LanguageMode language_mode, FunctionKind kind,
 
 #undef CHECK_FOLLOWS2
 #undef CHECK_FOLLOWS4
+
+Map* Context::GetInitialJSArrayMap(ElementsKind kind) const {
+  DCHECK(IsNativeContext());
+  if (!IsFastElementsKind(kind)) return nullptr;
+  DisallowHeapAllocation no_gc;
+  Object* const initial_js_array_map = get(Context::ArrayMapIndex(kind));
+  DCHECK(!initial_js_array_map->IsUndefined(GetIsolate()));
+  return Map::cast(initial_js_array_map);
+}
 
 }  // namespace internal
 }  // namespace v8

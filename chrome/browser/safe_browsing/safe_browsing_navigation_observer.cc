@@ -4,7 +4,8 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_navigation_observer.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -17,7 +18,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_request_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/resource_type.h"
 
@@ -39,7 +39,7 @@ NavigationEvent::NavigationEvent()
       target_tab_id(-1),
       frame_id(-1),
       last_updated(base::Time::Now()),
-      is_user_initiated(false),
+      navigation_initiation(ReferrerChainEntry::UNDEFINED),
       has_committed(false) {}
 
 NavigationEvent::NavigationEvent(NavigationEvent&& nav_event)
@@ -51,7 +51,7 @@ NavigationEvent::NavigationEvent(NavigationEvent&& nav_event)
       target_tab_id(std::move(nav_event.target_tab_id)),
       frame_id(nav_event.frame_id),
       last_updated(nav_event.last_updated),
-      is_user_initiated(nav_event.is_user_initiated),
+      navigation_initiation(nav_event.navigation_initiation),
       has_committed(nav_event.has_committed) {}
 
 NavigationEvent& NavigationEvent::operator=(NavigationEvent&& nav_event) {
@@ -62,7 +62,7 @@ NavigationEvent& NavigationEvent::operator=(NavigationEvent&& nav_event) {
   target_tab_id = nav_event.target_tab_id;
   frame_id = nav_event.frame_id;
   last_updated = nav_event.last_updated;
-  is_user_initiated = nav_event.is_user_initiated;
+  navigation_initiation = nav_event.navigation_initiation;
   has_committed = nav_event.has_committed;
   server_redirect_urls = std::move(nav_event.server_redirect_urls);
   return *this;
@@ -82,7 +82,7 @@ void SafeBrowsingNavigationObserver::MaybeCreateForWebContents(
           Profile::FromBrowserContext(web_contents->GetBrowserContext()))) {
     web_contents->SetUserData(
         kWebContentsUserDataKey,
-        base::MakeUnique<SafeBrowsingNavigationObserver>(
+        std::make_unique<SafeBrowsingNavigationObserver>(
             web_contents, g_browser_process->safe_browsing_service()
                               ->navigation_observer_manager()));
   }
@@ -115,26 +115,32 @@ SafeBrowsingNavigationObserver::~SafeBrowsingNavigationObserver() {}
 void SafeBrowsingNavigationObserver::DidStartNavigation(
     content::NavigationHandle* navigation_handle) {
   std::unique_ptr<NavigationEvent> nav_event =
-      base::MakeUnique<NavigationEvent>();
+      std::make_unique<NavigationEvent>();
   auto it = navigation_handle_map_.find(navigation_handle);
   // It is possible to see multiple DidStartNavigation(..) with the same
   // navigation_handle (e.g. cross-process transfer). If that's the case,
-  // we need to copy the is_user_initiated field.
-  if (it != navigation_handle_map_.end()) {
-    nav_event->is_user_initiated = it->second->is_user_initiated;
+  // we need to copy the navigation_initiation field.
+  if (it != navigation_handle_map_.end() &&
+      it->second->navigation_initiation != ReferrerChainEntry::UNDEFINED) {
+    nav_event->navigation_initiation = it->second->navigation_initiation;
   } else {
     // If this is the first time we see this navigation_handle, create a new
     // NavigationEvent, and decide if it is triggered by user.
-    if ((has_user_gesture_ &&
-         !SafeBrowsingNavigationObserverManager::IsUserGestureExpired(
-             last_user_gesture_timestamp_)) ||
-        !navigation_handle->IsRendererInitiated()) {
-      nav_event->is_user_initiated = true;
-      if (has_user_gesture_) {
-        manager_->OnUserGestureConsumed(web_contents(),
-                                        last_user_gesture_timestamp_);
-        has_user_gesture_ = false;
-      }
+    if (!navigation_handle->IsRendererInitiated()) {
+      nav_event->navigation_initiation = ReferrerChainEntry::BROWSER_INITIATED;
+    } else if (has_user_gesture_ &&
+               !SafeBrowsingNavigationObserverManager::IsUserGestureExpired(
+                   last_user_gesture_timestamp_)) {
+      nav_event->navigation_initiation =
+          ReferrerChainEntry::RENDERER_INITIATED_WITH_USER_GESTURE;
+    } else {
+      nav_event->navigation_initiation =
+          ReferrerChainEntry::RENDERER_INITIATED_WITHOUT_USER_GESTURE;
+    }
+    if (has_user_gesture_) {
+      manager_->OnUserGestureConsumed(web_contents(),
+                                      last_user_gesture_timestamp_);
+      has_user_gesture_ = false;
     }
   }
 
@@ -160,12 +166,11 @@ void SafeBrowsingNavigationObserver::DidStartNavigation(
   // committed navigation.
   if (navigation_handle->IsRendererInitiated() && current_frame_host &&
       current_frame_host->GetLastCommittedURL().is_valid()) {
-    nav_event->source_url =
-        SafeBrowsingNavigationObserverManager::ClearEmptyRef(
-            current_frame_host->GetLastCommittedURL());
+    nav_event->source_url = SafeBrowsingNavigationObserverManager::ClearURLRef(
+        current_frame_host->GetLastCommittedURL());
   }
   nav_event->original_request_url =
-      SafeBrowsingNavigationObserverManager::ClearEmptyRef(
+      SafeBrowsingNavigationObserverManager::ClearURLRef(
           navigation_handle->GetURL());
 
   nav_event->source_tab_id =
@@ -175,7 +180,7 @@ void SafeBrowsingNavigationObserver::DidStartNavigation(
     nav_event->source_main_frame_url = nav_event->source_url;
   } else {
     nav_event->source_main_frame_url =
-        SafeBrowsingNavigationObserverManager::ClearEmptyRef(
+        SafeBrowsingNavigationObserverManager::ClearURLRef(
             navigation_handle->GetWebContents()->GetLastCommittedURL());
   }
   navigation_handle_map_[navigation_handle] = std::move(nav_event);
@@ -190,13 +195,20 @@ void SafeBrowsingNavigationObserver::DidRedirectNavigation(
   }
   NavigationEvent* nav_event = navigation_handle_map_[navigation_handle].get();
   nav_event->server_redirect_urls.push_back(
-      SafeBrowsingNavigationObserverManager::ClearEmptyRef(
+      SafeBrowsingNavigationObserverManager::ClearURLRef(
           navigation_handle->GetURL()));
   nav_event->last_updated = base::Time::Now();
 }
 
 void SafeBrowsingNavigationObserver::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
+  if ((navigation_handle->HasCommitted() || navigation_handle->IsDownload()) &&
+      !navigation_handle->GetSocketAddress().IsEmpty()) {
+    manager_->RecordHostToIpMapping(
+        navigation_handle->GetURL().host(),
+        navigation_handle->GetSocketAddress().host());
+  }
+
   if (navigation_handle_map_.find(navigation_handle) ==
       navigation_handle_map_.end()) {
     return;
@@ -217,21 +229,6 @@ void SafeBrowsingNavigationObserver::DidFinishNavigation(
   manager_->RecordNavigationEvent(
       std::move(navigation_handle_map_[navigation_handle]));
   navigation_handle_map_.erase(navigation_handle);
-}
-
-void SafeBrowsingNavigationObserver::DidGetResourceResponseStart(
-    const content::ResourceRequestDetails& details) {
-  // We only care about main frame and sub frame.
-  if (details.resource_type != content::RESOURCE_TYPE_MAIN_FRAME &&
-      details.resource_type != content::RESOURCE_TYPE_SUB_FRAME) {
-    return;
-  }
-  if (!details.url.is_valid() || details.socket_address.IsEmpty())
-    return;
-  if (!details.url.host().empty()) {
-    manager_->RecordHostToIpMapping(details.url.host(),
-                                    details.socket_address.host());
-  }
 }
 
 void SafeBrowsingNavigationObserver::DidGetUserInteraction(
@@ -270,7 +267,8 @@ void SafeBrowsingNavigationObserver::OnContentSettingChanged(
     std::string resource_identifier) {
   // For all the content settings that can be changed via page info UI, we
   // assume there is a user gesture associated with the content setting change.
-  if (primary_pattern.Matches(web_contents()->GetLastCommittedURL()) &&
+  if (web_contents() &&
+      primary_pattern.Matches(web_contents()->GetLastCommittedURL()) &&
       PageInfoUI::ContentSettingsTypeInPageInfo(content_type)) {
     DidGetUserInteraction(blink::WebInputEvent::kMouseDown);
   }

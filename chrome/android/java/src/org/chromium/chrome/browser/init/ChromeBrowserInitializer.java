@@ -18,7 +18,6 @@ import com.squareup.leakcanary.LeakCanary;
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
-import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ContextUtils;
@@ -44,7 +43,6 @@ import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelImpl;
 import org.chromium.chrome.browser.webapps.ActivityAssigner;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
 import org.chromium.components.crash.browser.CrashDumpManager;
-import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.browser.SpeechRecognition;
@@ -53,7 +51,6 @@ import org.chromium.policy.CombinedPolicyProvider;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.io.File;
-import java.util.LinkedList;
 import java.util.Locale;
 
 /**
@@ -214,8 +211,6 @@ public class ChromeBrowserInitializer {
         // Ensure critical files are available, so they aren't blocked on the file-system
         // behind long-running accesses in next phase.
         // Don't do any large file access here!
-        ContentApplication.initCommandLine(mApplication);
-        waitForDebuggerIfNeeded();
         ChromeStrictMode.configureStrictMode();
         ChromeWebApkHost.init();
 
@@ -251,45 +246,24 @@ public class ChromeBrowserInitializer {
     public void handlePostNativeStartup(final boolean isAsync, final BrowserParts delegate)
             throws ProcessInitException {
         assert ThreadUtils.runningOnUiThread() : "Tried to start the browser on the wrong thread";
-
-        final LinkedList<Runnable> initQueue = new LinkedList<>();
-
-        abstract class NativeInitTask implements Runnable {
+        final ChainedTasks tasks = new ChainedTasks();
+        tasks.add(new Runnable() {
             @Override
-            public final void run() {
-                // Run the current task then put a request for the next one onto the
-                // back of the UI message queue. This lets Chrome handle input events
-                // between tasks.
-                initFunction();
-                if (!initQueue.isEmpty()) {
-                    Runnable nextTask = initQueue.pop();
-                    if (isAsync) {
-                        mHandler.post(nextTask);
-                    } else {
-                        nextTask.run();
-                    }
-                }
-            }
-            public abstract void initFunction();
-        }
-
-        initQueue.add(new NativeInitTask() {
-            @Override
-            public void initFunction() {
+            public void run() {
                 ProcessInitializationHandler.getInstance().initializePostNative();
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 initNetworkChangeNotifier(mApplication.getApplicationContext());
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 // This is not broken down as a separate task, since this:
                 // 1. Should happen as early as possible
                 // 2. Only submits asynchronous work
@@ -303,32 +277,32 @@ public class ChromeBrowserInitializer {
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 if (delegate.isActivityDestroyed()) return;
                 delegate.initializeCompositor();
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 if (delegate.isActivityDestroyed()) return;
                 delegate.initializeState();
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 onFinishNativeInitialization();
             }
         });
 
-        initQueue.add(new NativeInitTask() {
+        tasks.add(new Runnable() {
             @Override
-            public void initFunction() {
+            public void run() {
                 if (delegate.isActivityDestroyed()) return;
                 delegate.finishNativeInitialization();
             }
@@ -348,13 +322,12 @@ public class ChromeBrowserInitializer {
 
                         @Override
                         public void onSuccess(boolean success) {
-                            mHandler.post(initQueue.pop());
+                            tasks.start(false);
                         }
                     });
         } else {
             startChromeBrowserProcessesSync();
-            initQueue.pop().run();
-            assert initQueue.isEmpty();
+            tasks.start(true);
         }
     }
 
@@ -374,7 +347,6 @@ public class ChromeBrowserInitializer {
         try {
             TraceEvent.begin("ChromeBrowserInitializer.startChromeBrowserProcessesSync");
             ThreadUtils.assertOnUiThread();
-            mApplication.initCommandLine();
             LibraryLoader libraryLoader = LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER);
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
             libraryLoader.ensureInitialized();
@@ -422,14 +394,6 @@ public class ChromeBrowserInitializer {
                 AsyncTask.THREAD_POOL_EXECUTOR.execute(new LogcatExtractionRunnable(minidump));
             }
         });
-    }
-
-    private void waitForDebuggerIfNeeded() {
-        if (CommandLine.getInstance().hasSwitch(BaseSwitches.WAIT_FOR_JAVA_DEBUGGER)) {
-            Log.e(TAG, "Waiting for Java debugger to connect...");
-            android.os.Debug.waitForDebugger();
-            Log.e(TAG, "Java debugger connected. Resuming execution.");
-        }
     }
 
     private ActivityStateListener createActivityStateListener() {

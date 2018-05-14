@@ -4,13 +4,14 @@
 
 #include "core/svg/SVGElementProxy.h"
 
+#include "core/dom/Document.h"
 #include "core/dom/IdTargetObserver.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGResourceClient.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 
 namespace blink {
 
@@ -33,15 +34,15 @@ class SVGElementProxy::IdObserver : public IdTargetObserver {
     clients_.clear();
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(clients_);
     visitor->Trace(tree_scope_);
     IdTargetObserver::Trace(visitor);
   }
 
   void ContentChanged() {
-    DCHECK(Lifecycle().GetState() <= DocumentLifecycle::kCompositingClean ||
-           Lifecycle().GetState() >= DocumentLifecycle::kPaintClean);
+    DCHECK(Lifecycle().GetState() != DocumentLifecycle::kInPrePaint &&
+           Lifecycle().GetState() != DocumentLifecycle::kInPaint);
     HeapVector<Member<SVGResourceClient>> clients;
     CopyToVector(clients_, clients);
     for (SVGResourceClient* client : clients)
@@ -69,15 +70,18 @@ SVGElementProxy::SVGElementProxy(const AtomicString& id)
 SVGElementProxy::SVGElementProxy(const String& url, const AtomicString& id)
     : id_(id), url_(url), is_local_(false) {}
 
-SVGElementProxy::~SVGElementProxy() {}
+SVGElementProxy::~SVGElementProxy() = default;
 
-void SVGElementProxy::AddClient(SVGResourceClient* client) {
+void SVGElementProxy::AddClient(SVGResourceClient* client,
+                                base::SingleThreadTaskRunner* task_runner) {
   // An empty id will never be a valid element reference.
   if (id_.IsEmpty())
     return;
   if (!is_local_) {
-    if (document_)
-      document_->AddClient(client);
+    if (document_) {
+      DCHECK(!client->GetResource());
+      client->SetResource(document_, task_runner);
+    }
     return;
   }
   TreeScope* client_scope = client->GetTreeScope();
@@ -112,8 +116,8 @@ void SVGElementProxy::RemoveClient(SVGResourceClient* client) {
   if (id_.IsEmpty())
     return;
   if (!is_local_) {
-    if (document_)
-      document_->RemoveClient(client);
+    DCHECK_EQ(client->GetResource(), document_);
+    client->ClearResource();
     return;
   }
   auto entry = clients_.find(client);
@@ -139,7 +143,8 @@ void SVGElementProxy::Resolve(Document& document) {
   ResourceLoaderOptions options;
   options.initiator_info.name = FetchInitiatorTypeNames::css;
   FetchParameters params(ResourceRequest(url_), options);
-  document_ = DocumentResource::FetchSVGDocument(params, document.Fetcher());
+  document_ =
+      DocumentResource::FetchSVGDocument(params, document.Fetcher(), nullptr);
   url_ = String();
 }
 
@@ -176,7 +181,7 @@ void SVGElementProxy::ContentChanged(TreeScope& tree_scope) {
     observer->ContentChanged();
 }
 
-DEFINE_TRACE(SVGElementProxy) {
+void SVGElementProxy::Trace(blink::Visitor* visitor) {
   visitor->Trace(clients_);
   visitor->Trace(observers_);
   visitor->Trace(document_);
@@ -195,7 +200,7 @@ void SVGElementProxySet::NotifyContentChanged(TreeScope& tree_scope) {
     proxy->ContentChanged(tree_scope);
 }
 
-DEFINE_TRACE(SVGElementProxySet) {
+void SVGElementProxySet::Trace(blink::Visitor* visitor) {
   visitor->Trace(element_proxies_);
 }
 

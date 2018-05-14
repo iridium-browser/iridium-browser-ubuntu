@@ -5,7 +5,7 @@
 #ifndef BoundaryEventDispatcher_h
 #define BoundaryEventDispatcher_h
 
-#include "core/events/EventTarget.h"
+#include "core/dom/events/EventTarget.h"
 
 namespace blink {
 
@@ -16,8 +16,8 @@ class BoundaryEventDispatcher {
   STACK_ALLOCATED();
 
  public:
-  BoundaryEventDispatcher() {}
-  virtual ~BoundaryEventDispatcher() {}
+  BoundaryEventDispatcher() = default;
+  virtual ~BoundaryEventDispatcher() = default;
 
   void SendBoundaryEvents(EventTarget* exited_target,
                           EventTarget* entered_target);

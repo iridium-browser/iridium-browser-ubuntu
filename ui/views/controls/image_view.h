@@ -79,8 +79,11 @@ class VIEWS_EXPORT ImageView : public View {
   bool GetTooltipText(const gfx::Point& p,
                       base::string16* tooltip) const override;
   gfx::Size CalculatePreferredSize() const override;
+  views::PaintInfo::ScaleType GetPaintScaleType() const override;
 
  private:
+  friend class ImageViewTest;
+
   void OnPaintImage(gfx::Canvas* canvas);
 
   // Returns true if |img| is the same as the last image we painted. This is

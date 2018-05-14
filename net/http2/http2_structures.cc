@@ -7,8 +7,6 @@
 #include <cstring>  // For std::memcmp
 #include <sstream>
 
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
 #include "net/http2/platform/api/http2_string_utils.h"
 
 namespace net {
@@ -91,15 +89,15 @@ std::ostream& operator<<(std::ostream& out, const Http2PushPromiseFields& v) {
 // Http2PingFields:
 
 bool operator==(const Http2PingFields& a, const Http2PingFields& b) {
-  static_assert((sizeof a.opaque_data) == Http2PingFields::EncodedSize(),
+  static_assert((sizeof a.opaque_bytes) == Http2PingFields::EncodedSize(),
                 "Why not the same size?");
-  return 0 == std::memcmp(a.opaque_data, b.opaque_data, sizeof a.opaque_data);
+  return 0 ==
+         std::memcmp(a.opaque_bytes, b.opaque_bytes, sizeof a.opaque_bytes);
 }
 
 std::ostream& operator<<(std::ostream& out, const Http2PingFields& v) {
-  Http2String s = base::HexEncode(v.opaque_data, sizeof v.opaque_data);
-  base::CollapseWhitespaceASCII(s, /*trim_sequences_with_line_breaks=*/false);
-  return out << "opaque_data=[" << s << "]";
+  return out << "opaque_bytes=0x"
+             << Http2HexEncode(v.opaque_bytes, sizeof v.opaque_bytes);
 }
 
 // Http2GoAwayFields:

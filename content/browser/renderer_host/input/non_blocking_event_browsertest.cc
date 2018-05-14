@@ -127,9 +127,10 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
         ExecuteScriptAndExtractInt("document.documentElement.scrollHeight");
     EXPECT_EQ(kWebsiteHeight, scrollHeight);
 
-    FrameWatcher frame_watcher(shell()->web_contents());
-    scoped_refptr<InputMsgWatcher> input_msg_watcher(new InputMsgWatcher(
-        GetWidgetHost(), blink::WebInputEvent::kMouseWheel));
+    RenderFrameSubmissionObserver observer(
+        GetWidgetHost()->render_frame_metadata_provider());
+    auto input_msg_watcher = std::make_unique<InputMsgWatcher>(
+        GetWidgetHost(), blink::WebInputEvent::kMouseWheel);
 
     blink::WebMouseWheelEvent wheel_event =
         SyntheticWebMouseWheelEventBuilder::Build(10, 10, 0, -53, 0, true);
@@ -142,8 +143,8 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
 
     // Expect that the compositor scrolled at least one pixel while the
     // main thread was in a busy loop.
-    while (frame_watcher.LastMetadata().root_scroll_offset.y() <= 0)
-      frame_watcher.WaitFrames(1);
+    while (observer.LastRenderFrameMetadata().root_scroll_offset.y() <= 0)
+      observer.WaitForMetadataChange();
   }
 
   void DoTouchScroll() {
@@ -153,7 +154,8 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
         ExecuteScriptAndExtractInt("document.documentElement.scrollHeight");
     EXPECT_EQ(kWebsiteHeight, scrollHeight);
 
-    FrameWatcher frame_watcher(shell()->web_contents());
+    RenderFrameSubmissionObserver observer(
+        GetWidgetHost()->render_frame_metadata_provider());
 
     SyntheticSmoothScrollGestureParams params;
     params.gesture_source_type = SyntheticGestureParams::TOUCH_INPUT;
@@ -164,13 +166,14 @@ class NonBlockingEventBrowserTest : public ContentBrowserTest {
         new SyntheticSmoothScrollGesture(params));
     GetWidgetHost()->QueueSyntheticGesture(
         std::move(gesture),
-        base::Bind(&NonBlockingEventBrowserTest::OnSyntheticGestureCompleted,
-                   base::Unretained(this)));
+        base::BindOnce(
+            &NonBlockingEventBrowserTest::OnSyntheticGestureCompleted,
+            base::Unretained(this)));
 
     // Expect that the compositor scrolled at least one pixel while the
     // main thread was in a busy loop.
-    while (frame_watcher.LastMetadata().root_scroll_offset.y() <= 0)
-      frame_watcher.WaitFrames(1);
+    while (observer.LastRenderFrameMetadata().root_scroll_offset.y() <= 0)
+      observer.WaitForMetadataChange();
   }
 
  private:

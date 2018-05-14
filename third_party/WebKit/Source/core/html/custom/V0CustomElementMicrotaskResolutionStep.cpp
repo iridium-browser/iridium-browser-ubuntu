@@ -51,7 +51,7 @@ V0CustomElementMicrotaskResolutionStep::V0CustomElementMicrotaskResolutionStep(
     : context_(context), element_(element), descriptor_(descriptor) {}
 
 V0CustomElementMicrotaskResolutionStep::
-    ~V0CustomElementMicrotaskResolutionStep() {}
+    ~V0CustomElementMicrotaskResolutionStep() = default;
 
 V0CustomElementMicrotaskStep::Result
 V0CustomElementMicrotaskResolutionStep::Process() {
@@ -59,7 +59,7 @@ V0CustomElementMicrotaskResolutionStep::Process() {
   return V0CustomElementMicrotaskStep::kFinishedProcessing;
 }
 
-DEFINE_TRACE(V0CustomElementMicrotaskResolutionStep) {
+void V0CustomElementMicrotaskResolutionStep::Trace(blink::Visitor* visitor) {
   visitor->Trace(context_);
   visitor->Trace(element_);
   V0CustomElementMicrotaskStep::Trace(visitor);
@@ -68,7 +68,7 @@ DEFINE_TRACE(V0CustomElementMicrotaskResolutionStep) {
 #if !defined(NDEBUG)
 void V0CustomElementMicrotaskResolutionStep::Show(unsigned indent) {
   fprintf(stderr, "%*sResolution: ", indent, "");
-  element_->outerHTML().Show();
+  element_->OuterHTMLAsString().Show();
 }
 #endif
 

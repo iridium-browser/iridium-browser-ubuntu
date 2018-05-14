@@ -27,7 +27,7 @@ class EventObserver {
  public:
   void EventDispatchCallback(Event* event) {
     DispatchEventFromNativeUiEvent(
-        event, base::Bind(&EventObserver::OnEvent, base::Unretained(this)));
+        event, base::BindOnce(&EventObserver::OnEvent, base::Unretained(this)));
   }
 
   void OnEvent(Event* event) {
@@ -171,6 +171,12 @@ TEST_F(InputInjectorEvdevTest, LeftClick) {
 TEST_F(InputInjectorEvdevTest, RightClick) {
   ExpectClick(12, 13, EF_RIGHT_MOUSE_BUTTON, 1);
   SimulateMouseClick(12, 13, EF_RIGHT_MOUSE_BUTTON, 1);
+  run_loop_.RunUntilIdle();
+}
+
+TEST_F(InputInjectorEvdevTest, MiddleClick) {
+  ExpectClick(12, 13, EF_MIDDLE_MOUSE_BUTTON, 1);
+  SimulateMouseClick(12, 13, EF_MIDDLE_MOUSE_BUTTON, 1);
   run_loop_.RunUntilIdle();
 }
 

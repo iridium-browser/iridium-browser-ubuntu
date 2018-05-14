@@ -16,11 +16,10 @@
  *
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_
+#define MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_
 
-#include "structs.h"
-
+#include "modules/audio_coding/codecs/isac/fix/source/structs.h"
 
 /****************************************************************************
  * WebRtcIsacfix_InitBandwidthEstimator(...)
@@ -132,4 +131,4 @@ int16_t WebRtcIsacfix_GetNewFrameLength(int16_t bottle_neck, int16_t current_fra
 int16_t WebRtcIsacfix_GetSnr(int16_t bottle_neck, int16_t framesamples);
 
 
-#endif /*  WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_ */
+#endif /*  MODULES_AUDIO_CODING_CODECS_ISAC_FIX_SOURCE_BANDWIDTH_ESTIMATOR_H_ */

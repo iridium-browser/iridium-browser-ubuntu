@@ -7,9 +7,8 @@
 #include <windows.h>
 
 #include "base/logging.h"
-#include "ui/accessibility/ax_enums.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/platform/ax_platform_node_win.h"
-#include "ui/accessibility/platform/ax_platform_unique_id.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
 
@@ -18,22 +17,33 @@ namespace ui {
 AXSystemCaretWin::AXSystemCaretWin(gfx::AcceleratedWidget event_target)
     : event_target_(event_target) {
   caret_ = static_cast<AXPlatformNodeWin*>(AXPlatformNodeWin::Create(this));
-  data_.id = GetNextAXPlatformNodeUniqueId();
-  data_.role = AX_ROLE_CARET;
+  // The caret object is not part of the accessibility tree and so doesn't need
+  // a node ID. A globally unique ID is used when firing Win events, retrieved
+  // via |unique_id|.
+  data_.id = -1;
+  data_.role = ax::mojom::Role::kCaret;
   // |get_accState| should return 0 which means that the caret is visible.
   data_.state = 0;
   // According to MSDN, "Edit" should be the name of the caret object.
   data_.SetName(L"Edit");
   data_.offset_container_id = -1;
+
+  if (event_target_) {
+    ::NotifyWinEvent(EVENT_OBJECT_CREATE, event_target_, OBJID_CARET,
+                     -caret_->GetUniqueId());
+  }
 }
 
 AXSystemCaretWin::~AXSystemCaretWin() {
+  if (event_target_) {
+    ::NotifyWinEvent(EVENT_OBJECT_DESTROY, event_target_, OBJID_CARET,
+                     -caret_->GetUniqueId());
+  }
   caret_->Destroy();
-  caret_ = nullptr;
 }
 
-base::win::ScopedComPtr<IAccessible> AXSystemCaretWin::GetCaret() const {
-  base::win::ScopedComPtr<IAccessible> caret_accessible;
+Microsoft::WRL::ComPtr<IAccessible> AXSystemCaretWin::GetCaret() const {
+  Microsoft::WRL::ComPtr<IAccessible> caret_accessible;
   HRESULT hr = caret_->QueryInterface(
       IID_IAccessible,
       reinterpret_cast<void**>(caret_accessible.GetAddressOf()));
@@ -47,7 +57,7 @@ void AXSystemCaretWin::MoveCaretTo(const gfx::Rect& bounds) {
   data_.location = gfx::RectF(bounds);
   if (event_target_) {
     ::NotifyWinEvent(EVENT_OBJECT_LOCATIONCHANGE, event_target_, OBJID_CARET,
-                     -data_.id);
+                     -caret_->GetUniqueId());
   }
 }
 
@@ -55,8 +65,8 @@ const AXNodeData& AXSystemCaretWin::GetData() const {
   return data_;
 }
 
-const ui::AXTreeData& AXSystemCaretWin::GetTreeData() const {
-  CR_DEFINE_STATIC_LOCAL(ui::AXTreeData, empty_data, ());
+const AXTreeData& AXSystemCaretWin::GetTreeData() const {
+  CR_DEFINE_STATIC_LOCAL(AXTreeData, empty_data, ());
   return empty_data;
 }
 
@@ -85,9 +95,13 @@ gfx::NativeViewAccessible AXSystemCaretWin::ChildAtIndex(int index) {
   return nullptr;
 }
 
-gfx::Rect AXSystemCaretWin::GetScreenBoundsRect() const {
-  gfx::Rect bounds = ToEnclosingRect(data_.location);
-  return bounds;
+gfx::Rect AXSystemCaretWin::GetClippedScreenBoundsRect() const {
+  // We could optionally add clipping here if ever needed.
+  return ToEnclosingRect(data_.location);
+}
+
+gfx::Rect AXSystemCaretWin::GetUnclippedScreenBoundsRect() const {
+  return ToEnclosingRect(data_.location);
 }
 
 gfx::NativeViewAccessible AXSystemCaretWin::HitTestSync(int x, int y) {
@@ -103,9 +117,12 @@ AXSystemCaretWin::GetTargetForNativeAccessibilityEvent() {
   return event_target_;
 }
 
-bool AXSystemCaretWin::AccessibilityPerformAction(
-    const ui::AXActionData& data) {
+bool AXSystemCaretWin::AccessibilityPerformAction(const AXActionData& data) {
   return false;
+}
+
+int AXSystemCaretWin::GetIndexInParent() const {
+  return -1;
 }
 
 AXPlatformNode* AXSystemCaretWin::GetFromNodeID(int32_t id) {
@@ -114,6 +131,26 @@ AXPlatformNode* AXSystemCaretWin::GetFromNodeID(int32_t id) {
 
 bool AXSystemCaretWin::ShouldIgnoreHoveredStateForTesting() {
   return false;
+}
+
+bool AXSystemCaretWin::IsOffscreen() const {
+  return false;
+}
+
+std::set<int32_t> AXSystemCaretWin::GetReverseRelations(
+    ax::mojom::IntAttribute attr,
+    int32_t dst_id) {
+  return std::set<int32_t>();
+}
+
+std::set<int32_t> AXSystemCaretWin::GetReverseRelations(
+    ax::mojom::IntListAttribute attr,
+    int32_t dst_id) {
+  return std::set<int32_t>();
+}
+
+const ui::AXUniqueId& AXSystemCaretWin::GetUniqueId() const {
+  return unique_id_;
 }
 
 }  // namespace ui

@@ -5,6 +5,7 @@
 #include "net/quic/test_tools/crypto_test_utils.h"
 
 #include <memory>
+#include <string>
 
 #include "net/quic/core/crypto/channel_id.h"
 #include "net/quic/core/crypto/common_cert_set.h"
@@ -19,8 +20,12 @@
 #include "net/quic/core/quic_crypto_stream.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/core/tls_client_handshaker.h"
+#include "net/quic/core/tls_server_handshaker.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
 #include "net/quic/platform/api/quic_clock.h"
 #include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_ptr_util.h"
 #include "net/quic/platform/api/quic_socket_address.h"
 #include "net/quic/platform/api/quic_test.h"
 #include "net/quic/platform/api/quic_text_utils.h"
@@ -113,7 +118,7 @@ QuicAsyncStatus TestChannelIDSource::GetChannelIDKey(
     const string& hostname,
     std::unique_ptr<ChannelIDKey>* channel_id_key,
     ChannelIDSourceCallback* /*callback*/) {
-  channel_id_key->reset(new TestChannelIDKey(HostnameToKey(hostname)));
+  *channel_id_key = QuicMakeUnique<TestChannelIDKey>(HostnameToKey(hostname));
   return QUIC_SUCCESS;
 }
 
@@ -234,7 +239,7 @@ class AsyncTestChannelIDSource : public ChannelIDSource, public CallbackSource {
 
   // CallbackSource implementation.
   void RunPendingCallbacks() override {
-    if (callback_.get()) {
+    if (callback_) {
       callback_->Run(&channel_id_key_);
       callback_.reset();
     }
@@ -296,8 +301,7 @@ class FullChloGenerator {
 
   std::unique_ptr<ValidateClientHelloCallback>
   GetValidateClientHelloCallback() {
-    return std::unique_ptr<ValidateClientHelloCallback>(
-        new ValidateClientHelloCallback(this));
+    return QuicMakeUnique<ValidateClientHelloCallback>(this);
   }
 
  private:
@@ -307,7 +311,8 @@ class FullChloGenerator {
     result_ = result;
     crypto_config_->ProcessClientHello(
         result_, /*reject_only=*/false, /*connection_id=*/1, server_addr_,
-        client_addr_, AllSupportedVersions().front(), AllSupportedVersions(),
+        client_addr_, AllSupportedTransportVersions().front(),
+        AllSupportedTransportVersions(),
         /*use_stateless_rejects=*/true, /*server_designated_connection_id=*/0,
         clock_, QuicRandom::GetInstance(), compressed_certs_cache_, params_,
         signed_config_, /*total_framing_overhead=*/50, kDefaultMaxPacketSize,
@@ -332,8 +337,7 @@ class FullChloGenerator {
   };
 
   std::unique_ptr<ProcessClientHelloCallback> GetProcessClientHelloCallback() {
-    return std::unique_ptr<ProcessClientHelloCallback>(
-        new ProcessClientHelloCallback(this));
+    return QuicMakeUnique<ProcessClientHelloCallback>(this);
   }
 
   void ProcessClientHelloDone(std::unique_ptr<CryptoHandshakeMessage> rej) {
@@ -387,9 +391,9 @@ int HandshakeWithFakeServer(QuicConfig* server_quic_config,
       new PacketSavingConnection(helper, alarm_factory, Perspective::IS_SERVER,
                                  client_conn->supported_versions());
 
-  QuicCryptoServerConfig crypto_config(QuicCryptoServerConfig::TESTING,
-                                       QuicRandom::GetInstance(),
-                                       ProofSourceForTesting());
+  QuicCryptoServerConfig crypto_config(
+      QuicCryptoServerConfig::TESTING, QuicRandom::GetInstance(),
+      ProofSourceForTesting(), TlsServerHandshaker::CreateSslCtx());
   QuicCompressedCertsCache compressed_certs_cache(
       QuicCompressedCertsCache::kQuicCompressedCertsCacheSize);
   SetupCryptoServerConfigForTest(server_conn->clock(),
@@ -399,6 +403,8 @@ int HandshakeWithFakeServer(QuicConfig* server_quic_config,
   TestQuicSpdyServerSession server_session(server_conn, *server_quic_config,
                                            &crypto_config,
                                            &compressed_certs_cache);
+  server_session.OnSuccessfulVersionNegotiation(
+      client_conn->supported_versions().front());
   EXPECT_CALL(*server_session.helper(),
               CanAcceptClientHello(testing::_, testing::_, testing::_))
       .Times(testing::AnyNumber());
@@ -424,12 +430,22 @@ int HandshakeWithFakeClient(MockQuicConnectionHelper* helper,
                             QuicCryptoServerStream* server,
                             const QuicServerId& server_id,
                             const FakeClientOptions& options) {
-  PacketSavingConnection* client_conn =
-      new PacketSavingConnection(helper, alarm_factory, Perspective::IS_CLIENT);
+  ParsedQuicVersionVector supported_versions = AllSupportedVersions();
+  if (options.only_tls_versions) {
+    supported_versions.clear();
+    for (QuicTransportVersion transport_version :
+         AllSupportedTransportVersions()) {
+      supported_versions.push_back(
+          ParsedQuicVersion(PROTOCOL_TLS1_3, transport_version));
+    }
+  }
+  PacketSavingConnection* client_conn = new PacketSavingConnection(
+      helper, alarm_factory, Perspective::IS_CLIENT, supported_versions);
   // Advance the time, because timers do not like uninitialized times.
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(1));
 
-  QuicCryptoClientConfig crypto_config(ProofVerifierForTesting());
+  QuicCryptoClientConfig crypto_config(ProofVerifierForTesting(),
+                                       TlsClientHandshaker::CreateSslCtx());
   AsyncTestChannelIDSource* async_channel_id_source = nullptr;
   if (options.channel_id_enabled) {
     ChannelIDSource* source = ChannelIDSourceForTesting();
@@ -512,7 +528,7 @@ void CommunicateHandshakeMessagesAndRunCallbacks(
     QuicCryptoStream* server,
     CallbackSource* callback_source) {
   size_t client_i = 0, server_i = 0;
-  while (!client->handshake_confirmed()) {
+  while (!client->handshake_confirmed() || !server->handshake_confirmed()) {
     ASSERT_GT(client_conn->encrypted_packets_.size(), client_i);
     QUIC_LOG(INFO) << "Processing "
                    << client_conn->encrypted_packets_.size() - client_i
@@ -594,8 +610,7 @@ uint64_t LeafCertHashForTesting() {
   // Note: relies on the callback being invoked synchronously
   bool ok = false;
   proof_source->GetProof(
-      server_address, "", "", AllSupportedVersions().front(), "",
-      QuicTagVector(),
+      server_address, "", "", AllSupportedTransportVersions().front(), "",
       std::unique_ptr<ProofSource::Callback>(new Callback(&ok, &chain)));
   if (!ok || chain->certs.empty()) {
     DCHECK(false) << "Proof generation failed";
@@ -611,7 +626,7 @@ class MockCommonCertSets : public CommonCertSets {
       : cert_(cert.as_string()), hash_(hash), index_(index) {}
 
   QuicStringPiece GetCommonHashes() const override {
-    CHECK(false) << "not implemented";
+    QUIC_BUG << "not implemented";
     return QuicStringPiece();
   }
 
@@ -895,11 +910,37 @@ ChannelIDSource* ChannelIDSourceForTesting() {
   return new TestChannelIDSource();
 }
 
+void MovePacketsForTlsHandshake(PacketSavingConnection* source_conn,
+                                size_t* inout_packet_index,
+                                QuicCryptoStream* dest_stream,
+                                PacketSavingConnection* dest_conn,
+                                Perspective dest_perspective) {
+  SimpleQuicFramer framer(source_conn->supported_versions(), dest_perspective);
+  size_t index = *inout_packet_index;
+  for (; index < source_conn->encrypted_packets_.size(); index++) {
+    if (!framer.ProcessPacket(*source_conn->encrypted_packets_[index])) {
+      // The framer will be unable to decrypt forward-secure packets sent after
+      // the handshake is complete. Don't treat them as handshake packets.
+      break;
+    }
+
+    for (const auto& stream_frame : framer.stream_frames()) {
+      dest_conn->OnStreamFrame(*stream_frame);
+    }
+  }
+  *inout_packet_index = index;
+}
+
 void MovePackets(PacketSavingConnection* source_conn,
                  size_t* inout_packet_index,
                  QuicCryptoStream* dest_stream,
                  PacketSavingConnection* dest_conn,
                  Perspective dest_perspective) {
+  if (dest_stream->handshake_protocol() == PROTOCOL_TLS1_3) {
+    MovePacketsForTlsHandshake(source_conn, inout_packet_index, dest_stream,
+                               dest_conn, dest_perspective);
+    return;
+  }
   SimpleQuicFramer framer(source_conn->supported_versions(), dest_perspective);
   CryptoFramer crypto_framer;
   CryptoFramerVisitor crypto_visitor;
@@ -947,7 +988,7 @@ void MovePackets(PacketSavingConnection* source_conn,
 
 CryptoHandshakeMessage GenerateDefaultInchoateCHLO(
     const QuicClock* clock,
-    QuicVersion version,
+    QuicTransportVersion version,
     QuicCryptoServerConfig* crypto_config) {
   // clang-format off
   return CreateCHLO(
@@ -956,7 +997,8 @@ CryptoHandshakeMessage GenerateDefaultInchoateCHLO(
        {"KEXS", "C255"},
        {"PUBS", GenerateClientPublicValuesHex().c_str()},
        {"NONC", GenerateClientNonceHex(clock, crypto_config).c_str()},
-       {"VER\0", QuicTagToString(QuicVersionToQuicTag(version)).c_str()}},
+       {"VER\0", QuicVersionLabelToString(
+           QuicVersionToQuicVersionLabel(version)).c_str()}},
       kClientHelloMinimumSize);
   // clang-format on
 }
@@ -995,7 +1037,7 @@ void GenerateFullCHLO(const CryptoHandshakeMessage& inchoate_chlo,
                       QuicCryptoServerConfig* crypto_config,
                       QuicSocketAddress server_addr,
                       QuicSocketAddress client_addr,
-                      QuicVersion version,
+                      QuicTransportVersion version,
                       const QuicClock* clock,
                       QuicReferenceCountedPointer<QuicSignedServerConfig> proof,
                       QuicCompressedCertsCache* compressed_certs_cache,

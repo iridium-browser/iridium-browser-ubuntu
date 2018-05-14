@@ -23,41 +23,30 @@
 #include "build/build_config.h"
 #include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/system_network_context_manager.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "components/metrics/data_use_tracker.h"
 #include "components/prefs/pref_member.h"
 #include "components/ssl_config/ssl_config_service_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browser_thread_delegate.h"
-#include "content/public/common/network_service.mojom.h"
-#include "content/public/network/network_service.h"
 #include "extensions/features/features.h"
 #include "net/base/network_change_notifier.h"
-#include "net/http/http_network_session.h"
 #include "net/nqe/network_quality_estimator.h"
+#include "services/network/public/mojom/network_service.mojom.h"
+#include "services/network/url_request_context_owner.h"
 
-class PrefProxyConfigTracker;
-class PrefService;
 class PrefRegistrySimple;
+class PrefService;
+class SystemNetworkContextManager;
 
 #if defined(OS_ANDROID)
-namespace chrome {
 namespace android {
 class ExternalDataUseObserver;
 }
-}
 #endif  // defined(OS_ANDROID)
-
-namespace base {
-class CommandLine;
-}
 
 namespace certificate_transparency {
 class TreeStateTracker;
-}
-
-namespace chrome {
-class TestingIOThreadState;
 }
 
 namespace chrome_browser_net {
@@ -78,13 +67,10 @@ class EventRouterForwarder;
 
 namespace net {
 class CTLogVerifier;
-class HostMappingRules;
 class HostResolver;
 class HttpAuthHandlerFactory;
 class HttpAuthPreferences;
-class LoggingNetworkChangeObserver;
 class NetworkQualityEstimator;
-class ProxyConfigService;
 class RTTAndThroughputEstimatesObserver;
 class SSLConfigService;
 class URLRequestContext;
@@ -100,13 +86,13 @@ namespace net_log {
 class ChromeNetLog;
 }
 
+namespace network {
+class URLRequestContextBuilderMojo;
+}
+
 namespace policy {
 class PolicyService;
 }  // namespace policy
-
-namespace test {
-class IOThreadPeer;
-}  // namespace test
 
 // Contains state associated with, initialized and cleaned up on, and
 // primarily used on, the IO thread.
@@ -129,10 +115,7 @@ class IOThread : public content::BrowserThreadDelegate {
     Globals();
     ~Globals();
 
-    // In-process NetworkService for use in URLRequestContext configuration when
-    // the network service created through the ServiceManager is disabled. See
-    // SystemNetworkContextManager's header comment for more details
-    std::unique_ptr<content::NetworkService> network_service;
+    bool quic_disabled = false;
 
     // Ascribes all data use in Chrome to a source, such as page loads.
     std::unique_ptr<data_use_measurement::ChromeDataUseAscriber>
@@ -142,37 +125,38 @@ class IOThread : public content::BrowserThreadDelegate {
     std::unique_ptr<data_usage::DataUseAggregator> data_use_aggregator;
 #if defined(OS_ANDROID)
     // An external observer of data use.
-    std::unique_ptr<chrome::android::ExternalDataUseObserver>
+    std::unique_ptr<android::ExternalDataUseObserver>
         external_data_use_observer;
 #endif  // defined(OS_ANDROID)
     std::vector<scoped_refptr<const net::CTLogVerifier>> ct_logs;
     std::unique_ptr<net::HttpAuthPreferences> http_auth_preferences;
-    std::unique_ptr<content::mojom::NetworkContext> system_network_context;
-    net::URLRequestContext* system_request_context;
-    SystemRequestContextLeakChecker system_request_context_leak_checker;
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-    scoped_refptr<extensions::EventRouterForwarder>
-        extension_event_router_forwarder;
-#endif
-    std::unique_ptr<net::HostMappingRules> host_mapping_rules;
+
     std::unique_ptr<net::NetworkQualityEstimator> network_quality_estimator;
     std::unique_ptr<net::RTTAndThroughputEstimatesObserver>
         network_quality_observer;
 
+    // When the network service is enabled, this holds on to a
+    // content::NetworkContext class that owns |system_request_context|.
+    std::unique_ptr<network::mojom::NetworkContext> system_network_context;
+    // When the network service is disabled, this owns |system_request_context|.
+    network::URLRequestContextOwner system_request_context_owner;
+    net::URLRequestContext* system_request_context;
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+    scoped_refptr<extensions::EventRouterForwarder>
+        extension_event_router_forwarder;
+#endif
     // NetErrorTabHelper uses |dns_probe_service| to send DNS probes when a
     // main frame load fails with a DNS error in order to provide more useful
     // information to the renderer so it can show a more specific error page.
     std::unique_ptr<chrome_browser_net::DnsProbeService> dns_probe_service;
-
-    // Enables Brotli Content-Encoding support
-    bool enable_brotli;
   };
 
   // |net_log| must either outlive the IOThread or be NULL.
   IOThread(PrefService* local_state,
            policy::PolicyService* policy_service,
            net_log::ChromeNetLog* net_log,
-           extensions::EventRouterForwarder* extension_event_router_forwarder);
+           extensions::EventRouterForwarder* extension_event_router_forwarder,
+           SystemNetworkContextManager* system_network_context_manager);
 
   ~IOThread() override;
 
@@ -201,12 +185,10 @@ class IOThread : public content::BrowserThreadDelegate {
   void ClearHostCache(
       const base::Callback<bool(const std::string&)>& host_filter);
 
-  const net::HttpNetworkSession::Params& NetworkSessionParams() const;
-
-  // Dynamically disables QUIC for HttpNetworkSessions owned by io_thread, and
-  // to HttpNetworkSession::Params which are used for the creation of new
-  // HttpNetworkSessions. Not that re-enabling Quic dynamically is not
-  // supported for simplicity and requires a browser restart.
+  // Dynamically disables QUIC for all NetworkContexts using the IOThread's
+  // NetworkService. Re-enabling Quic dynamically is not supported for
+  // simplicity and requires a browser restart. May only be called on the IO
+  // thread.
   void DisableQuic();
 
   // Returns the callback for updating data use prefs.
@@ -229,10 +211,12 @@ class IOThread : public content::BrowserThreadDelegate {
   bool WpadQuickCheckEnabled() const;
   bool PacHttpsUrlStrippingEnabled() const;
 
- private:
-  friend class test::IOThreadPeer;
-  friend class chrome::TestingIOThreadState;
+  // Configures |builder|'s ProxyResolutionService based on prefs and policies.
+  void SetUpProxyService(network::URLRequestContextBuilderMojo* builder) const;
 
+  certificate_transparency::TreeStateTracker* ct_tree_tracker() const;
+
+ private:
   // BrowserThreadDelegate implementation, runs on the IO thread.
   // This handles initialization and destruction of state that must
   // live on the IO thread.
@@ -253,6 +237,9 @@ class IOThread : public content::BrowserThreadDelegate {
   void UpdateAndroidAuthNegotiateAccountType();
   void UpdateNegotiateDisableCnameLookup();
   void UpdateNegotiateEnablePort();
+#if defined(OS_POSIX)
+  void UpdateNtlmV2Enabled();
+#endif
 
   extensions::EventRouterForwarder* extension_event_router_forwarder() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -262,14 +249,6 @@ class IOThread : public content::BrowserThreadDelegate {
 #endif
   }
   void ConstructSystemRequestContext();
-
-  // Parse command line flags and use components/network_session_configurator to
-  // configure |params|.
-  static void ConfigureParamsFromFieldTrialsAndCommandLine(
-      const base::CommandLine& command_line,
-      bool is_quic_allowed_by_policy,
-      bool http_09_on_non_default_ports_enabled,
-      net::HttpNetworkSession::Params* params);
 
   // The NetLog is owned by the browser process, to allow logging from other
   // threads during shutdown, but is used most frequently on the IOThread.
@@ -291,11 +270,6 @@ class IOThread : public content::BrowserThreadDelegate {
 
   Globals* globals_;
 
-  net::HttpNetworkSession::Params session_params_;
-
-  // Observer that logs network changes to the ChromeNetLog.
-  std::unique_ptr<net::LoggingNetworkChangeObserver> network_change_observer_;
-
   std::unique_ptr<certificate_transparency::TreeStateTracker> ct_tree_tracker_;
 
   BooleanPrefMember system_enable_referrers_;
@@ -306,19 +280,26 @@ class IOThread : public content::BrowserThreadDelegate {
 
   BooleanPrefMember pac_https_url_stripping_enabled_;
 
+  StringListPrefMember dns_over_https_servers_;
+
+  StringListPrefMember dns_over_https_server_methods_;
+
   // Store HTTP Auth-related policies in this thread.
   // TODO(aberent) Make the list of auth schemes a PrefMember, so that the
   // policy can change after startup (https://crbug/549273).
   std::string auth_schemes_;
   BooleanPrefMember negotiate_disable_cname_lookup_;
   BooleanPrefMember negotiate_enable_port_;
+#if defined(OS_POSIX)
+  BooleanPrefMember ntlm_v2_enabled_;
+#endif
   StringPrefMember auth_server_whitelist_;
   StringPrefMember auth_delegate_whitelist_;
 
 #if defined(OS_ANDROID)
   StringPrefMember auth_android_negotiate_account_type_;
 #endif
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
   // No PrefMember for the GSSAPI library name, since changing it after startup
   // requires unloading the existing GSSAPI library, which could cause all sorts
   // of problems for, for example, active Negotiate transactions.
@@ -331,28 +312,19 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // These are set on the UI thread, and then consumed during initialization on
   // the IO thread.
-  content::mojom::NetworkContextRequest network_context_request_;
-  content::mojom::NetworkContextParamsPtr network_context_params_;
+  network::mojom::NetworkContextRequest network_context_request_;
+  network::mojom::NetworkContextParamsPtr network_context_params_;
 
   // This is an instance of the default SSLConfigServiceManager for the current
   // platform and it gets SSL preferences from local_state object.
   std::unique_ptr<ssl_config::SSLConfigServiceManager>
       ssl_config_service_manager_;
 
-  // These member variables are initialized by a task posted to the IO thread,
-  // which gets posted by calling certain member functions of IOThread.
-  std::unique_ptr<net::ProxyConfigService> system_proxy_config_service_;
-
-  std::unique_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
-
   scoped_refptr<net::URLRequestContextGetter>
       system_url_request_context_getter_;
 
-  // True if QUIC is allowed by policy.
-  bool is_quic_allowed_by_policy_;
-
-  // True if HTTP/0.9 is allowed on non-default ports by policy.
-  bool http_09_on_non_default_ports_enabled_;
+  // True if QUIC is initially enabled.
+  bool is_quic_allowed_on_init_;
 
   base::WeakPtrFactory<IOThread> weak_factory_;
 

@@ -30,11 +30,32 @@
 
 #include "core/animation/ElementAnimations.h"
 
+#include "core/style/ComputedStyle.h"
+
 namespace blink {
+
+namespace {
+
+void UpdateAnimationFlagsForEffect(const KeyframeEffectReadOnly& effect,
+                                   ComputedStyle& style) {
+  if (effect.Affects(PropertyHandle(GetCSSPropertyOpacity())))
+    style.SetHasCurrentOpacityAnimation(true);
+  if (effect.Affects(PropertyHandle(GetCSSPropertyTransform())) ||
+      effect.Affects(PropertyHandle(GetCSSPropertyRotate())) ||
+      effect.Affects(PropertyHandle(GetCSSPropertyScale())) ||
+      effect.Affects(PropertyHandle(GetCSSPropertyTranslate())))
+    style.SetHasCurrentTransformAnimation(true);
+  if (effect.Affects(PropertyHandle(GetCSSPropertyFilter())))
+    style.SetHasCurrentFilterAnimation(true);
+  if (effect.Affects(PropertyHandle(GetCSSPropertyBackdropFilter())))
+    style.SetHasCurrentBackdropFilterAnimation(true);
+}
+
+}  // namespace
 
 ElementAnimations::ElementAnimations() : animation_style_change_(false) {}
 
-ElementAnimations::~ElementAnimations() {}
+ElementAnimations::~ElementAnimations() = default;
 
 void ElementAnimations::UpdateAnimationFlags(ComputedStyle& style) {
   for (const auto& entry : animations_) {
@@ -44,40 +65,38 @@ void ElementAnimations::UpdateAnimationFlags(ComputedStyle& style) {
     DCHECK(animation.effect()->IsKeyframeEffectReadOnly());
     const KeyframeEffectReadOnly& effect =
         *ToKeyframeEffectReadOnly(animation.effect());
-    if (effect.IsCurrent()) {
-      if (effect.Affects(PropertyHandle(CSSPropertyOpacity)))
-        style.SetHasCurrentOpacityAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyTransform)) ||
-          effect.Affects(PropertyHandle(CSSPropertyRotate)) ||
-          effect.Affects(PropertyHandle(CSSPropertyScale)) ||
-          effect.Affects(PropertyHandle(CSSPropertyTranslate)))
-        style.SetHasCurrentTransformAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyFilter)))
-        style.SetHasCurrentFilterAnimation(true);
-      if (effect.Affects(PropertyHandle(CSSPropertyBackdropFilter)))
-        style.SetHasCurrentBackdropFilterAnimation(true);
-    }
+    if (!effect.IsCurrent())
+      continue;
+    UpdateAnimationFlagsForEffect(effect, style);
+  }
+
+  for (const auto& entry : worklet_animations_) {
+    const KeyframeEffectReadOnly& effect = *entry->GetEffect();
+    // TODO(majidvp): we should check the effect's phase before updating the
+    // style once the timing of effect is ready to use.
+    // https://crbug.com/814851.
+    UpdateAnimationFlagsForEffect(effect, style);
   }
 
   if (style.HasCurrentOpacityAnimation()) {
     style.SetIsRunningOpacityAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyOpacity)));
+            PropertyHandle(GetCSSPropertyOpacity())));
   }
   if (style.HasCurrentTransformAnimation()) {
     style.SetIsRunningTransformAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyTransform)));
+            PropertyHandle(GetCSSPropertyTransform())));
   }
   if (style.HasCurrentFilterAnimation()) {
     style.SetIsRunningFilterAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyFilter)));
+            PropertyHandle(GetCSSPropertyFilter())));
   }
   if (style.HasCurrentBackdropFilterAnimation()) {
     style.SetIsRunningBackdropFilterAnimationOnCompositor(
         effect_stack_.HasActiveAnimationsOnCompositor(
-            PropertyHandle(CSSPropertyBackdropFilter)));
+            PropertyHandle(GetCSSPropertyBackdropFilter())));
   }
 }
 
@@ -86,17 +105,17 @@ void ElementAnimations::RestartAnimationOnCompositor() {
     entry.key->RestartAnimationOnCompositor();
 }
 
-DEFINE_TRACE(ElementAnimations) {
+void ElementAnimations::Trace(blink::Visitor* visitor) {
   visitor->Trace(css_animations_);
-  visitor->Trace(custom_compositor_animations_);
   visitor->Trace(effect_stack_);
   visitor->Trace(animations_);
+  visitor->Trace(worklet_animations_);
 }
 
 const ComputedStyle* ElementAnimations::BaseComputedStyle() const {
 #if !DCHECK_IS_ON()
   if (IsAnimationStyleChange())
-    return base_computed_style_.Get();
+    return base_computed_style_.get();
 #endif
   return nullptr;
 }
@@ -119,13 +138,13 @@ void ElementAnimations::ClearBaseComputedStyle() {
 }
 
 bool ElementAnimations::IsAnimationStyleChange() const {
-  // TODO(rune@opera.com): The FontFaceCache version number may be increased
-  // without forcing a style recalc (see crbug.com/471079). ComputedStyle
-  // objects created with different cache versions will not be considered equal
-  // as Font::operator== will compare versions, hence ComputedStyle::operator==
-  // will return false. We avoid using baseComputedStyle (the check for
-  // isFallbackValid()) in that case to avoid triggering the ComputedStyle
-  // comparison ASSERT in updateBaseComputedStyle.
+  // TODO(futhark@chromium.org): The FontFaceCache version number may be
+  // increased without forcing a style recalc (see crbug.com/471079).
+  // ComputedStyle objects created with different cache versions will not be
+  // considered equal as Font::operator== will compare versions, hence
+  // ComputedStyle::operator== will return false. We avoid using
+  // base_computed_style (the check for IsFallbackValid()) in that case to avoid
+  // triggering the ComputedStyle comparison DCHECK in UpdateBaseComputedStyle.
   return animation_style_change_ &&
          (!base_computed_style_ ||
           base_computed_style_->GetFont().IsFallbackValid());

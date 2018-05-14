@@ -27,6 +27,7 @@
 #define LayoutSVGShape_h
 
 #include <memory>
+#include "base/macros.h"
 #include "core/layout/svg/LayoutSVGModelObject.h"
 #include "core/layout/svg/SVGMarkerData.h"
 #include "platform/geometry/FloatRect.h"
@@ -46,13 +47,13 @@ enum ShapeGeometryCodePath {
 };
 
 struct LayoutSVGShapeRareData {
-  WTF_MAKE_NONCOPYABLE(LayoutSVGShapeRareData);
   USING_FAST_MALLOC(LayoutSVGShapeRareData);
 
  public:
-  LayoutSVGShapeRareData() {}
+  LayoutSVGShapeRareData() = default;
   Path cached_non_scaling_stroke_path_;
   AffineTransform cached_non_scaling_stroke_transform_;
+  DISALLOW_COPY_AND_ASSIGN(LayoutSVGShapeRareData);
 };
 
 class LayoutSVGShape : public LayoutSVGModelObject {
@@ -121,6 +122,11 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   virtual bool ShapeDependentFillContains(const FloatPoint&,
                                           const WindRule) const;
 
+  // Compute an approximation of the bounding box that this stroke geometry
+  // would generate when applied to a shape with the (tight-fitting) bounding
+  // box |shape_bbox|.
+  FloatRect ApproximateStrokeBoundingBox(const FloatRect& shape_bbox) const;
+
   FloatRect fill_bounding_box_;
   FloatRect stroke_bounding_box_;
   LayoutSVGShapeRareData& EnsureRareData() const;
@@ -149,7 +155,7 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   FloatRect StrokeBoundingBox() const final { return stroke_bounding_box_; }
   FloatRect CalculateObjectBoundingBox() const;
   FloatRect CalculateStrokeBoundingBox() const;
-  void UpdateLocalTransform();
+  bool UpdateLocalTransform();
 
  private:
   AffineTransform local_transform_;
@@ -163,6 +169,8 @@ class LayoutSVGShape : public LayoutSVGModelObject {
   bool needs_boundaries_update_ : 1;
   bool needs_shape_update_ : 1;
   bool needs_transform_update_ : 1;
+  bool affected_by_miter_ : 1;
+  bool transform_uses_reference_box_ : 1;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGShape, IsSVGShape());

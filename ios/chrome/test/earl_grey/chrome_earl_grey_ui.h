@@ -22,6 +22,11 @@
 // calling this method.
 + (void)openSettingsMenu;
 
+// Scrolls to find the button in the Tools menu with the corresponding
+// |buttonMatcher|, and then taps it. If |buttonMatcher| is not found, or
+// the Tools menu is not open when this is called there will be a GREYAssert.
++ (void)tapToolsMenuButton:(id<GREYMatcher>)buttonMatcher;
+
 // Scrolls to find the button in the Settings menu with the corresponding
 // |buttonMatcher|, and then taps it. If |buttonMatcher| is not found, or
 // the Settings menu is not open when this is called there will be a GREYAssert.
@@ -61,6 +66,14 @@
 // for it to disappear. If the condition is not met within a timeout, a
 // GREYAssert is induced.
 + (void)waitForToolbarVisible:(BOOL)isVisible;
+
+// Signs in the identity for the specific |userEmail|. This must be called from
+// the NTP, and it doesn't dismiss the sign in confirmation page.
++ (void)signInToIdentityByEmail:(NSString*)userEmail;
+
+// Confirms the sign in confirmation page, scrolls first to make the OK button
+// visible on short devices (e.g. iPhone 5s).
++ (void)confirmSigninConfirmationDialog;
 
 @end
 

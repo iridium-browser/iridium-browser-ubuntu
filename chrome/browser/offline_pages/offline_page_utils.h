@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/callback.h"
+#include "base/files/file_util.h"
 #include "components/offline_pages/core/offline_page_model.h"
 #include "components/offline_pages/core/offline_page_types.h"
 #include "url/gurl.h"
@@ -18,6 +19,7 @@ class Time;
 
 namespace content {
 class BrowserContext;
+class NavigationEntry;
 class WebContents;
 }
 
@@ -51,20 +53,23 @@ class OfflinePageUtils {
     ALL = 0xFFFF
   };
 
+  static const base::FilePath::CharType kMHTMLExtension[];
+
   // Callback to inform the duplicate checking result.
   using DuplicateCheckCallback = base::Callback<void(DuplicateCheckResult)>;
 
-  // Returns via callback an offline page related to |url|, if any. The
-  // page is chosen based on creation date; a more recently created offline
-  // page will be preferred over an older one. The offline page captured from
-  // last visit in the tab will not be considered if its tab id does not match
-  // the provided |tab_id|.
-  static void SelectPageForURL(
+  // Returns via callback all offline pages related to |url|. The offline page
+  // captured from last visit in the tab will be excluded if its tab id does not
+  // match the provided |tab_id|. The returned list is sorted based creation
+  // date in descending order. That is, the most recently created offline will
+  // appear as the first element of the list.
+  static void SelectPagesForURL(
       content::BrowserContext* browser_context,
       const GURL& url,
-      OfflinePageModel::URLSearchMode url_search_mode,
+      URLSearchMode url_search_mode,
       int tab_id,
-      const base::Callback<void(const OfflinePageItem*)>& callback);
+      const base::Callback<void(const std::vector<OfflinePageItem>&)>&
+          callback);
 
   // Gets the offline page corresponding to the given web contents.  The
   // returned pointer is owned by the web_contents and may be deleted by user
@@ -127,6 +132,12 @@ class OfflinePageUtils {
   static void ScheduleDownload(content::WebContents* web_contents,
                                const std::string& name_space,
                                const GURL& url,
+                               DownloadUIActionFlags ui_action,
+                               const std::string& request_origin);
+
+  static void ScheduleDownload(content::WebContents* web_contents,
+                               const std::string& name_space,
+                               const GURL& url,
                                DownloadUIActionFlags ui_action);
 
   // Determines if offline page download should be triggered based on MIME type
@@ -143,6 +154,16 @@ class OfflinePageUtils {
       const SizeInBytesCallback& callback,
       const base::Time& begin_time,
       const base::Time& end_time);
+
+  // Extracts and returns the value of the custom offline header from a
+  // navigation entry. Empty string is returned if it is not found.
+  // Note that the offline header is assumed to be the onlt extra header if it
+  // exists.
+  static std::string ExtractOfflineHeaderValueFromNavigationEntry(
+      const content::NavigationEntry& entry);
+
+  // Returns true if |web_contents| is showing a trusted offline page.
+  static bool IsShowingTrustedOfflinePage(content::WebContents* web_contents);
 };
 
 }  // namespace offline_pages

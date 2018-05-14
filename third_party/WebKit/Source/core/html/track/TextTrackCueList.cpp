@@ -59,9 +59,6 @@ void TextTrackCueList::CollectActiveCues(TextTrackCueList& active_cues) const {
 }
 
 bool TextTrackCueList::Add(TextTrackCue* cue) {
-  DCHECK_GE(cue->startTime(), 0);
-  DCHECK_GE(cue->endTime(), 0);
-
   // Maintain text track cue order:
   // https://html.spec.whatwg.org/#text-track-cue-order
   size_t index = FindInsertionIndex(cue);
@@ -70,7 +67,7 @@ bool TextTrackCueList::Add(TextTrackCue* cue) {
   if (!list_.IsEmpty() && (index > 0) && (list_[index - 1].Get() == cue))
     return false;
 
-  list_.insert(index, TraceWrapperMember<TextTrackCue>(this, cue));
+  list_.insert(index, cue);
   InvalidateCueIndex(index);
   return true;
 }
@@ -97,10 +94,20 @@ bool TextTrackCueList::Remove(TextTrackCue* cue) {
   if (index == kNotFound)
     return false;
 
-  list_.erase(index);
+  list_.EraseAt(index);
   InvalidateCueIndex(index);
   cue->InvalidateCueIndex();
   return true;
+}
+
+void TextTrackCueList::RemoveAll() {
+  if (list_.IsEmpty())
+    return;
+
+  first_invalid_index_ = 0;
+  for (auto& cue : list_)
+    cue->InvalidateCueIndex();
+  Clear();
 }
 
 void TextTrackCueList::UpdateCueIndex(TextTrackCue* cue) {
@@ -132,13 +139,16 @@ void TextTrackCueList::ValidateCueIndexes() {
   first_invalid_index_ = list_.size();
 }
 
-DEFINE_TRACE(TextTrackCueList) {
+void TextTrackCueList::Trace(blink::Visitor* visitor) {
   visitor->Trace(list_);
+  ScriptWrappable::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(TextTrackCueList) {
+void TextTrackCueList::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   for (auto cue : list_) {
     visitor->TraceWrappers(cue);
   }
+  ScriptWrappable::TraceWrappers(visitor);
 }
 }  // namespace blink

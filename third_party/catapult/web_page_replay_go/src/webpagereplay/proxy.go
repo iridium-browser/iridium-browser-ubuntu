@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+        "time"
 )
 
 const errStatus = http.StatusInternalServerError
@@ -33,6 +34,31 @@ func fixupRequestURL(req *http.Request, scheme string) {
 	if req.URL.Host == "" {
 		req.URL.Host = req.Host
 	}
+}
+
+// updateDate is the basic function for date adjustment.
+func updateDate(h http.Header, name string, now, oldNow time.Time) {
+        val := h.Get(name)
+        if val == "" {
+                return
+        }
+        oldTime, err := http.ParseTime(val)
+        if err != nil {
+                return
+        }
+        newTime := now.Add(oldTime.Sub(oldNow))
+        h.Set(name, newTime.UTC().Format(http.TimeFormat))
+}
+
+// updateDates updates "Date" header as current time and adjusts "Last-Modified"/"Expires" against it.
+func updateDates(h http.Header, now time.Time) {
+        oldNow, err := http.ParseTime(h.Get("Date"))
+        h.Set("Date", now.UTC().Format(http.TimeFormat))
+        if err != nil {
+                return
+        }
+        updateDate(h, "Last-Modified", now, oldNow)
+        updateDate(h, "Expires", now, oldNow)
 }
 
 // NewReplayingProxy constructs an HTTP proxy that replays responses from an archive.
@@ -102,13 +128,16 @@ func (proxy *replayingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 		}
 	}
 
+        // Update dates in response header.
+        updateDates(storedResp.Header, time.Now())
+
 	// Transform.
 	for _, t := range proxy.transformers {
 		t.Transform(req, storedResp)
 	}
 
 	// Forward the response.
-	logf("serving %v response (http2: %v)", storedResp.StatusCode)
+	logf("serving %v response", storedResp.StatusCode)
 	for k, v := range storedResp.Header {
 		w.Header()[k] = append([]string{}, v...)
 	}
@@ -121,7 +150,7 @@ func (proxy *replayingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 // NewRecordingProxy constructs an HTTP proxy that records responses into an archive.
 // The proxy is listening for requests on a port that uses the given scheme (e.g., http, https).
 func NewRecordingProxy(a *WritableArchive, scheme string, transformers []ResponseTransformer) http.Handler {
-	return &recordingProxy{&http.Transport{}, a, scheme, transformers}
+	return &recordingProxy{http.DefaultTransport.(*http.Transport), a, scheme, transformers}
 }
 
 type recordingProxy struct {
@@ -152,6 +181,11 @@ func (proxy *recordingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	if req.ContentLength == 0 {
 		req.Body = nil
 	}
+
+	// TODO(catapult:3742): Implement Brotli support. Remove br advertisement for now.
+	ce := req.Header.Get("Accept-Encoding")
+	req.Header.Set("Accept-Encoding", strings.TrimSuffix(ce, ", br"))
+
 	// Read the entire request body (for POST) before forwarding to the server
 	// so we can save the entire request in the archive.
 	var requestBody []byte
@@ -181,11 +215,6 @@ func (proxy *recordingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 		}
 	}
 
-	// Transform.
-	for _, t := range proxy.transformers {
-		t.Transform(req, resp)
-	}
-
 	// Copy the entire response body.
 	responseBody, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -193,23 +222,38 @@ func (proxy *recordingProxy) ServeHTTP(w http.ResponseWriter, req *http.Request)
 	}
 	resp.Body.Close()
 
-	// Forward the response.
-	logf("serving %v, %v bytes", resp.StatusCode, len(responseBody))
-	for k, v := range resp.Header {
-		w.Header()[k] = append([]string{}, v...)
+	// Restore req body (which was consumed by RoundTrip) and record original response without transformation.
+	resp.Body = ioutil.NopCloser(bytes.NewReader(responseBody))
+	if req.Body != nil {
+		req.Body = ioutil.NopCloser(bytes.NewReader(requestBody))
 	}
-	w.WriteHeader(resp.StatusCode)
-	if n, err := io.Copy(w, bytes.NewReader(responseBody)); err != nil {
-		logf("warning: client response truncated (%d/%d bytes): %v", n, len(responseBody), err)
+	if err := proxy.a.RecordRequest(proxy.scheme, req, resp); err != nil {
+		logf("failed recording request: %v", err)
 	}
 
-	// Restore the req/resp body before archiving.
-	// The req body was consumed by RoundTrip, and the resp body was consumed by the above io.Copy.
+	// Restore req and response body which are consumed by RecordRequest.
 	if req.Body != nil {
 		req.Body = ioutil.NopCloser(bytes.NewReader(requestBody))
 	}
 	resp.Body = ioutil.NopCloser(bytes.NewReader(responseBody))
-	if err := proxy.a.RecordRequest(proxy.scheme, req, resp); err != nil {
-		logf("failed recording request: %v", err)
+
+	// Transform.
+	for _, t := range proxy.transformers {
+		t.Transform(req, resp)
+	}
+
+	responseBodyAfterTransform, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logf("warning: transformed response truncated: %v", err)
+	}
+
+	// Forward the response.
+	logf("serving %d, %d bytes", resp.StatusCode, len(responseBodyAfterTransform))
+	for k, v := range resp.Header {
+		w.Header()[k] = append([]string{}, v...)
+	}
+	w.WriteHeader(resp.StatusCode)
+	if n, err := io.Copy(w, bytes.NewReader(responseBodyAfterTransform)); err != nil {
+		logf("warning: client response truncated (%d/%d bytes): %v", n, len(responseBodyAfterTransform), err)
 	}
 }

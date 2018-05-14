@@ -9,14 +9,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/base/request_priority.h"
 #include "net/socket/client_socket_factory.h"
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/url_request_context_getter.h"
-#include "remoting/client/audio_player.h"
+#include "remoting/client/audio/audio_player.h"
 #include "remoting/client/chromoting_client.h"
 #include "remoting/client/client_context.h"
 #include "remoting/protocol/chromium_port_allocator_factory.h"
@@ -125,8 +124,8 @@ void TestChromotingClient::StartConnection(
   scoped_refptr<protocol::TransportContext> transport_context(
       new protocol::TransportContext(
           signal_strategy_.get(),
-          base::MakeUnique<protocol::ChromiumPortAllocatorFactory>(),
-          base::MakeUnique<ChromiumUrlRequestFactory>(request_context_getter),
+          std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
+          std::make_unique<ChromiumUrlRequestFactory>(request_context_getter),
           network_settings, protocol::TransportRole::CLIENT));
 
   protocol::ClientAuthenticationConfig client_auth_config;

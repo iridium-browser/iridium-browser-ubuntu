@@ -13,10 +13,8 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "net/http/transport_security_state.h"
-#include "net/spdy/chromium/spdy_flags.h"
 #include "net/ssl/ssl_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -105,14 +103,6 @@ void SetFrameLength(SpdySerializedFrame* frame, size_t length) {
   }
 }
 
-SpdyString a2b_hex(const char* hex_data) {
-  std::vector<uint8_t> output;
-  SpdyString result;
-  if (base::HexStringToBytes(hex_data, &output))
-    result.assign(reinterpret_cast<const char*>(&output[0]), output.size());
-  return result;
-}
-
 HashValue GetTestHashValue(uint8_t label) {
   HashValue hash_value(HASH_VALUE_SHA256);
   memset(hash_value.data(), label, hash_value.size());
@@ -159,9 +149,9 @@ void TestHeadersHandler::OnHeaderBlockEnd(
   compressed_header_bytes_parsed_ = compressed_header_bytes_parsed;
 }
 
-TestServerPushDelegate::TestServerPushDelegate() {}
+TestServerPushDelegate::TestServerPushDelegate() = default;
 
-TestServerPushDelegate::~TestServerPushDelegate() {}
+TestServerPushDelegate::~TestServerPushDelegate() = default;
 
 void TestServerPushDelegate::OnPush(
     std::unique_ptr<ServerPushHelper> push_helper,

@@ -174,22 +174,8 @@ Manifest::Type Extension::GetType() const {
 // static
 GURL Extension::GetResourceURL(const GURL& extension_url,
                                const std::string& relative_path) {
-  DCHECK(extension_url.SchemeIs(extensions::kExtensionScheme));
-  DCHECK_EQ("/", extension_url.path());
-
-  std::string path = relative_path;
-
-  // If the relative path starts with "/", it is "absolute" relative to the
-  // extension base directory, but extension_url is already specified to refer
-  // to that base directory, so strip the leading "/" if present.
-  if (relative_path.size() > 0 && relative_path[0] == '/')
-    path = relative_path.substr(1);
-
-  GURL ret_val = GURL(extension_url.spec() + path);
-  DCHECK(base::StartsWith(ret_val.spec(), extension_url.spec(),
-                          base::CompareCase::INSENSITIVE_ASCII));
-
-  return ret_val;
+  DCHECK(extension_url.SchemeIs(kExtensionScheme));
+  return extension_url.Resolve(relative_path);
 }
 
 bool Extension::ResourceMatches(const URLPatternSet& pattern_set,
@@ -395,8 +381,12 @@ const std::string& Extension::id() const {
   return manifest_->extension_id();
 }
 
+const HashedExtensionId& Extension::hashed_id() const {
+  return manifest_->hashed_id();
+}
+
 const std::string Extension::VersionString() const {
-  return version()->GetString();
+  return version_.GetString();
 }
 
 const std::string Extension::GetVersionForDisplay() const {
@@ -458,7 +448,7 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
                                 int creation_flags,
                                 base::string16* error) {
   if (!explicit_id.empty()) {
-    manifest->set_extension_id(explicit_id);
+    manifest->SetExtensionId(explicit_id);
     return true;
   }
 
@@ -471,7 +461,7 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
       return false;
     }
     std::string extension_id = crx_file::id_util::GenerateId(public_key_bytes);
-    manifest->set_extension_id(extension_id);
+    manifest->SetExtensionId(extension_id);
     return true;
   }
 
@@ -487,7 +477,7 @@ bool Extension::InitExtensionID(extensions::Manifest* manifest,
       NOTREACHED() << "Could not create ID from path.";
       return false;
     }
-    manifest->set_extension_id(extension_id);
+    manifest->SetExtensionId(extension_id);
     return true;
   }
 }
@@ -568,9 +558,12 @@ bool Extension::LoadName(base::string16* error) {
     *error = base::ASCIIToUTF16(errors::kInvalidName);
     return false;
   }
+
   non_localized_name_ = base::UTF16ToUTF8(localized_name);
-  base::i18n::AdjustStringForLocaleDirection(&localized_name);
-  name_ = base::UTF16ToUTF8(localized_name);
+  base::string16 sanitized_name =
+      base::CollapseWhitespace(localized_name, true);
+  base::i18n::SanitizeUserSuppliedString(&sanitized_name);
+  display_name_ = base::UTF16ToUTF8(sanitized_name);
   return true;
 }
 
@@ -580,8 +573,8 @@ bool Extension::LoadVersion(base::string16* error) {
     *error = base::ASCIIToUTF16(errors::kInvalidVersion);
     return false;
   }
-  version_.reset(new base::Version(version_str));
-  if (!version_->IsValid() || version_->components().size() > 4) {
+  version_ = base::Version(version_str);
+  if (!version_.IsValid() || version_.components().size() > 4) {
     *error = base::ASCIIToUTF16(errors::kInvalidVersion);
     return false;
   }
@@ -636,7 +629,7 @@ bool Extension::LoadExtent(const char* key,
     std::string pattern_string;
     if (!pattern_list->GetString(i, &pattern_string)) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i), errors::kExpectString);
+          value_error, base::NumberToString(i), errors::kExpectString);
       return false;
     }
 
@@ -649,7 +642,7 @@ bool Extension::LoadExtent(const char* key,
 
     if (parse_result != URLPattern::PARSE_SUCCESS) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           URLPattern::GetParseResultString(parse_result));
       return false;
     }
@@ -657,7 +650,7 @@ bool Extension::LoadExtent(const char* key,
     // Do not allow authors to claim "<all_urls>".
     if (pattern.match_all_urls()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           errors::kCannotClaimAllURLsInExtent);
       return false;
     }
@@ -665,7 +658,7 @@ bool Extension::LoadExtent(const char* key,
     // Do not allow authors to claim "*" for host.
     if (pattern.host().empty()) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i),
+          value_error, base::NumberToString(i),
           errors::kCannotClaimAllHostsInExtent);
       return false;
     }
@@ -674,7 +667,7 @@ bool Extension::LoadExtent(const char* key,
     // imply one at the end.
     if (pattern.path().find('*') != std::string::npos) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
-          value_error, base::SizeTToString(i), errors::kNoWildCardsInPaths);
+          value_error, base::NumberToString(i), errors::kNoWildCardsInPaths);
       return false;
     }
     pattern.SetPath(pattern.path() + '*');
@@ -743,7 +736,7 @@ bool Extension::LoadShortName(base::string16* error) {
     base::i18n::AdjustStringForLocaleDirection(&localized_short_name);
     short_name_ = base::UTF16ToUTF8(localized_short_name);
   } else {
-    short_name_ = name_;
+    short_name_ = display_name_;
   }
   return true;
 }

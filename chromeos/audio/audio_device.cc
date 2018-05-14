@@ -127,7 +127,7 @@ AudioDeviceType AudioDevice::GetAudioType(
     return AUDIO_TYPE_OTHER;
 }
 
-AudioDevice::AudioDevice() {}
+AudioDevice::AudioDevice() = default;
 
 AudioDevice::AudioDevice(const AudioNode& node) {
   is_input = node.is_input;
@@ -178,9 +178,8 @@ std::string AudioDevice::ToString() const {
   base::StringAppendF(&result,
                       "active = %s ",
                       active ? "true" : "false");
-  base::StringAppendF(&result,
-                      "plugged_time= %s ",
-                      base::Uint64ToString(plugged_time).c_str());
+  base::StringAppendF(&result, "plugged_time= %s ",
+                      base::NumberToString(plugged_time).c_str());
   base::StringAppendF(&result, "mic_positions = %s ", mic_positions.c_str());
 
   return result;

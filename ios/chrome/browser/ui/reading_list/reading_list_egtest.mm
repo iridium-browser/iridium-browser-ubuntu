@@ -6,16 +6,19 @@
 #import <UIKit/UIKit.h>
 #import <XCTest/XCTest.h>
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
+#include "base/ios/ios_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/ios/wait_util.h"
 #include "components/reading_list/core/reading_list_model.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
+#import "ios/chrome/browser/ui/commands/reading_list_add_command.h"
+#import "ios/chrome/browser/ui/reading_list/reading_list_collection_view_controller.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_collection_view_item.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_empty_collection_background.h"
+#import "ios/chrome/browser/ui/reading_list/reading_list_toolbar_button.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
@@ -36,6 +39,7 @@
 #import "ios/web/public/test/http_server/http_server.h"
 #include "ios/web/public/test/http_server/http_server_util.h"
 #import "ios/web/public/test/web_view_content_test_util.h"
+#import "ios/web/public/web_state/web_state.h"
 #include "net/base/network_change_notifier.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -104,20 +108,35 @@ ReadingListModel* GetReadingListModel() {
   return model;
 }
 
+// Scroll to the top of the Reading List.
+void ScrollToTop() {
+  NSError* error = nil;
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          [ReadingListCollectionViewController
+                                              accessibilityIdentifier])]
+      performAction:grey_scrollToContentEdge(kGREYContentEdgeTop)
+              error:&error];
+  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
+}
+
 // Asserts the |button_id| button is not visible.
 void AssertButtonNotVisibleWithID(int button_id) {
   [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
-                                   button_id)]
-      assertWithMatcher:grey_notVisible()];
+      selectElementWithMatcher:
+          grey_allOf(
+              chrome_test_util::ButtonWithAccessibilityLabelId(button_id),
+              grey_ancestor(grey_kindOfClass([ReadingListToolbarButton class])),
+              nil)] assertWithMatcher:grey_notVisible()];
 }
 
 // Assert the |button_id| button is visible.
 void AssertButtonVisibleWithID(int button_id) {
   [[EarlGrey
-      selectElementWithMatcher:chrome_test_util::ButtonWithAccessibilityLabelId(
-                                   button_id)]
-      assertWithMatcher:grey_sufficientlyVisible()];
+      selectElementWithMatcher:
+          grey_allOf(
+              chrome_test_util::ButtonWithAccessibilityLabelId(button_id),
+              grey_ancestor(grey_kindOfClass([ReadingListToolbarButton class])),
+              nil)] assertWithMatcher:grey_sufficientlyVisible()];
 }
 
 // Taps the |button_id| button.
@@ -127,13 +146,21 @@ void TapButtonWithID(int button_id) {
                                    button_id)] performAction:grey_tap()];
 }
 
-// Performs |action| on the entry with the title |entryTitle|.
+// Performs |action| on the entry with the title |entryTitle|. The view can be
+// scrolled down to find the entry.
 void performActionOnEntry(const std::string& entryTitle,
                           id<GREYAction> action) {
-  [[EarlGrey selectElementWithMatcher:
-                 grey_allOf(chrome_test_util::StaticTextWithAccessibilityLabel(
-                                base::SysUTF8ToNSString(entryTitle)),
-                            grey_sufficientlyVisible(), nil)]
+  ScrollToTop();
+  id<GREYMatcher> matcher =
+      grey_allOf(chrome_test_util::StaticTextWithAccessibilityLabel(
+                     base::SysUTF8ToNSString(entryTitle)),
+                 grey_ancestor(grey_kindOfClass([ReadingListCell class])),
+                 grey_sufficientlyVisible(), nil);
+  [[[EarlGrey selectElementWithMatcher:matcher]
+         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 100)
+      onElementWithMatcher:grey_accessibilityID(
+                               [ReadingListCollectionViewController
+                                   accessibilityIdentifier])]
       performAction:action];
 }
 
@@ -150,13 +177,18 @@ void LongPressEntry(const std::string& entryTitle) {
 
 // Asserts that the entry with the title |entryTitle| is visible.
 void AssertEntryVisible(const std::string& entryTitle) {
-  [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  [[EarlGrey
+  ScrollToTop();
+  [[[EarlGrey
       selectElementWithMatcher:
           grey_allOf(chrome_test_util::StaticTextWithAccessibilityLabel(
                          base::SysUTF8ToNSString(entryTitle)),
                      grey_ancestor(grey_kindOfClass([ReadingListCell class])),
-                     nil)] assertWithMatcher:grey_sufficientlyVisible()];
+                     grey_sufficientlyVisible(), nil)]
+         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 100)
+      onElementWithMatcher:grey_accessibilityID(
+                               [ReadingListCollectionViewController
+                                   accessibilityIdentifier])]
+      assertWithMatcher:grey_notNil()];
 }
 
 // Asserts that all the entries are visible.
@@ -176,12 +208,22 @@ void AssertAllEntriesVisible() {
 // Asserts that the entry |title| is not visible.
 void AssertEntryNotVisible(std::string title) {
   [[GREYUIThreadExecutor sharedInstance] drainUntilIdle];
-  [[EarlGrey
+  ScrollToTop();
+  NSError* error;
+
+  [[[EarlGrey
       selectElementWithMatcher:
           grey_allOf(chrome_test_util::StaticTextWithAccessibilityLabel(
                          base::SysUTF8ToNSString(title)),
                      grey_ancestor(grey_kindOfClass([ReadingListCell class])),
-                     nil)] assertWithMatcher:grey_notVisible()];
+                     grey_sufficientlyVisible(), nil)]
+         usingSearchAction:grey_scrollInDirection(kGREYDirectionDown, 100)
+      onElementWithMatcher:grey_accessibilityID(
+                               [ReadingListCollectionViewController
+                                   accessibilityIdentifier])]
+      assertWithMatcher:grey_notNil()
+                  error:&error];
+  GREYAssertNotNil(error, @"Entry is visible");
 }
 
 // Asserts |header| is visible.
@@ -194,9 +236,7 @@ void AssertHeaderNotVisible(std::string header) {
 
 // Opens the reading list menu using command line.
 void OpenReadingList() {
-  GenericChromeCommand* command =
-      [[GenericChromeCommand alloc] initWithTag:IDC_SHOW_READING_LIST];
-  chrome_test_util::RunCommandWithActiveViewController(command);
+  [chrome_test_util::BrowserCommandDispatcherForMainBVC() showReadingList];
 }
 
 // Adds a read and an unread entry to the model, opens the reading list menu and
@@ -238,8 +278,20 @@ id<GREYMatcher> EmptyBackground() {
 // Adds the current page to the Reading List.
 void AddCurrentPageToReadingList() {
   // Add the page to the reading list.
-  [ChromeEarlGreyUI openShareMenu];
-  TapButtonWithID(IDS_IOS_SHARE_MENU_READING_LIST_ACTION);
+  if (base::ios::IsRunningOnIOS11OrLater()) {
+    // On iOS 11, it is not possible to interact with the share menu in EG.
+    // Send directly the command instead. This is the closest behavior we can
+    // have from the normal behavior.
+    web::WebState* web_state = chrome_test_util::GetCurrentWebState();
+    ReadingListAddCommand* command = [[ReadingListAddCommand alloc]
+        initWithURL:web_state->GetVisibleURL()
+              title:base::SysUTF16ToNSString(web_state->GetTitle())];
+    [chrome_test_util::DispatcherForActiveViewController()
+        addToReadingList:command];
+  } else {
+    [ChromeEarlGreyUI openShareMenu];
+    TapButtonWithID(IDS_IOS_SHARE_MENU_READING_LIST_ACTION);
+  }
 
   // Wait for the snackbar to appear.
   id<GREYMatcher> snackbar_matcher =
@@ -398,10 +450,18 @@ void AssertIsShowingDistillablePage(bool online) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version via context menu.
-- (void)testSavingToReadingListAndLoadDistilled {
+// TODO(crbug.com/796082): Re-enable this test on devices.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testSavingToReadingListAndLoadDistilled \
+  testSavingToReadingListAndLoadDistilled
+#else
+#define MAYBE_testSavingToReadingListAndLoadDistilled \
+  FLAKY_testSavingToReadingListAndLoadDistilled
+#endif
+- (void)MAYBE_testSavingToReadingListAndLoadDistilled {
   auto network_change_disabler =
-      base::MakeUnique<net::NetworkChangeNotifier::DisableForTest>();
-  auto wifi_network = base::MakeUnique<WifiNetworkChangeNotifier>();
+      std::make_unique<net::NetworkChangeNotifier::DisableForTest>();
+  auto wifi_network = std::make_unique<WifiNetworkChangeNotifier>();
   web::test::SetUpSimpleHttpServer(ResponsesForDistillationServer());
   GURL distillablePageURL(web::test::HttpServer::MakeUrl(kDistillableURL));
   GURL nonDistillablePageURL(
@@ -446,10 +506,18 @@ void AssertIsShowingDistillablePage(bool online) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads online version by tapping on entry.
-- (void)testSavingToReadingListAndLoadNormal {
+// TODO(crbug.com/796082): Re-enable this test on devices.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testSavingToReadingListAndLoadNormal \
+  testSavingToReadingListAndLoadNormal
+#else
+#define MAYBE_testSavingToReadingListAndLoadNormal \
+  FLAKY_testSavingToReadingListAndLoadNormal
+#endif
+- (void)MAYBE_testSavingToReadingListAndLoadNormal {
   auto network_change_disabler =
-      base::MakeUnique<net::NetworkChangeNotifier::DisableForTest>();
-  auto wifi_network = base::MakeUnique<WifiNetworkChangeNotifier>();
+      std::make_unique<net::NetworkChangeNotifier::DisableForTest>();
+  auto wifi_network = std::make_unique<WifiNetworkChangeNotifier>();
   web::test::SetUpSimpleHttpServer(ResponsesForDistillationServer());
   web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
   std::string pageTitle(kDistillableTitle);
@@ -485,10 +553,18 @@ void AssertIsShowingDistillablePage(bool online) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version by tapping on entry without web server.
-- (void)testSavingToReadingListAndLoadNoNetwork {
+// TODO(crbug.com/796082): Re-enable this test on devices.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testSavingToReadingListAndLoadNoNetwork \
+  testSavingToReadingListAndLoadNoNetwork
+#else
+#define MAYBE_testSavingToReadingListAndLoadNoNetwork \
+  FLAKY_testSavingToReadingListAndLoadNoNetwork
+#endif
+- (void)MAYBE_testSavingToReadingListAndLoadNoNetwork {
   auto network_change_disabler =
-      base::MakeUnique<net::NetworkChangeNotifier::DisableForTest>();
-  auto wifi_network = base::MakeUnique<WifiNetworkChangeNotifier>();
+      std::make_unique<net::NetworkChangeNotifier::DisableForTest>();
+  auto wifi_network = std::make_unique<WifiNetworkChangeNotifier>();
   web::test::SetUpSimpleHttpServer(ResponsesForDistillationServer());
   std::string pageTitle(kDistillableTitle);
   web::test::HttpServer& server = web::test::HttpServer::GetSharedInstance();
@@ -529,10 +605,18 @@ void AssertIsShowingDistillablePage(bool online) {
 // Tests that sharing a web page to the Reading List results in a snackbar
 // appearing, and that the Reading List entry is present in the Reading List.
 // Loads offline version by tapping on entry with delayed web server.
-- (void)testSavingToReadingListAndLoadBadNetwork {
+// TODO(crbug.com/796082): Re-enable this test on devices.
+#if TARGET_IPHONE_SIMULATOR
+#define MAYBE_testSavingToReadingListAndLoadBadNetwork \
+  testSavingToReadingListAndLoadBadNetwork
+#else
+#define MAYBE_testSavingToReadingListAndLoadBadNetwork \
+  FLAKY_testSavingToReadingListAndLoadBadNetwork
+#endif
+- (void)MAYBE_testSavingToReadingListAndLoadBadNetwork {
   auto network_change_disabler =
-      base::MakeUnique<net::NetworkChangeNotifier::DisableForTest>();
-  auto wifi_network = base::MakeUnique<WifiNetworkChangeNotifier>();
+      std::make_unique<net::NetworkChangeNotifier::DisableForTest>();
+  auto wifi_network = std::make_unique<WifiNetworkChangeNotifier>();
   web::test::SetUpSimpleHttpServer(ResponsesForDistillationServer());
   std::string pageTitle(kDistillableTitle);
   // Open http://potato
@@ -549,8 +633,8 @@ void AssertIsShowingDistillablePage(bool online) {
   AssertEntryVisible(pageTitle);
   WaitForDistillation();
 
-  web::test::SetUpHttpServer(base::MakeUnique<web::DelayedResponseProvider>(
-      base::MakeUnique<HtmlResponseProvider>(ResponsesForDistillationServer()),
+  web::test::SetUpHttpServer(std::make_unique<web::DelayedResponseProvider>(
+      std::make_unique<HtmlResponseProvider>(ResponsesForDistillationServer()),
       kDelayForSlowWebServer));
   // Long press the entry, and open it offline.
   TapEntry(pageTitle);

@@ -13,16 +13,20 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 
+namespace search_provider_logos {
 class LogoService;
+}  // namespace search_provider_logos
 
 // The C++ counterpart to LogoBridge.java. Enables Java code to access the
 // default search provider's logo.
 class LogoBridge {
  public:
-  explicit LogoBridge(jobject j_profile);
+  explicit LogoBridge(const base::android::JavaRef<jobject>& j_profile);
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
-  // TODO(treib): Double-check the observer contract (esp. for LogoTracker).
+  // TODO(treib): Double-check the observer contract (esp. for
+  // LogoService::GetLogo()).
+  //
   // Gets the current non-animated logo (downloading it if necessary) and passes
   // it to the observer.
   // The observer's |onLogoAvailable| is guaranteed to be called at least once:
@@ -48,7 +52,7 @@ class LogoBridge {
 
   virtual ~LogoBridge();
 
-  LogoService* logo_service_;
+  search_provider_logos::LogoService* logo_service_;
 
   std::unique_ptr<AnimatedLogoFetcher> animated_logo_fetcher_;
 

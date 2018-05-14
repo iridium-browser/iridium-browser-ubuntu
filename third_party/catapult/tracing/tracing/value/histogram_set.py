@@ -2,7 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import collections
+
 from tracing.value import histogram as histogram_module
+from tracing.value.diagnostics import all_diagnostics
 from tracing.value.diagnostics import diagnostic
 from tracing.value.diagnostics import diagnostic_ref
 
@@ -53,13 +56,10 @@ class HistogramSet(object):
     histograms = self
     def HandleDiagnosticMap(dm):
       for diag in dm.itervalues():
-        if isinstance(
-            diag, (histogram_module.RelatedHistogramSet,
-                   histogram_module.RelatedHistogramMap)):
+        if isinstance(diag, histogram_module.RelatedHistogramMap):
           diag.Resolve(histograms)
 
     for hist in self:
-      hist.diagnostics.ResolveSharedDiagnostics(self)
       HandleDiagnosticMap(hist.diagnostics)
       for dm in hist.nan_diagnostic_maps:
         HandleDiagnosticMap(dm)
@@ -76,11 +76,13 @@ class HistogramSet(object):
 
   def ImportDicts(self, dicts):
     for d in dicts:
-      if diagnostic.Diagnostic.GetDiagnosticType(d.get('type')):
+      if d.get('type') in all_diagnostics.GetDiagnosticTypenames():
         diag = diagnostic.Diagnostic.FromDict(d)
         self._shared_diagnostics_by_guid[d['guid']] = diag
       else:
-        self.AddHistogram(histogram_module.Histogram.FromDict(d))
+        hist = histogram_module.Histogram.FromDict(d)
+        hist.diagnostics.ResolveSharedDiagnostics(self)
+        self.AddHistogram(hist)
 
   def AsDicts(self):
     dcts = []
@@ -98,3 +100,33 @@ class HistogramSet(object):
       for name, diag in hist.diagnostics.iteritems():
         if diag.has_guid and diag.guid == old_guid:
           hist.diagnostics[name] = new_diagnostic
+
+  def DeduplicateDiagnostics(self):
+    names_to_candidates = {}
+    diagnostics_to_histograms = collections.defaultdict(list)
+
+    for hist in self:
+      for name, candidate in hist.diagnostics.iteritems():
+        diagnostics_to_histograms[candidate].append(hist)
+
+        if name not in names_to_candidates:
+          names_to_candidates[name] = set()
+        names_to_candidates[name].add(candidate)
+
+    for name, candidates in names_to_candidates.iteritems():
+      deduplicated_diagnostics = set()
+
+      for candidate in candidates:
+        found = False
+        for test in deduplicated_diagnostics:
+          if candidate == test:
+            hists = diagnostics_to_histograms.get(candidate)
+            for h in hists:
+              h.diagnostics[name] = test
+            found = True
+            break
+        if not found:
+          deduplicated_diagnostics.add(candidate)
+
+        for diag in deduplicated_diagnostics:
+          self._shared_diagnostics_by_guid[diag.guid] = diag

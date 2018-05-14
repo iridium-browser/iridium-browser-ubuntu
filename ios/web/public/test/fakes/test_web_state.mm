@@ -29,16 +29,19 @@ void TestWebState::RemoveObserver(WebStateObserver* observer) {
 
 TestWebState::TestWebState()
     : browser_state_(nullptr),
-      web_usage_enabled_(false),
+      web_usage_enabled_(true),
       is_loading_(false),
+      is_visible_(false),
+      is_crashed_(false),
+      is_evicted_(false),
+      has_opener_(false),
       trust_level_(kAbsolute),
-      content_is_html_(true) {}
+      content_is_html_(true),
+      web_view_proxy_(nil) {}
 
 TestWebState::~TestWebState() {
   for (auto& observer : observers_)
-    observer.WebStateDestroyed();
-  for (auto& observer : observers_)
-    observer.ResetWebState();
+    observer.WebStateDestroyed(this);
 };
 
 WebStateDelegate* TestWebState::GetDelegate() {
@@ -57,6 +60,8 @@ bool TestWebState::IsWebUsageEnabled() const {
 
 void TestWebState::SetWebUsageEnabled(bool enabled) {
   web_usage_enabled_ = enabled;
+  if (!web_usage_enabled_)
+    SetIsEvicted(true);
 }
 
 bool TestWebState::ShouldSuppressDialogs() const {
@@ -67,6 +72,18 @@ void TestWebState::SetShouldSuppressDialogs(bool should_suppress) {}
 
 UIView* TestWebState::GetView() {
   return view_;
+}
+
+void TestWebState::WasShown() {
+  is_visible_ = true;
+  for (auto& observer : observers_)
+    observer.WasShown(this);
+}
+
+void TestWebState::WasHidden() {
+  is_visible_ = false;
+  for (auto& observer : observers_)
+    observer.WasHidden(this);
 }
 
 const NavigationManager* TestWebState::GetNavigationManager() const {
@@ -100,8 +117,22 @@ void TestWebState::SetView(UIView* view) {
   view_ = view;
 }
 
+void TestWebState::SetIsCrashed(bool value) {
+  is_crashed_ = value;
+  if (is_crashed_)
+    SetIsEvicted(true);
+}
+
+void TestWebState::SetIsEvicted(bool value) {
+  is_evicted_ = value;
+}
+
+void TestWebState::SetWebViewProxy(CRWWebViewProxyType web_view_proxy) {
+  web_view_proxy_ = web_view_proxy;
+}
+
 CRWJSInjectionReceiver* TestWebState::GetJSInjectionReceiver() const {
-  return nullptr;
+  return injection_receiver_;
 }
 
 void TestWebState::ExecuteJavaScript(const base::string16& javascript) {}
@@ -111,12 +142,10 @@ void TestWebState::ExecuteJavaScript(const base::string16& javascript,
   callback.Run(nullptr);
 }
 
+void TestWebState::ExecuteUserJavaScript(NSString* javaScript) {}
+
 const std::string& TestWebState::GetContentsMimeType() const {
   return mime_type_;
-}
-
-const std::string& TestWebState::GetContentLanguageHeader() const {
-  return content_language_;
 }
 
 bool TestWebState::ContentIsHTML() const {
@@ -148,6 +177,11 @@ void TestWebState::SetBrowserState(BrowserState* browser_state) {
   browser_state_ = browser_state;
 }
 
+void TestWebState::SetJSInjectionReceiver(
+    CRWJSInjectionReceiver* injection_receiver) {
+  injection_receiver_ = injection_receiver;
+}
+
 void TestWebState::SetContentIsHTML(bool content_is_html) {
   content_is_html_ = content_is_html;
 }
@@ -164,6 +198,18 @@ double TestWebState::GetLoadingProgress() const {
   return 0.0;
 }
 
+bool TestWebState::IsVisible() const {
+  return is_visible_;
+}
+
+bool TestWebState::IsCrashed() const {
+  return is_crashed_;
+}
+
+bool TestWebState::IsEvicted() const {
+  return is_evicted_;
+}
+
 bool TestWebState::IsBeingDestroyed() const {
   return false;
 }
@@ -176,27 +222,52 @@ void TestWebState::SetLoading(bool is_loading) {
 
   if (is_loading) {
     for (auto& observer : observers_)
-      observer.DidStartLoading();
+      observer.DidStartLoading(this);
   } else {
     for (auto& observer : observers_)
-      observer.DidStopLoading();
+      observer.DidStopLoading(this);
   }
 }
 
 void TestWebState::OnPageLoaded(
     PageLoadCompletionStatus load_completion_status) {
   for (auto& observer : observers_)
-    observer.PageLoaded(load_completion_status);
+    observer.PageLoaded(this, load_completion_status);
 }
 
 void TestWebState::OnNavigationStarted(NavigationContext* navigation_context) {
   for (auto& observer : observers_)
-    observer.DidStartNavigation(navigation_context);
+    observer.DidStartNavigation(this, navigation_context);
+}
+
+void TestWebState::OnNavigationFinished(NavigationContext* navigation_context) {
+  for (auto& observer : observers_)
+    observer.DidFinishNavigation(this, navigation_context);
 }
 
 void TestWebState::OnRenderProcessGone() {
   for (auto& observer : observers_)
-    observer.RenderProcessGone();
+    observer.RenderProcessGone(this);
+}
+
+void TestWebState::OnFormActivity(const FormActivityParams& params) {
+  for (auto& observer : observers_) {
+    observer.FormActivityRegistered(this, params);
+  }
+}
+
+void TestWebState::OnDocumentSubmitted(const std::string& form_name,
+                                       bool user_initiated,
+                                       bool is_main_frame) {
+  for (auto& observer : observers_) {
+    observer.DocumentSubmitted(this, form_name, user_initiated, is_main_frame);
+  }
+}
+
+void TestWebState::OnVisibleSecurityStateChanged() {
+  for (auto& observer : observers_) {
+    observer.DidChangeVisibleSecurityState(this);
+  }
 }
 
 void TestWebState::ShowTransientContentView(CRWContentView* content_view) {
@@ -217,12 +288,16 @@ void TestWebState::SetCurrentURL(const GURL& url) {
   url_ = url;
 }
 
+void TestWebState::SetVisibleURL(const GURL& url) {
+  url_ = url;
+}
+
 void TestWebState::SetTrustLevel(URLVerificationTrustLevel trust_level) {
   trust_level_ = trust_level;
 }
 
 CRWWebViewProxyType TestWebState::GetWebViewProxy() const {
-  return nullptr;
+  return web_view_proxy_;
 }
 
 WebStateInterfaceProvider* TestWebState::GetWebStateInterfaceProvider() {
@@ -230,17 +305,16 @@ WebStateInterfaceProvider* TestWebState::GetWebStateInterfaceProvider() {
 }
 
 bool TestWebState::HasOpener() const {
-  return false;
+  return has_opener_;
+}
+
+void TestWebState::SetHasOpener(bool has_opener) {
+  has_opener_ = has_opener;
 }
 
 void TestWebState::TakeSnapshot(const SnapshotCallback& callback,
                                 CGSize target_size) const {
   callback.Run(gfx::Image([[UIImage alloc] init]));
-}
-
-base::WeakPtr<WebState> TestWebState::AsWeakPtr() {
-  NOTREACHED();
-  return base::WeakPtr<WebState>();
 }
 
 }  // namespace web

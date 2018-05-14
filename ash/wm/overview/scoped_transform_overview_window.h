@@ -12,12 +12,12 @@
 #include "ash/wm/overview/overview_animation_type.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/events/event_handler.h"
+#include "ui/compositor/layer_animation_observer.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
-
-class SkRegion;
 
 namespace aura {
 class Window;
@@ -27,6 +27,10 @@ namespace gfx {
 class Rect;
 }
 
+namespace ui {
+class Layer;
+}
+
 namespace views {
 class Widget;
 }
@@ -34,14 +38,29 @@ class Widget;
 namespace ash {
 
 class ScopedOverviewAnimationSettings;
+class WindowSelectorItem;
 
 // Manages a window, and its transient children, in the overview mode. This
 // class allows transforming the windows with a helper to determine the best
 // fit in certain bounds. The window's state is restored when this object is
 // destroyed.
-class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
+class ASH_EXPORT ScopedTransformOverviewWindow
+    : public ui::ImplicitAnimationObserver {
  public:
-  class OverviewContentMask;
+  // Overview windows have certain properties if their aspect ratio exceedes a
+  // threshold. This enum keeps track of which category the window falls into,
+  // based on its aspect ratio.
+  enum class GridWindowFillMode {
+    kNormal = 0,
+    kLetterBoxed,
+    kPillarBoxed,
+  };
+
+  // Windows whose aspect ratio surpass this (width twice as large as height or
+  // vice versa) will be classified as too wide or too tall and will be handled
+  // slightly differently in overview mode.
+  static constexpr float kExtremeWindowRatioThreshold = 2.f;
+
   using ScopedAnimationSettings =
       std::vector<std::unique_ptr<ScopedOverviewAnimationSettings>>;
 
@@ -52,20 +71,12 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
                             int top_view_inset,
                             int title_height);
 
-  // Returns |rect| having been shrunk to fit within |bounds| (preserving the
-  // aspect ratio). Takes into account a window header that is |top_view_inset|
-  // tall in the original window getting replaced by a window caption that is
-  // |title_height| tall in the transformed window.
-  static gfx::Rect ShrinkRectToFitPreservingAspectRatio(const gfx::Rect& rect,
-                                                        const gfx::Rect& bounds,
-                                                        int top_view_inset,
-                                                        int title_height);
-
   // Returns the transform turning |src_rect| into |dst_rect|.
   static gfx::Transform GetTransformForRect(const gfx::Rect& src_rect,
                                             const gfx::Rect& dst_rect);
 
-  explicit ScopedTransformOverviewWindow(aura::Window* window);
+  ScopedTransformOverviewWindow(WindowSelectorItem* selector_item,
+                                aura::Window* window);
   ~ScopedTransformOverviewWindow() override;
 
   // Starts an animation sequence which will use animation settings specified by
@@ -108,7 +119,10 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
   int GetTopInset() const;
 
   // Restores and animates the managed window to its non overview mode state.
-  void RestoreWindow();
+  // If |reset_transform| equals false, the window's transform will not be reset
+  // to identity transform when exiting the overview mode. See
+  // WindowSelectorItem::RestoreWindow() for details why we need this.
+  void RestoreWindow(bool reset_transform);
 
   // Informs the ScopedTransformOverviewWindow that the window being watched was
   // destroyed. This resets the internal window pointer.
@@ -124,17 +138,26 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
   // Sets the opacity of the managed windows.
   void SetOpacity(float opacity);
 
-  // Hides the window header whose size is given in |TOP_VIEW_INSET| window
-  // property.
-  void HideHeader();
-
-  // Shows the window header that is hidden by HideHeader().
-  void ShowHeader();
-
   // Creates/Deletes a mirror window for minimized windows.
   void UpdateMirrorWindowForMinimizedState();
 
+  // Returns |rect| having been shrunk to fit within |bounds| (preserving the
+  // aspect ratio). Takes into account a window header that is |top_view_inset|
+  // tall in the original window getting replaced by a window caption that is
+  // |title_height| tall in the transformed window. If |type_| is not normal,
+  // write |window_selector_bounds_|, which would differ than the return bounds.
+  gfx::Rect ShrinkRectToFitPreservingAspectRatio(const gfx::Rect& rect,
+                                                 const gfx::Rect& bounds,
+                                                 int top_view_inset,
+                                                 int title_height);
+
   aura::Window* window() const { return window_; }
+
+  GridWindowFillMode type() const { return type_; }
+
+  base::Optional<gfx::Rect> window_selector_bounds() const {
+    return window_selector_bounds_;
+  }
 
   // Closes the transient root of the window managed by |this|.
   void Close();
@@ -150,12 +173,19 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
   // does not exist.
   aura::Window* GetOverviewWindowForMinimizedState() const;
 
-  // ui::EventHandler:
-  void OnGestureEvent(ui::GestureEvent* event) override;
-  void OnMouseEvent(ui::MouseEvent* event) override;
+  // Called via WindowSelectorItem from WindowGrid when |window_|'s bounds
+  // change. Must be called before PositionWindows in WindowGrid.
+  void UpdateWindowDimensionsType();
+
+  views::Widget* minimized_widget() { return minimized_widget_.get(); }
+
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override;
 
  private:
   friend class WindowSelectorTest;
+  class LayerCachingAndFilteringObserver;
+  class WindowMask;
 
   // Closes the window managed by |this|.
   void CloseWidget();
@@ -165,15 +195,11 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
   // Makes Close() execute synchronously when used in tests.
   static void SetImmediateCloseForTests();
 
+  // A weak pointer to the window selector item that owns the transform window.
+  WindowSelectorItem* selector_item_;
+
   // A weak pointer to the real window in the overview.
   aura::Window* window_;
-
-  // Original |window_|'s shape, if it was set on the window.
-  std::unique_ptr<SkRegion> original_window_shape_;
-
-  // True after the |original_window_shape_| has been set or after it has
-  // been determined that window shape was not originally set on the |window_|.
-  bool determined_original_window_shape_;
 
   // Tracks if this window was ignored by the shelf.
   bool ignored_by_shelf_;
@@ -181,14 +207,33 @@ class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
   // True if the window has been transformed for overview mode.
   bool overview_started_;
 
-  // The original transform of the window before entering overview mode.
-  gfx::Transform original_transform_;
-
   // The original opacity of the window before entering overview mode.
   float original_opacity_;
 
+  // Specifies how the window is laid out in the grid.
+  GridWindowFillMode type_ = GridWindowFillMode::kNormal;
+
+  // Empty if window is of type normal. Contains the bounds the window selector
+  // item should be if the window is too wide or too tall.
+  base::Optional<gfx::Rect> window_selector_bounds_;
+
   // A widget that holds the content for the minimized window.
   std::unique_ptr<views::Widget> minimized_widget_;
+
+  // The observers associated with the layers we requested caching render
+  // surface and trilinear filtering. The requests will be removed in dtor if
+  // the layer has not been destroyed.
+  std::vector<std::unique_ptr<LayerCachingAndFilteringObserver>>
+      cached_and_filtered_layer_observers_;
+
+  // A mask to be applied on |window_|. This will give |window_| rounded edges
+  // while in overview.
+  std::unique_ptr<WindowMask> mask_;
+
+  // The original mask layer of the window before entering overview mode.
+  ui::Layer* original_mask_layer_ = nullptr;
+
+  int original_shadow_elevation_ = 0;
 
   base::WeakPtrFactory<ScopedTransformOverviewWindow> weak_ptr_factory_;
 

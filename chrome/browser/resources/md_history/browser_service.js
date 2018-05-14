@@ -29,7 +29,7 @@ cr.define('md_history', function() {
         });
       }
 
-      var removalList = items.map(function(item) {
+      const removalList = items.map(function(item) {
         return {
           url: item.url,
           timestamps: item.allTimestamps,
@@ -97,7 +97,7 @@ cr.define('md_history', function() {
      */
     recordAction: function(action) {
       if (action.indexOf('_') == -1)
-        action = 'HistoryPage_' + action;
+        action = `HistoryPage_${action}`;
       chrome.send('metricsHandler:recordAction', [action]);
     },
 

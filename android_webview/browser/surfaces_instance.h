@@ -13,11 +13,7 @@
 #include "components/viz/common/surfaces/frame_sink_id_allocator.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/service/display/display_client.h"
-#include "components/viz/service/frame_sinks/compositor_frame_sink_support_client.h"
-
-namespace cc {
-class BeginFrameSource;
-}
+#include "services/viz/public/interfaces/compositing/compositor_frame_sink.mojom.h"
 
 namespace gfx {
 class Rect;
@@ -26,10 +22,11 @@ class Transform;
 }
 
 namespace viz {
+class BeginFrameSource;
 class CompositorFrameSinkSupport;
 class Display;
 class FrameSinkManagerImpl;
-class LocalSurfaceIdAllocator;
+class ParentLocalSurfaceIdAllocator;
 }  // namespace viz
 
 namespace android_webview {
@@ -38,7 +35,7 @@ class ParentOutputSurface;
 
 class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
                          public viz::DisplayClient,
-                         public viz::CompositorFrameSinkSupportClient {
+                         public viz::mojom::CompositorFrameSinkClient {
  public:
   static scoped_refptr<SurfacesInstance> GetOrCreateInstance();
 
@@ -49,7 +46,8 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
                    const gfx::Rect& clip,
                    const gfx::Transform& transform,
                    const gfx::Size& frame_size,
-                   const viz::SurfaceId& child_id);
+                   const viz::SurfaceId& child_id,
+                   float device_scale_factor);
 
   void AddChildId(const viz::SurfaceId& child_id);
   void RemoveChildId(const viz::SurfaceId& child_id);
@@ -64,18 +62,23 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   void DisplayOutputSurfaceLost() override;
   void DisplayWillDrawAndSwap(
       bool will_draw_and_swap,
-      const cc::RenderPassList& render_passes) override {}
+      const viz::RenderPassList& render_passes) override {}
   void DisplayDidDrawAndSwap() override {}
+  void DisplayDidReceiveCALayerParams(
+      const gfx::CALayerParams& ca_layer_params) override {}
 
-  // viz::CompositorFrameSinkSupportClient implementation.
+  // viz::mojom::CompositorFrameSinkClient implementation.
   void DidReceiveCompositorFrameAck(
-      const std::vector<cc::ReturnedResource>& resources) override;
-  void OnBeginFrame(const cc::BeginFrameArgs& args) override;
-  void WillDrawSurface(const viz::LocalSurfaceId& local_surface_id,
-                       const gfx::Rect& damage_rect) override;
+      const std::vector<viz::ReturnedResource>& resources) override;
+  void DidPresentCompositorFrame(uint32_t presentation_token,
+                                 base::TimeTicks time,
+                                 base::TimeDelta refresh,
+                                 uint32_t flags) override;
+  void DidDiscardCompositorFrame(uint32_t presentation_token) override;
+  void OnBeginFrame(const viz::BeginFrameArgs& args) override;
   void OnBeginFramePausedChanged(bool paused) override;
   void ReclaimResources(
-      const std::vector<cc::ReturnedResource>& resources) override;
+      const std::vector<viz::ReturnedResource>& resources) override;
 
   void SetSolidColorRootFrame();
 
@@ -84,18 +87,22 @@ class SurfacesInstance : public base::RefCounted<SurfacesInstance>,
   viz::FrameSinkId frame_sink_id_;
 
   std::unique_ptr<viz::FrameSinkManagerImpl> frame_sink_manager_;
-  std::unique_ptr<cc::BeginFrameSource> begin_frame_source_;
+  std::unique_ptr<viz::BeginFrameSource> begin_frame_source_;
   std::unique_ptr<viz::Display> display_;
-  std::unique_ptr<viz::LocalSurfaceIdAllocator> local_surface_id_allocator_;
+  std::unique_ptr<viz::ParentLocalSurfaceIdAllocator>
+      parent_local_surface_id_allocator_;
   std::unique_ptr<viz::CompositorFrameSinkSupport> support_;
 
   viz::LocalSurfaceId root_id_;
+  float device_scale_factor_ = 1.0f;
   std::vector<viz::SurfaceId> child_ids_;
 
   // This is owned by |display_|.
   ParentOutputSurface* output_surface_;
 
   gfx::Size surface_size_;
+
+  uint64_t swap_id_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(SurfacesInstance);
 };

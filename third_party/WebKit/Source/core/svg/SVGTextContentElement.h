@@ -41,7 +41,7 @@ template <>
 const SVGEnumerationStringEntries&
 GetStaticStringEntries<SVGLengthAdjustType>();
 
-class SVGTextContentElement : public SVGGraphicsElement {
+class CORE_EXPORT SVGTextContentElement : public SVGGraphicsElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -73,7 +73,7 @@ class SVGTextContentElement : public SVGGraphicsElement {
     return length_adjust_.Get();
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   SVGTextContentElement(const QualifiedName&, Document&);
@@ -81,7 +81,7 @@ class SVGTextContentElement : public SVGGraphicsElement {
   bool IsPresentationAttribute(const QualifiedName&) const final;
   void CollectStyleForPresentationAttribute(const QualifiedName&,
                                             const AtomicString&,
-                                            MutableStylePropertySet*) final;
+                                            MutableCSSPropertyValueSet*) final;
   void SvgAttributeChanged(const QualifiedName&) override;
 
   bool SelfHasRelativeLengths() const override;

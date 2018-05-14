@@ -12,12 +12,12 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "components/metrics/metrics_log.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
-#include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_log.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
+#include "third_party/metrics_proto/omnibox_input_type.pb.h"
 
 using metrics::OmniboxEventProto;
 
@@ -68,6 +68,10 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::PHYSICAL_WEB;
     case AutocompleteMatchType::PHYSICAL_WEB_OVERFLOW:
       return OmniboxEventProto::Suggestion::PHYSICAL_WEB_OVERFLOW;
+    case AutocompleteMatchType::TAB_SEARCH:
+      // TODO(crbug.com/46672): Create a specific type and move this result
+      // under it.
+      return OmniboxEventProto::Suggestion::UNKNOWN_RESULT_TYPE;
     case AutocompleteMatchType::VOICE_SUGGEST:
       // VOICE_SUGGEST matches are only used in Java and are not logged,
       // so we should never reach this case.
@@ -98,7 +102,7 @@ void OmniboxMetricsProvider::OnRecordingDisabled() {
   subscription_.reset();
 }
 
-void OmniboxMetricsProvider::ProvideGeneralMetrics(
+void OmniboxMetricsProvider::ProvideCurrentSessionData(
     metrics::ChromeUserMetricsExtension* uma_proto) {
   uma_proto->mutable_omnibox_event()->Swap(
       omnibox_events_cache.mutable_omnibox_event());
@@ -117,7 +121,7 @@ void OmniboxMetricsProvider::RecordOmniboxOpenedURL(const OmniboxLog& log) {
       base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
 
   OmniboxEventProto* omnibox_event = omnibox_events_cache.add_omnibox_event();
-  omnibox_event->set_time(metrics::MetricsLog::GetCurrentTime());
+  omnibox_event->set_time_sec(metrics::MetricsLog::GetCurrentTime());
   if (log.tab_id != -1) {
     // If we know what tab the autocomplete URL was opened in, log it.
     omnibox_event->set_tab_id(log.tab_id);

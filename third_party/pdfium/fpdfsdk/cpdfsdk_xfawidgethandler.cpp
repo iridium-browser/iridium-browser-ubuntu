@@ -20,6 +20,7 @@
 #include "xfa/fxfa/cxfa_ffwidget.h"
 #include "xfa/fxfa/cxfa_ffwidgethandler.h"
 #include "xfa/fxfa/fxfa_basic.h"
+#include "xfa/fxfa/parser/cxfa_node.h"
 #include "xfa/fxgraphics/cxfa_graphics.h"
 
 CPDFSDK_XFAWidgetHandler::CPDFSDK_XFAWidgetHandler(
@@ -60,7 +61,7 @@ void CPDFSDK_XFAWidgetHandler::OnDraw(CPDFSDK_PageView* pPageView,
   if (pPageView->GetFormFillEnv()->GetFocusAnnot() != pAnnot)
     bIsHighlight = true;
 
-  GetXFAWidgetHandler(pAnnot)->RenderWidget(pAnnot->GetXFAWidget(), &gs, &mt,
+  GetXFAWidgetHandler(pAnnot)->RenderWidget(pAnnot->GetXFAWidget(), &gs, mt,
                                             bIsHighlight);
 
   // to do highlight and shadow
@@ -80,9 +81,11 @@ CFX_FloatRect CPDFSDK_XFAWidgetHandler::GetViewBBox(CPDFSDK_PageView* pPageView,
                                                     CPDFSDK_Annot* pAnnot) {
   ASSERT(pAnnot);
 
+  CXFA_Node* node = pAnnot->GetXFAWidget()->GetNode();
+  ASSERT(node->IsWidgetReady());
+
   CFX_RectF rcBBox;
-  XFA_Element eType = pAnnot->GetXFAWidget()->GetDataAcc()->GetUIType();
-  if (eType == XFA_Element::Signature)
+  if (node->GetFFWidgetType() == XFA_FFWidgetType::kSignature)
     rcBBox = pAnnot->GetXFAWidget()->GetBBox(XFA_WidgetStatus_Visible, true);
   else
     rcBBox = pAnnot->GetXFAWidget()->GetBBox(XFA_WidgetStatus_None);
@@ -97,9 +100,21 @@ CFX_FloatRect CPDFSDK_XFAWidgetHandler::GetViewBBox(CPDFSDK_PageView* pPageView,
   return rcWidget;
 }
 
-CFX_WideString CPDFSDK_XFAWidgetHandler::GetSelectedText(
-    CPDFSDK_Annot* pAnnot) {
-  return CFX_WideString();
+WideString CPDFSDK_XFAWidgetHandler::GetSelectedText(CPDFSDK_Annot* pAnnot) {
+  if (!pAnnot)
+    return WideString();
+
+  CXFA_FFWidgetHandler* pWidgetHandler = GetXFAWidgetHandler(pAnnot);
+  return pWidgetHandler->GetSelectedText(pAnnot->GetXFAWidget());
+}
+
+void CPDFSDK_XFAWidgetHandler::ReplaceSelection(CPDFSDK_Annot* pAnnot,
+                                                const WideString& text) {
+  if (!pAnnot)
+    return;
+
+  CXFA_FFWidgetHandler* pWidgetHandler = GetXFAWidgetHandler(pAnnot);
+  return pWidgetHandler->PasteText(pAnnot->GetXFAWidget(), text);
 }
 
 bool CPDFSDK_XFAWidgetHandler::HitTest(CPDFSDK_PageView* pPageView,

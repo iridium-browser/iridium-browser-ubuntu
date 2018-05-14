@@ -11,8 +11,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
+#include "chrome/browser/ui/views/frame/browser_frame_header_ash.h"
 #include "chrome/browser/ui/views/frame/browser_frame_mus.h"
-#include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "chrome/grit/theme_resources.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/aura/client/aura_constants.h"
@@ -29,11 +28,9 @@
 #include "ui/base/layout.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
-#include "ui/compositor/layer_animator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/scoped_canvas.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/mus/desktop_window_tree_host_mus.h"
 #include "ui/views/mus/window_manager_frame_values.h"
@@ -93,9 +90,6 @@ BrowserNonClientFrameViewMus::BrowserNonClientFrameViewMus(
     BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
       window_icon_(nullptr),
-#if defined(FRAME_AVATAR_BUTTON)
-      profile_switcher_(this),
-#endif
       tab_strip_(nullptr) {
 }
 
@@ -169,14 +163,6 @@ void BrowserNonClientFrameViewMus::UpdateThrobber(bool running) {
     window_icon_->Update();
 }
 
-views::View* BrowserNonClientFrameViewMus::GetProfileSwitcherView() const {
-#if defined(FRAME_AVATAR_BUTTON)
-  return profile_switcher_.view();
-#else
-  return nullptr;
-#endif
-}
-
 void BrowserNonClientFrameViewMus::UpdateClientArea() {
   std::vector<gfx::Rect> additional_client_area;
   int top_container_offset = 0;
@@ -188,8 +174,10 @@ void BrowserNonClientFrameViewMus::UpdateClientArea() {
                                       immersive_mode_controller->IsRevealed();
   if (browser_view()->IsTabStripVisible() && show_frame_decorations) {
     gfx::Rect tab_strip_bounds(GetBoundsForTabStrip(tab_strip_));
-    if (!tab_strip_bounds.IsEmpty() && tab_strip_->max_x()) {
-      tab_strip_bounds.set_width(tab_strip_->max_x());
+
+    int tab_strip_max_x = tab_strip_->GetMaxX();
+    if (!tab_strip_bounds.IsEmpty() && tab_strip_max_x) {
+      tab_strip_bounds.set_width(tab_strip_max_x);
       if (immersive_mode_controller->IsEnabled()) {
         top_container_offset =
             immersive_mode_controller->GetTopContainerVerticalOffset(
@@ -260,8 +248,9 @@ int BrowserNonClientFrameViewMus::NonClientHitTest(const gfx::Point& point) {
   int hit_test = HTCLIENT;
 
 #if defined(FRAME_AVATAR_BUTTON)
-  if (hit_test == HTCAPTION && profile_switcher_.view() &&
-      ConvertedHitTest(this, profile_switcher_.view(), point)) {
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  if (hit_test == HTCAPTION && profile_switcher_view &&
+      ConvertedHitTest(this, profile_switcher_view, point)) {
     return HTCLIENT;
   }
 #endif
@@ -315,7 +304,7 @@ void BrowserNonClientFrameViewMus::Layout() {
     LayoutIncognitoButton();
 
 #if defined(FRAME_AVATAR_BUTTON)
-  if (profile_switcher_.view())
+  if (GetProfileSwitcherView())
     LayoutProfileSwitcher();
 #endif
 
@@ -330,7 +319,7 @@ const char* BrowserNonClientFrameViewMus::GetClassName() const {
 
 void BrowserNonClientFrameViewMus::GetAccessibleNodeData(
     ui::AXNodeData* node_data) {
-  node_data->role = ui::AX_ROLE_TITLE_BAR;
+  node_data->role = ax::mojom::Role::kTitleBar;
 }
 
 gfx::Size BrowserNonClientFrameViewMus::GetMinimumSize() const {
@@ -371,24 +360,12 @@ gfx::ImageSkia BrowserNonClientFrameViewMus::GetFaviconForTabIconView() {
 // BrowserNonClientFrameViewMus, protected:
 
 // BrowserNonClientFrameView:
-void BrowserNonClientFrameViewMus::UpdateProfileIcons() {
+AvatarButtonStyle BrowserNonClientFrameViewMus::GetAvatarButtonStyle() const {
 #if defined(FRAME_AVATAR_BUTTON)
-  if (browser_view()->IsRegularOrGuestSession()) {
-    profile_switcher_.Update(AvatarButtonStyle::NATIVE);
-    return;
-  }
+  return AvatarButtonStyle::NATIVE;
+#else
+  return AvatarButtonStyle::NONE;
 #endif
-  Browser* browser = browser_view()->browser();
-
-  // Similar logic as in BrowserNonClientFrameViewAsh::UpdateProfileIcons (minus
-  // the multi-profile part). That is, no profile indicator for non-tabbed and
-  // non-app browser window, or regular/guest user browser window.
-  if (!browser->is_type_tabbed() && !browser->is_app())
-    return;
-  if (browser_view()->IsRegularOrGuestSession())
-    return;
-
-  UpdateProfileIndicatorIcon();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -418,9 +395,10 @@ int BrowserNonClientFrameViewMus::GetTabStripRightInset() const {
   int right_inset = kTabstripRightSpacing + frame_right_insets;
 
 #if defined(FRAME_AVATAR_BUTTON)
-  if (profile_switcher_.view()) {
-    right_inset += kAvatarButtonOffset +
-                   profile_switcher_.view()->GetPreferredSize().width();
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  if (profile_switcher_view) {
+    right_inset +=
+        kAvatarButtonOffset + profile_switcher_view->GetPreferredSize().width();
   }
 #endif
 
@@ -434,30 +412,13 @@ bool BrowserNonClientFrameViewMus::UsePackagedAppHeaderStyle() const {
          browser->is_app();
 }
 
-void BrowserNonClientFrameViewMus::LayoutIncognitoButton() {
-  DCHECK(profile_indicator_icon());
-#if !defined(OS_CHROMEOS)
-  // ChromeOS shows avatar on V1 app.
-  DCHECK(browser_view()->IsTabStripVisible());
-#endif
-  gfx::ImageSkia incognito_icon = GetIncognitoAvatarIcon();
-  int avatar_bottom = GetTopInset(false) + browser_view()->GetTabStripHeight() -
-                      kAvatarIconPadding;
-  int avatar_y = avatar_bottom - incognito_icon.height();
-  int avatar_height = incognito_icon.height();
-
-  gfx::Rect avatar_bounds(kAvatarIconPadding, avatar_y, incognito_icon.width(),
-                          avatar_height);
-  profile_indicator_icon()->SetBoundsRect(avatar_bounds);
-  profile_indicator_icon()->SetVisible(true);
-}
-
 void BrowserNonClientFrameViewMus::LayoutProfileSwitcher() {
 #if defined(FRAME_AVATAR_BUTTON)
-  gfx::Size button_size = profile_switcher_.view()->GetPreferredSize();
+  views::View* profile_switcher_view = GetProfileSwitcherView();
+  gfx::Size button_size = profile_switcher_view->GetPreferredSize();
   int button_x = width() - GetTabStripRightInset() + kAvatarButtonOffset;
-  profile_switcher_.view()->SetBounds(button_x, 0, button_size.width(),
-                                      button_size.height());
+  profile_switcher_view->SetBounds(button_x, 0, button_size.width(),
+                                   button_size.height());
 #endif
 }
 
@@ -471,46 +432,6 @@ bool BrowserNonClientFrameViewMus::ShouldPaint() const {
       browser_view()->immersive_mode_controller();
   return immersive_mode_controller->IsEnabled() &&
          immersive_mode_controller->IsRevealed();
-}
-
-void BrowserNonClientFrameViewMus::PaintToolbarBackground(gfx::Canvas* canvas) {
-  gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());
-  if (toolbar_bounds.IsEmpty())
-    return;
-  gfx::Point toolbar_origin(toolbar_bounds.origin());
-  View::ConvertPointToTarget(browser_view(), this, &toolbar_origin);
-  toolbar_bounds.set_origin(toolbar_origin);
-  const ui::ThemeProvider* tp = GetThemeProvider();
-
-  // Background.
-  if (tp->HasCustomImage(IDR_THEME_TOOLBAR)) {
-    const int bg_y = GetTopInset(false) + GetLayoutInsets(TAB).top();
-    const int x = toolbar_bounds.x();
-    const int y = toolbar_bounds.y();
-    canvas->TileImageInt(*tp->GetImageSkiaNamed(IDR_THEME_TOOLBAR),
-                         x + GetThemeBackgroundXInset(), y - bg_y, x, y,
-                         toolbar_bounds.width(), toolbar_bounds.height());
-  } else {
-    canvas->FillRect(toolbar_bounds,
-                     tp->GetColor(ThemeProperties::COLOR_TOOLBAR));
-  }
-
-  // Top stroke.
-  gfx::ScopedCanvas scoped_canvas(canvas);
-  gfx::Rect tabstrip_bounds =
-      GetMirroredRect(GetBoundsForTabStrip(browser_view()->tabstrip()));
-  canvas->ClipRect(tabstrip_bounds, SkClipOp::kDifference);
-  const gfx::Rect separator_rect(toolbar_bounds.x(), tabstrip_bounds.bottom(),
-                                 toolbar_bounds.width(), 0);
-  BrowserView::Paint1pxHorizontalLine(canvas, GetToolbarTopSeparatorColor(),
-                                      separator_rect, true);
-
-  // Toolbar/content separator.
-  toolbar_bounds.Inset(kClientEdgeThickness, 0);
-  BrowserView::Paint1pxHorizontalLine(
-      canvas, tp->GetColor(ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR),
-      toolbar_bounds,
-      true);
 }
 
 void BrowserNonClientFrameViewMus::PaintContentEdge(gfx::Canvas* canvas) {

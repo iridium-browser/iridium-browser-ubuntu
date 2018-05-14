@@ -7,6 +7,7 @@
 #endif
 
 #include <array>
+#include <memory>
 
 #import "remoting/ios/display/gl_display_handler.h"
 
@@ -17,7 +18,6 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "remoting/client/chromoting_client_runtime.h"
 #include "remoting/client/cursor_shape_stub_proxy.h"
@@ -61,6 +61,8 @@ class Core : public protocol::CursorShapeStub, public GlRendererDelegate {
   void SurfaceChanged(int width, int height);
 
   std::unique_ptr<protocol::FrameConsumer> GrabFrameConsumer();
+
+  // Returns a weak pointer to be used on the display thread.
   base::WeakPtr<Core> GetWeakPtr();
 
  private:
@@ -93,9 +95,6 @@ Core::Core() : weak_factory_(this) {
 
   weak_ptr_ = weak_factory_.GetWeakPtr();
 
-  runtime_->display_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&Core::Initialize, base::Unretained(this)));
-
   // Do not bind GlRenderer::OnFrameReceived. |renderer_| is not ready yet.
   owned_frame_consumer_.reset(new remoting::DualBufferFrameConsumer(
       base::Bind(&Core::OnFrameReceived, weak_ptr_),
@@ -106,6 +105,9 @@ Core::Core() : weak_factory_(this) {
   owned_renderer_proxy_.reset(
       new RendererProxy(runtime_->display_task_runner()));
   renderer_proxy_ = owned_renderer_proxy_->GetWeakPtr();
+
+  runtime_->display_task_runner()->PostTask(
+      FROM_HERE, base::Bind(&Core::Initialize, GetWeakPtr()));
 }
 
 Core::~Core() {
@@ -117,10 +119,15 @@ void Core::Initialize() {
 
   eagl_context_ = [EAGLContext currentContext];
   if (!eagl_context_) {
-    // TODO(nicholss): For prod code, make sure to check for ES3 support and
-    // fall back to ES2 if needed.
     eagl_context_ =
         [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES3];
+    if (!eagl_context_) {
+      LOG(WARNING) << "Failed to create GLES3 context. Atempting to create "
+                   << "GLES2 context.";
+      eagl_context_ =
+          [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+    }
+    DCHECK(eagl_context_);
     [EAGLContext setCurrentContext:eagl_context_];
   }
 
@@ -128,10 +135,6 @@ void Core::Initialize() {
 
   renderer_proxy_->Initialize(renderer_->GetWeakPtr());
 
-  //  renderer_.RequestCanvasSize();
-
-  // demo_screen_ = new GlDemoScreen();
-  // renderer_->AddDrawable(demo_screen_->GetWeakPtr());
   renderer_->SetDelegate(weak_ptr_);
 }
 
@@ -169,16 +172,21 @@ void Core::OnFrameReceived(std::unique_ptr<webrtc::DesktopFrame> frame,
 
 void Core::OnFrameRendered() {
   [eagl_context_ presentRenderbuffer:GL_RENDERBUFFER];
+  // Do not directly use |handler_delegate_| in the block. That will force the
+  // block to dereference |this|, which is thread unsafe because it doesn't
+  // support ARC.
+  __weak id<GlDisplayHandlerDelegate> handler_delegate = handler_delegate_;
   runtime_->ui_task_runner()->PostTask(FROM_HERE, base::BindBlockArc(^() {
-                                         [handler_delegate_ rendererTicked];
+                                         [handler_delegate rendererTicked];
                                        }));
 }
 
 void Core::OnSizeChanged(int width, int height) {
   DCHECK(runtime_->display_task_runner()->BelongsToCurrentThread());
+  __weak id<GlDisplayHandlerDelegate> handler_delegate = handler_delegate_;
   runtime_->ui_task_runner()->PostTask(
       FROM_HERE, base::BindBlockArc(^() {
-        [handler_delegate_ canvasSizeChanged:CGSizeMake(width, height)];
+        [handler_delegate canvasSizeChanged:CGSizeMake(width, height)];
       }));
 }
 
@@ -193,10 +201,12 @@ void Core::SurfaceCreated(EAGLView* view) {
   DCHECK(runtime_->display_task_runner()->BelongsToCurrentThread());
   DCHECK(eagl_context_);
 
-  [view startWithContext:eagl_context_];
+  runtime_->ui_task_runner()->PostTask(FROM_HERE, base::BindBlockArc(^() {
+                                         [view startWithContext:eagl_context_];
+                                       }));
 
   renderer_->OnSurfaceCreated(
-      base::MakeUnique<GlCanvas>(static_cast<int>([eagl_context_ API])));
+      std::make_unique<GlCanvas>(static_cast<int>([eagl_context_ API])));
 
   renderer_->RequestCanvasSize();
 
@@ -251,12 +261,12 @@ base::WeakPtr<remoting::GlDisplayHandler::Core> Core::GetWeakPtr() {
 }
 
 - (std::unique_ptr<remoting::protocol::VideoRenderer>)CreateVideoRenderer {
-  return base::MakeUnique<remoting::SoftwareVideoRenderer>(
+  return std::make_unique<remoting::SoftwareVideoRenderer>(
       _core->GrabFrameConsumer());
 }
 
 - (std::unique_ptr<remoting::protocol::CursorShapeStub>)CreateCursorShapeStub {
-  return base::MakeUnique<remoting::CursorShapeStubProxy>(
+  return std::make_unique<remoting::CursorShapeStubProxy>(
       _core->GetWeakPtr(), _runtime->display_task_runner());
 }
 

@@ -42,8 +42,7 @@ class WebOptionElement;
 class BLINK_EXPORT WebInputElement final : public WebFormControlElement {
  public:
   WebInputElement() : WebFormControlElement() {}
-  WebInputElement(const WebInputElement& element)
-      : WebFormControlElement(element) {}
+  WebInputElement(const WebInputElement& element) = default;
 
   WebInputElement& operator=(const WebInputElement& element) {
     WebFormControlElement::Assign(element);
@@ -63,6 +62,7 @@ class BLINK_EXPORT WebInputElement final : public WebFormControlElement {
   bool IsImageButton() const;
   bool IsRadioButton() const;
   bool IsCheckbox() const;
+  bool IsPasswordFieldForAutofill() const;
   // This has different behavior from 'maxLength' IDL attribute, it returns
   // defaultMaxLength() when no valid has been set, whereas 'maxLength' IDL
   // attribute returns -1.
@@ -73,6 +73,8 @@ class BLINK_EXPORT WebInputElement final : public WebFormControlElement {
   // Sets the value inside the text field without being sanitized. Can't be
   // used if a renderer doesn't exist or on a non text field type. Caret will
   // be moved to the end.
+  // TODO(crbug.com/777850): Remove all references to SetEditingValue, as it's
+  // not used anymore.
   void SetEditingValue(const WebString&);
   bool IsValidValue(const WebString&) const;
   bool IsChecked() const;
@@ -93,7 +95,7 @@ class BLINK_EXPORT WebInputElement final : public WebFormControlElement {
   // Returns true if the text of the element should be visible.
   bool ShouldRevealPassword() const;
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebInputElement(HTMLInputElement*);
   WebInputElement& operator=(HTMLInputElement*);
   operator HTMLInputElement*() const;

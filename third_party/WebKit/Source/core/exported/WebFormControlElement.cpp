@@ -31,14 +31,15 @@
 #include "public/web/WebFormControlElement.h"
 
 #include "core/dom/NodeComputedStyle.h"
-#include "core/events/Event.h"
-#include "core/html/HTMLFormControlElement.h"
-#include "core/html/HTMLFormElement.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLSelectElement.h"
-#include "core/html/HTMLTextAreaElement.h"
+#include "core/dom/events/Event.h"
+#include "core/html/forms/HTMLFormControlElement.h"
+#include "core/html/forms/HTMLFormElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
+#include "core/html/forms/HTMLTextAreaElement.h"
+#include "core/input_type_names.h"
 
-#include "platform/wtf/PassRefPtr.h"
+#include "base/memory/scoped_refptr.h"
 
 namespace blink {
 
@@ -58,6 +59,15 @@ WebString WebFormControlElement::FormControlType() const {
   return ConstUnwrap<HTMLFormControlElement>()->type();
 }
 
+WebString WebFormControlElement::FormControlTypeForAutofill() const {
+  if (auto* input = ToHTMLInputElementOrNull(*private_)) {
+    if (input->IsTextField() && input->HasBeenPasswordField())
+      return InputTypeNames::password;
+  }
+
+  return ConstUnwrap<HTMLFormControlElement>()->type();
+}
+
 bool WebFormControlElement::IsAutofilled() const {
   return ConstUnwrap<HTMLFormControlElement>()->IsAutofilled();
 }
@@ -71,49 +81,49 @@ WebString WebFormControlElement::NameForAutofill() const {
 }
 
 bool WebFormControlElement::AutoComplete() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->ShouldAutocomplete();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->ShouldAutocomplete();
-  if (isHTMLSelectElement(*private_))
-    return ConstUnwrap<HTMLSelectElement>()->ShouldAutocomplete();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->ShouldAutocomplete();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->ShouldAutocomplete();
+  if (auto* select = ToHTMLSelectElementOrNull(*private_))
+    return select->ShouldAutocomplete();
   return false;
 }
 
 void WebFormControlElement::SetValue(const WebString& value, bool send_events) {
-  if (isHTMLInputElement(*private_)) {
-    Unwrap<HTMLInputElement>()->setValue(
+  if (auto* input = ToHTMLInputElementOrNull(*private_)) {
+    input->setValue(
         value, send_events ? kDispatchInputAndChangeEvent : kDispatchNoEvent);
-  } else if (isHTMLTextAreaElement(*private_)) {
-    Unwrap<HTMLTextAreaElement>()->setValue(
+  } else if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_)) {
+    textarea->setValue(
         value, send_events ? kDispatchInputAndChangeEvent : kDispatchNoEvent);
-  } else if (isHTMLSelectElement(*private_)) {
-    Unwrap<HTMLSelectElement>()->setValue(value, send_events);
+  } else if (auto* select = ToHTMLSelectElementOrNull(*private_)) {
+    select->setValue(value, send_events);
   }
 }
 
 void WebFormControlElement::SetAutofillValue(const WebString& value) {
   // The input and change events will be sent in setValue.
-  if (isHTMLInputElement(*private_) || isHTMLTextAreaElement(*private_)) {
+  if (IsHTMLInputElement(*private_) || IsHTMLTextAreaElement(*private_)) {
     if (!Focused()) {
       Unwrap<Element>()->DispatchFocusEvent(nullptr, kWebFocusTypeForward,
                                             nullptr);
     }
     Unwrap<Element>()->DispatchScopedEvent(
         Event::CreateBubble(EventTypeNames::keydown));
-    Unwrap<TextControlElement>()->setValue(value, kDispatchInputAndChangeEvent);
+    Unwrap<TextControlElement>()->SetAutofillValue(value);
     Unwrap<Element>()->DispatchScopedEvent(
         Event::CreateBubble(EventTypeNames::keyup));
     if (!Focused()) {
       Unwrap<Element>()->DispatchBlurEvent(nullptr, kWebFocusTypeForward,
                                            nullptr);
     }
-  } else if (isHTMLSelectElement(*private_)) {
+  } else if (auto* select = ToHTMLSelectElementOrNull(*private_)) {
     if (!Focused()) {
       Unwrap<Element>()->DispatchFocusEvent(nullptr, kWebFocusTypeForward,
                                             nullptr);
     }
-    Unwrap<HTMLSelectElement>()->setValue(value, true);
+    select->setValue(value, true);
     if (!Focused()) {
       Unwrap<Element>()->DispatchBlurEvent(nullptr, kWebFocusTypeForward,
                                            nullptr);
@@ -122,62 +132,62 @@ void WebFormControlElement::SetAutofillValue(const WebString& value) {
 }
 
 WebString WebFormControlElement::Value() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->value();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->value();
-  if (isHTMLSelectElement(*private_))
-    return ConstUnwrap<HTMLSelectElement>()->value();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->value();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->value();
+  if (auto* select = ToHTMLSelectElementOrNull(*private_))
+    return select->value();
   return WebString();
 }
 
 void WebFormControlElement::SetSuggestedValue(const WebString& value) {
-  if (isHTMLInputElement(*private_))
-    Unwrap<HTMLInputElement>()->SetSuggestedValue(value);
-  else if (isHTMLTextAreaElement(*private_))
-    Unwrap<HTMLTextAreaElement>()->SetSuggestedValue(value);
-  else if (isHTMLSelectElement(*private_))
-    Unwrap<HTMLSelectElement>()->SetSuggestedValue(value);
+  if (auto* input = ToHTMLInputElementOrNull(*private_)) {
+    input->SetSuggestedValue(value);
+  } else if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_)) {
+    textarea->SetSuggestedValue(value);
+  } else if (auto* select = ToHTMLSelectElementOrNull(*private_))
+    select->SetSuggestedValue(value);
 }
 
 WebString WebFormControlElement::SuggestedValue() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->SuggestedValue();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->SuggestedValue();
-  if (isHTMLSelectElement(*private_))
-    return ConstUnwrap<HTMLSelectElement>()->SuggestedValue();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->SuggestedValue();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->SuggestedValue();
+  if (auto* select = ToHTMLSelectElementOrNull(*private_))
+    return select->SuggestedValue();
   return WebString();
 }
 
 WebString WebFormControlElement::EditingValue() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->InnerEditorValue();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->InnerEditorValue();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->InnerEditorValue();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->InnerEditorValue();
   return WebString();
 }
 
 void WebFormControlElement::SetSelectionRange(int start, int end) {
-  if (isHTMLInputElement(*private_))
-    Unwrap<HTMLInputElement>()->SetSelectionRange(start, end);
-  else if (isHTMLTextAreaElement(*private_))
-    Unwrap<HTMLTextAreaElement>()->SetSelectionRange(start, end);
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    input->SetSelectionRange(start, end);
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    textarea->SetSelectionRange(start, end);
 }
 
 int WebFormControlElement::SelectionStart() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->selectionStart();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->selectionStart();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->selectionStart();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->selectionStart();
   return 0;
 }
 
 int WebFormControlElement::SelectionEnd() const {
-  if (isHTMLInputElement(*private_))
-    return ConstUnwrap<HTMLInputElement>()->selectionEnd();
-  if (isHTMLTextAreaElement(*private_))
-    return ConstUnwrap<HTMLTextAreaElement>()->selectionEnd();
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->selectionEnd();
+  if (auto* textarea = ToHTMLTextAreaElementOrNull(*private_))
+    return textarea->selectionEnd();
   return 0;
 }
 

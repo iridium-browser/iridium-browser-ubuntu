@@ -21,7 +21,7 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
   }
   static PointerEvent* Create(const AtomicString& type,
                               const PointerEventInit& initializer) {
-    return PointerEvent::Create(type, initializer, TimeTicks::Now());
+    return PointerEvent::Create(type, initializer, CurrentTimeTicks());
   }
 
   int pointerId() const { return pointer_id_; }
@@ -39,12 +39,22 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
   bool IsMouseEvent() const override;
   bool IsPointerEvent() const override;
 
-  EventDispatchMediator* CreateMediator() override;
+  // TODO(eirage): Remove these override of coordinates getters when
+  // fractional mouseevent flag is removed.
+  double screenX() const override;
+  double screenY() const override;
+  double clientX() const override;
+  double clientY() const override;
+  double pageX() const override;
+  double pageY() const override;
+
   void ReceivedTarget() override;
 
   HeapVector<Member<PointerEvent>> getCoalescedEvents();
 
-  DECLARE_VIRTUAL_TRACE();
+  DispatchEventResult DispatchEvent(EventDispatcher&) override;
+
+  virtual void Trace(blink::Visitor*);
 
  private:
   PointerEvent(const AtomicString&,
@@ -65,16 +75,6 @@ class CORE_EXPORT PointerEvent final : public MouseEvent {
   bool coalesced_events_targets_dirty_;
 
   HeapVector<Member<PointerEvent>> coalesced_events_;
-};
-
-class PointerEventDispatchMediator final : public EventDispatchMediator {
- public:
-  static PointerEventDispatchMediator* Create(PointerEvent*);
-
- private:
-  explicit PointerEventDispatchMediator(PointerEvent*);
-  PointerEvent& Event() const;
-  DispatchEventResult DispatchEvent(EventDispatcher&) const override;
 };
 
 DEFINE_EVENT_TYPE_CASTS(PointerEvent);

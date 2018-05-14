@@ -42,14 +42,15 @@ class CORE_EXPORT ColorChooserPopupUIController final
   USING_PRE_FINALIZER(ColorChooserPopupUIController, Dispose);
 
  public:
-  static ColorChooserPopupUIController* Create(LocalFrame* frame,
-                                               ChromeClient* chrome_client,
-                                               ColorChooserClient* client) {
+  static ColorChooserPopupUIController* Create(
+      LocalFrame* frame,
+      ChromeClient* chrome_client,
+      blink::ColorChooserClient* client) {
     return new ColorChooserPopupUIController(frame, chrome_client, client);
   }
 
   ~ColorChooserPopupUIController() override;
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
   // ColorChooserUIController functions:
   void OpenUI() override;
@@ -71,7 +72,7 @@ class CORE_EXPORT ColorChooserPopupUIController final
  private:
   ColorChooserPopupUIController(LocalFrame*,
                                 ChromeClient*,
-                                ColorChooserClient*);
+                                blink::ColorChooserClient*);
 
   void OpenPopup();
   void Dispose();

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 GEN('#include "base/command_line.h"');
+GEN('#include "chrome/common/chrome_features.h"');
 
 /**
  * TestFixture for kiosk app settings WebUI testing.
@@ -23,6 +24,9 @@ KioskAppSettingsWebUITest.prototype = {
   commandLineSwitches: [{
     switchName: 'enable-consumer-kiosk',
   }],
+
+  /** @override */
+  featureList: ['', 'features::kMaterialDesignExtensions'],
 
   /**
    * Mock settings data.
@@ -60,8 +64,8 @@ KioskAppSettingsWebUITest.prototype = {
          'enableKioskAutoLaunch',
          'disableKioskAutoLaunch'
         ]);
-    this.mockHandler.stubs().getKioskAppSettings().
-        will(callFunction(function() {
+    this.mockHandler.stubs().getKioskAppSettings(ANYTHING).will(
+        callFunction(function() {
           extensions.KioskAppsOverlay.setSettings(this.settings_);
         }.bind(this)));
     this.mockHandler.stubs().addKioskApp(ANYTHING);

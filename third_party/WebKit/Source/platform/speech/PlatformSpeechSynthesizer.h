@@ -27,6 +27,8 @@
 #define PlatformSpeechSynthesizer_h
 
 #include <memory>
+
+#include "base/macros.h"
 #include "platform/PlatformExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/speech/PlatformSpeechSynthesisVoice.h"
@@ -54,21 +56,16 @@ class PLATFORM_EXPORT PlatformSpeechSynthesizerClient
   virtual void VoicesDidChange() = 0;
 
  protected:
-  virtual ~PlatformSpeechSynthesizerClient() {}
+  virtual ~PlatformSpeechSynthesizerClient() = default;
 };
 
 class PLATFORM_EXPORT PlatformSpeechSynthesizer
     : public GarbageCollectedFinalized<PlatformSpeechSynthesizer> {
-  WTF_MAKE_NONCOPYABLE(PlatformSpeechSynthesizer);
-
  public:
   static PlatformSpeechSynthesizer* Create(PlatformSpeechSynthesizerClient*);
 
   virtual ~PlatformSpeechSynthesizer();
 
-  const Vector<RefPtr<PlatformSpeechSynthesisVoice>>& VoiceList() const {
-    return voice_list_;
-  }
   virtual void Speak(PlatformSpeechSynthesisUtterance*);
   virtual void Pause();
   virtual void Resume();
@@ -78,7 +75,9 @@ class PLATFORM_EXPORT PlatformSpeechSynthesizer
     return speech_synthesizer_client_;
   }
 
-  void SetVoiceList(Vector<RefPtr<PlatformSpeechSynthesisVoice>>&);
+  const Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>& GetVoiceList();
+
+  void SetVoiceList(Vector<scoped_refptr<PlatformSpeechSynthesisVoice>>&);
 
   // Eager finalization is required to promptly release the owned
   // WebSpeechSynthesizer.
@@ -91,20 +90,25 @@ class PLATFORM_EXPORT PlatformSpeechSynthesizer
   // m_webSpeechSynthesizerClient. Eagerly releasing WebSpeechSynthesizer
   // prevents such unsafe accesses.
   EAGERLY_FINALIZE();
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit PlatformSpeechSynthesizer(PlatformSpeechSynthesizerClient*);
 
   virtual void InitializeVoiceList();
 
-  Vector<RefPtr<PlatformSpeechSynthesisVoice>> voice_list_;
+  Vector<scoped_refptr<PlatformSpeechSynthesisVoice>> voice_list_;
+  bool voices_initialized_ = false;
 
  private:
+  void MaybeInitializeVoiceList();
+
   Member<PlatformSpeechSynthesizerClient> speech_synthesizer_client_;
 
   std::unique_ptr<WebSpeechSynthesizer> web_speech_synthesizer_;
   Member<WebSpeechSynthesizerClientImpl> web_speech_synthesizer_client_;
+
+  DISALLOW_COPY_AND_ASSIGN(PlatformSpeechSynthesizer);
 };
 
 }  // namespace blink

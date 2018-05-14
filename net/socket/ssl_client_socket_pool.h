@@ -50,8 +50,7 @@ class NET_EXPORT_PRIVATE SSLSocketParams
                   const HostPortPair& host_and_port,
                   const SSLConfig& ssl_config,
                   PrivacyMode privacy_mode,
-                  int load_flags,
-                  bool expect_spdy);
+                  int load_flags);
 
   // Returns the type of the underlying connection.
   ConnectionType GetConnectionType() const;
@@ -72,7 +71,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const SSLConfig& ssl_config() const { return ssl_config_; }
   PrivacyMode privacy_mode() const { return privacy_mode_; }
   int load_flags() const { return load_flags_; }
-  bool expect_spdy() const { return expect_spdy_; }
 
  private:
   friend class base::RefCounted<SSLSocketParams>;
@@ -85,7 +83,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const SSLConfig ssl_config_;
   const PrivacyMode privacy_mode_;
   const int load_flags_;
-  const bool expect_spdy_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLSocketParams);
 };
@@ -98,6 +95,7 @@ class SSLConnectJob : public ConnectJob {
   // job.
   SSLConnectJob(const std::string& group_name,
                 RequestPriority priority,
+                const SocketTag& socket_tag,
                 ClientSocketPool::RespectLimits respect_limits,
                 const scoped_refptr<SSLSocketParams>& params,
                 const base::TimeDelta& timeout_duration,
@@ -217,6 +215,7 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
   int RequestSocket(const std::string& group_name,
                     const void* connect_params,
                     RequestPriority priority,
+                    const SocketTag& socket_tag,
                     RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
@@ -225,7 +224,8 @@ class NET_EXPORT_PRIVATE SSLClientSocketPool
   void RequestSockets(const std::string& group_name,
                       const void* params,
                       int num_sockets,
-                      const NetLogWithSource& net_log) override;
+                      const NetLogWithSource& net_log,
+                      HttpRequestInfo::RequestMotivation motivation) override;
 
   void SetPriority(const std::string& group_name,
                    ClientSocketHandle* handle,

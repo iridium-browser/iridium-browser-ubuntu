@@ -13,19 +13,18 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "content/browser/devtools/render_frame_devtools_agent_host.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigation_request.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/common/frame_messages.h"
-#include "content/common/site_isolation_policy.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/browser_side_navigation_policy.h"
-#include "third_party/WebKit/public/web/WebSandboxFlags.h"
+#include "third_party/WebKit/public/common/frame/sandbox_flags.h"
 
 namespace content {
 
@@ -41,7 +40,6 @@ base::LazyInstance<FrameTreeNodeIdMap>::DestructorAtExit
 // These values indicate the loading progress status. The minimum progress
 // value matches what Blink's ProgressTracker has traditionally used for a
 // minimum progress value.
-const double kLoadingProgressNotStarted = 0.0;
 const double kLoadingProgressMinimum = 0.1;
 const double kLoadingProgressDone = 1.0;
 
@@ -97,11 +95,17 @@ class FrameTreeNode::OpenerDestroyedObserver : public FrameTreeNode::Observer {
   // FrameTreeNode::Observer
   void OnFrameTreeNodeDestroyed(FrameTreeNode* node) override {
     if (observing_original_opener_) {
+      // The "original owner" is special. It's used for attribution, and clients
+      // walk down the original owner chain. Therefore, if a link in the chain
+      // is being destroyed, reconnect the observation to the parent of the link
+      // being destroyed.
       CHECK_EQ(owner_->original_opener(), node);
-      owner_->SetOriginalOpener(nullptr);
+      owner_->SetOriginalOpener(node->original_opener());
+      // |this| is deleted at this point.
     } else {
       CHECK_EQ(owner_->opener(), node);
       owner_->SetOpener(nullptr);
+      // |this| is deleted at this point.
     }
   }
 
@@ -131,6 +135,8 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              blink::WebTreeScopeType scope,
                              const std::string& name,
                              const std::string& unique_name,
+                             bool is_created_by_script,
+                             const base::UnguessableToken& devtools_frame_token,
                              const FrameOwnerProperties& frame_owner_properties)
     : frame_tree_(frame_tree),
       navigator_(navigator),
@@ -141,22 +147,22 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
       frame_tree_node_id_(next_frame_tree_node_id_++),
       parent_(parent),
       opener_(nullptr),
-      opener_observer_(nullptr),
       original_opener_(nullptr),
-      original_opener_observer_(nullptr),
       has_committed_real_load_(false),
       is_collapsed_(false),
       replication_state_(
           scope,
           name,
           unique_name,
-          blink::WebSandboxFlags::kNone,
           false /* should enforce strict mixed content checking */,
+          std::vector<uint32_t>()
+          /* hashes of hosts for insecure request upgrades */,
           false /* is a potentially trustworthy unique origin */,
-          false /* has received a user gesture */),
-      pending_sandbox_flags_(blink::WebSandboxFlags::kNone),
+          false /* has received a user gesture */,
+          false /* has received a user gesture before nav */),
+      is_created_by_script_(is_created_by_script),
+      devtools_frame_token_(devtools_frame_token),
       frame_owner_properties_(frame_owner_properties),
-      loading_progress_(kLoadingProgressNotStarted),
       blame_context_(frame_tree_node_id_, parent) {
   std::pair<FrameTreeNodeIdMap::iterator, bool> result =
       g_frame_tree_node_id_map.Get().insert(
@@ -170,7 +176,22 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
 }
 
 FrameTreeNode::~FrameTreeNode() {
+  // Remove the children.  See https://crbug.com/612450 for explanation why we
+  // don't just call the std::vector::clear method.
   std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
+
+  // If the removed frame was created by a script, then its history entry will
+  // never be reused - we can save some memory by removing the history entry.
+  // See also https://crbug.com/784356.
+  if (is_created_by_script_ && parent_) {
+    NavigationEntryImpl* nav_entry = static_cast<NavigationEntryImpl*>(
+        navigator()->GetController()->GetLastCommittedEntry());
+    if (nav_entry) {
+      nav_entry->RemoveEntryForFrame(this,
+                                     /* only_if_different_position = */ false);
+    }
+  }
+
   frame_tree_->FrameRemoved(this);
   for (auto& observer : observers_)
     observer.OnFrameTreeNodeDestroyed(this);
@@ -220,9 +241,7 @@ FrameTreeNode* FrameTreeNode::AddChild(std::unique_ptr<FrameTreeNode> child,
   // about the new frame.  Create a proxy for the child frame in all
   // SiteInstances that have a proxy for the frame's parent, since all frames
   // in a frame tree should have the same set of proxies.
-  // TODO(alexmos, nick): We ought to do this for non-oopif too, for openers.
-  if (SiteIsolationPolicy::AreCrossProcessFramesPossible())
-    render_manager_.CreateProxiesForChildFrame(child.get());
+  render_manager_.CreateProxiesForChildFrame(child.get());
 
   children_.push_back(std::move(child));
   return children_.back().get();
@@ -242,12 +261,22 @@ void FrameTreeNode::RemoveChild(FrameTreeNode* child) {
 }
 
 void FrameTreeNode::ResetForNewProcess() {
-  current_frame_host()->set_last_committed_url(GURL());
+  current_frame_host()->SetLastCommittedUrl(GURL());
   blame_context_.TakeSnapshot();
 
   // Remove child nodes from the tree, then delete them. This destruction
   // operation will notify observers.
   std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
+}
+
+void FrameTreeNode::ResetForNavigation() {
+  // Discard any CSP headers from the previous document.
+  replication_state_.accumulated_csp_headers.clear();
+  render_manager_.OnDidResetContentSecurityPolicy();
+
+  // Clear any CSP-set sandbox flags, and the declared feature policy for the
+  // frame.
+  UpdateFramePolicyHeaders(blink::WebSandboxFlags::kNone, {});
 }
 
 void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
@@ -259,30 +288,33 @@ void FrameTreeNode::SetOpener(FrameTreeNode* opener) {
   opener_ = opener;
 
   if (opener_) {
-    if (!opener_observer_)
-      opener_observer_ = base::MakeUnique<OpenerDestroyedObserver>(this, false);
+    opener_observer_ = std::make_unique<OpenerDestroyedObserver>(this, false);
     opener_->AddObserver(opener_observer_.get());
   }
 }
 
 void FrameTreeNode::SetOriginalOpener(FrameTreeNode* opener) {
-  DCHECK(!original_opener_ || !opener);
+  // The original opener tracks main frames only.
   DCHECK(opener == nullptr || !opener->parent());
+
+  if (original_opener_) {
+    original_opener_->RemoveObserver(original_opener_observer_.get());
+    original_opener_observer_.reset();
+  }
 
   original_opener_ = opener;
 
   if (original_opener_) {
-    DCHECK(!original_opener_observer_);
     original_opener_observer_ =
-        base::MakeUnique<OpenerDestroyedObserver>(this, true);
+        std::make_unique<OpenerDestroyedObserver>(this, true);
     original_opener_->AddObserver(original_opener_observer_.get());
   }
 }
 
 void FrameTreeNode::SetCurrentURL(const GURL& url) {
-  if (!has_committed_real_load_ && url != url::kAboutBlankURL)
+  if (!has_committed_real_load_ && !url.IsAboutBlank())
     has_committed_real_load_ = true;
-  current_frame_host()->set_last_committed_url(url);
+  current_frame_host()->SetLastCommittedUrl(url);
   blame_context_.TakeSnapshot();
 }
 
@@ -334,26 +366,12 @@ void FrameTreeNode::SetFrameName(const std::string& name,
   replication_state_.unique_name = unique_name;
 }
 
-void FrameTreeNode::SetFeaturePolicyHeader(
-    const ParsedFeaturePolicyHeader& parsed_header) {
-  replication_state_.feature_policy_header = parsed_header;
-}
-
-void FrameTreeNode::ResetFeaturePolicyHeader() {
-  replication_state_.feature_policy_header.clear();
-}
-
 void FrameTreeNode::AddContentSecurityPolicies(
     const std::vector<ContentSecurityPolicyHeader>& headers) {
   replication_state_.accumulated_csp_headers.insert(
       replication_state_.accumulated_csp_headers.end(), headers.begin(),
       headers.end());
   render_manager_.OnDidAddContentSecurityPolicies(headers);
-}
-
-void FrameTreeNode::ResetCspHeaders() {
-  replication_state_.accumulated_csp_headers.clear();
-  render_manager_.OnDidResetContentSecurityPolicy();
 }
 
 void FrameTreeNode::SetInsecureRequestPolicy(
@@ -364,21 +382,26 @@ void FrameTreeNode::SetInsecureRequestPolicy(
   replication_state_.insecure_request_policy = policy;
 }
 
-void FrameTreeNode::SetPendingSandboxFlags(
-    blink::WebSandboxFlags sandbox_flags) {
-  pending_sandbox_flags_ = sandbox_flags;
-
-  // Subframes should always inherit their parent's sandbox flags.
-  if (parent())
-    pending_sandbox_flags_ |= parent()->effective_sandbox_flags();
+void FrameTreeNode::SetInsecureNavigationsSet(
+    const std::vector<uint32_t>& insecure_navigations_set) {
+  DCHECK(std::is_sorted(insecure_navigations_set.begin(),
+                        insecure_navigations_set.end()));
+  if (insecure_navigations_set == replication_state_.insecure_navigations_set)
+    return;
+  render_manager_.OnEnforceInsecureNavigationsSet(insecure_navigations_set);
+  replication_state_.insecure_navigations_set = insecure_navigations_set;
 }
 
-void FrameTreeNode::SetPendingContainerPolicy(
-    const ParsedFeaturePolicyHeader& container_policy) {
-  // This should only be called on subframes; container policy is not mutable on
-  // main frame.
-  DCHECK(!IsMainFrame());
-  pending_container_policy_ = container_policy;
+void FrameTreeNode::SetPendingFramePolicy(blink::FramePolicy frame_policy) {
+  pending_frame_policy_.sandbox_flags = frame_policy.sandbox_flags;
+
+  if (parent()) {
+    // Subframes should always inherit their parent's sandbox flags.
+    pending_frame_policy_.sandbox_flags |= parent()->active_sandbox_flags();
+    // This is only applied on subframes; container policy is not mutable on
+    // main frame.
+    pending_frame_policy_.container_policy = frame_policy.container_policy;
+  }
 }
 
 bool FrameTreeNode::IsDescendantOf(FrameTreeNode* other) const {
@@ -404,36 +427,41 @@ FrameTreeNode* FrameTreeNode::NextSibling() const {
 bool FrameTreeNode::IsLoading() const {
   RenderFrameHostImpl* current_frame_host =
       render_manager_.current_frame_host();
-  RenderFrameHostImpl* pending_frame_host =
-      render_manager_.pending_frame_host();
 
   DCHECK(current_frame_host);
 
-  if (IsBrowserSideNavigationEnabled()) {
-    if (navigation_request_)
-      return true;
+  if (navigation_request_)
+    return true;
 
-    RenderFrameHostImpl* speculative_frame_host =
-        render_manager_.speculative_frame_host();
-    if (speculative_frame_host && speculative_frame_host->is_loading())
-      return true;
-  } else {
-    if (pending_frame_host && pending_frame_host->is_loading())
-      return true;
-  }
+  RenderFrameHostImpl* speculative_frame_host =
+      render_manager_.speculative_frame_host();
+  if (speculative_frame_host && speculative_frame_host->is_loading())
+    return true;
   return current_frame_host->is_loading();
 }
 
 bool FrameTreeNode::CommitPendingFramePolicy() {
-  bool did_change_flags =
-      pending_sandbox_flags_ != replication_state_.sandbox_flags;
+  bool did_change_flags = pending_frame_policy_.sandbox_flags !=
+                          replication_state_.frame_policy.sandbox_flags;
   bool did_change_container_policy =
-      pending_container_policy_ != replication_state_.container_policy;
+      pending_frame_policy_.container_policy !=
+      replication_state_.frame_policy.container_policy;
   if (did_change_flags)
-    replication_state_.sandbox_flags = pending_sandbox_flags_;
+    replication_state_.frame_policy.sandbox_flags =
+        pending_frame_policy_.sandbox_flags;
   if (did_change_container_policy)
-    replication_state_.container_policy = pending_container_policy_;
+    replication_state_.frame_policy.container_policy =
+        pending_frame_policy_.container_policy;
+  UpdateFramePolicyHeaders(pending_frame_policy_.sandbox_flags,
+                           replication_state_.feature_policy_header);
   return did_change_flags || did_change_container_policy;
+}
+
+void FrameTreeNode::TransferNavigationRequestOwnership(
+    RenderFrameHostImpl* render_frame_host) {
+  RenderFrameDevToolsAgentHost::OnResetNavigationRequest(
+      navigation_request_.get());
+  render_frame_host->SetNavigationRequest(std::move(navigation_request_));
 }
 
 void FrameTreeNode::CreatedNavigationRequest(
@@ -475,6 +503,9 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
   if (!navigation_request_)
     return;
 
+  RenderFrameDevToolsAgentHost::OnResetNavigationRequest(
+      navigation_request_.get());
+
   // The renderer should be informed if the caller allows to do so and the
   // navigation came from a BeginNavigation IPC.
   int need_to_inform_renderer =
@@ -508,15 +539,6 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
     current_frame_host()->Send(
         new FrameMsg_DroppedNavigation(current_frame_host()->GetRoutingID()));
   }
-
-}
-
-bool FrameTreeNode::has_started_loading() const {
-  return loading_progress_ != kLoadingProgressNotStarted;
-}
-
-void FrameTreeNode::reset_loading_progress() {
-  loading_progress_ = kLoadingProgressNotStarted;
 }
 
 void FrameTreeNode::DidStartLoading(bool to_different_document,
@@ -550,11 +572,20 @@ void FrameTreeNode::DidStopLoading() {
 
   // Notify the RenderFrameHostManager of the event.
   render_manager()->OnDidStopLoading();
+
+  // Notify accessibility that the user is no longer trying to load or
+  // reload a page.
+  BrowserAccessibilityManager* manager =
+      current_frame_host()->browser_accessibility_manager();
+  if (manager)
+    manager->DidStopLoading();
 }
 
 void FrameTreeNode::DidChangeLoadProgress(double load_progress) {
-  loading_progress_ = load_progress;
-  frame_tree_->UpdateLoadProgress();
+  DCHECK_GE(load_progress, kLoadingProgressMinimum);
+  DCHECK_LE(load_progress, kLoadingProgressDone);
+  if (IsMainFrame())
+    frame_tree_->UpdateLoadProgress(load_progress);
 }
 
 bool FrameTreeNode::StopLoading() {
@@ -597,27 +628,25 @@ void FrameTreeNode::BeforeUnloadCanceled() {
   DCHECK(current_frame_host);
   current_frame_host->ResetLoadingState();
 
-  if (IsBrowserSideNavigationEnabled()) {
-    RenderFrameHostImpl* speculative_frame_host =
-        render_manager_.speculative_frame_host();
-    if (speculative_frame_host)
-      speculative_frame_host->ResetLoadingState();
-    // Note: there is no need to set an error code on the NavigationHandle here
-    // as it has not been created yet. It is only created when the
-    // BeforeUnloadACK is received.
-    if (navigation_request_)
-      ResetNavigationRequest(false, true);
-  } else {
-    RenderFrameHostImpl* pending_frame_host =
-        render_manager_.pending_frame_host();
-    if (pending_frame_host)
-      pending_frame_host->ResetLoadingState();
-  }
+  RenderFrameHostImpl* speculative_frame_host =
+      render_manager_.speculative_frame_host();
+  if (speculative_frame_host)
+    speculative_frame_host->ResetLoadingState();
+  // Note: there is no need to set an error code on the NavigationHandle here
+  // as it has not been created yet. It is only created when the
+  // BeforeUnloadACK is received.
+  if (navigation_request_)
+    ResetNavigationRequest(false, true);
 }
 
 void FrameTreeNode::OnSetHasReceivedUserGesture() {
   render_manager_.OnSetHasReceivedUserGesture();
   replication_state_.has_received_user_gesture = true;
+}
+
+void FrameTreeNode::OnSetHasReceivedUserGestureBeforeNavigation(bool value) {
+  render_manager_.OnSetHasReceivedUserGestureBeforeNavigation(value);
+  replication_state_.has_received_user_gesture_before_nav = value;
 }
 
 FrameTreeNode* FrameTreeNode::GetSibling(int relative_offset) const {
@@ -636,6 +665,27 @@ FrameTreeNode* FrameTreeNode::GetSibling(int relative_offset) const {
 
   NOTREACHED() << "FrameTreeNode not found in its parent's children.";
   return nullptr;
+}
+
+void FrameTreeNode::UpdateFramePolicyHeaders(
+    blink::WebSandboxFlags sandbox_flags,
+    const blink::ParsedFeaturePolicy& parsed_header) {
+  bool changed = false;
+  if (replication_state_.feature_policy_header != parsed_header) {
+    replication_state_.feature_policy_header = parsed_header;
+    changed = true;
+  }
+  // TODO(iclelland): Kill the renderer if sandbox flags is not a subset of the
+  // currently effective sandbox flags from the frame. https://crbug.com/740556
+  blink::WebSandboxFlags updated_flags =
+      sandbox_flags | effective_frame_policy().sandbox_flags;
+  if (replication_state_.active_sandbox_flags != updated_flags) {
+    replication_state_.active_sandbox_flags = updated_flags;
+    changed = true;
+  }
+  // Notify any proxies if the policies have been changed.
+  if (changed)
+    render_manager()->OnDidSetFramePolicyHeaders();
 }
 
 }  // namespace content

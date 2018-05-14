@@ -11,7 +11,7 @@
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
-#include "chrome/common/features.h"
+#include "chrome/common/buildflags.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "ui/base/ui_base_types.h"
 
@@ -27,10 +27,6 @@ class ActiveTabPermissionGranter;
 class Command;
 class Extension;
 }
-
-namespace security_state {
-struct SecurityInfo;
-}  // namespace security_state
 
 // An implementation of BrowserWindow for Cocoa. Bridges between C++ and
 // the Cocoa NSWindow. Cross-platform code will interact with this object when
@@ -84,8 +80,6 @@ class BrowserWindowCocoa
   bool ShouldHideUIForFullscreen() const override;
   bool IsFullscreen() const override;
   bool IsFullscreenBubbleVisible() const override;
-  void MaybeShowNewBackShortcutBubble(bool forward) override;
-  void HideNewBackShortcutBubble() override;
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override;
   void UpdateReloadStopState(bool is_loading, bool force) override;
@@ -96,7 +90,7 @@ class BrowserWindowCocoa
   void ToolbarSizeChanged(bool is_animating) override;
   void FocusAppMenu() override;
   void FocusBookmarksToolbar() override;
-  void FocusInfobars() override;
+  void FocusInactivePopupForAccessibility() override;
   void RotatePaneFocus(bool forwards) override;
   bool IsBookmarkBarVisible() const override;
   bool IsBookmarkBarAnimating() const override;
@@ -127,10 +121,6 @@ class BrowserWindowCocoa
       bool app_modal,
       const base::Callback<void(bool)>& callback) override;
   void UserChangedTheme() override;
-  void ShowPageInfo(Profile* profile,
-                    content::WebContents* web_contents,
-                    const GURL& virtual_url,
-                    const security_state::SecurityInfo& security_info) override;
   void ShowAppMenu() override;
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;

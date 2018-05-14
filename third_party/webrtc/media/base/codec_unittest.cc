@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/media/base/codec.h"
-#include "webrtc/rtc_base/gunit.h"
+#include "media/base/codec.h"
+#include "rtc_base/gunit.h"
 
 using cricket::AudioCodec;
 using cricket::Codec;
@@ -22,7 +22,7 @@ using cricket::kCodecParamMinBitrate;
 
 class TestCodec : public Codec {
  public:
-  TestCodec(int id, const std::string name, int clockrate)
+  TestCodec(int id, const std::string& name, int clockrate)
       : Codec(id, name, clockrate) {}
   TestCodec() : Codec() {}
   TestCodec(const TestCodec& c) : Codec(c) {}
@@ -186,6 +186,45 @@ TEST(CodecTest, TestVideoCodecMatches) {
   EXPECT_FALSE(c1.Matches(VideoCodec(95, "V")));
 }
 
+// Matching H264 codecs also need to have matching profile-level-id and
+// packetization-mode.
+TEST(CodecTest, TestH264CodecMatches) {
+  const char kProfileLevelId1[] = "42e01f";
+  const char kProfileLevelId2[] = "42a01e";
+
+  VideoCodec pli_1_pm_0(95, "H264");
+  pli_1_pm_0.params[cricket::kH264FmtpProfileLevelId] = kProfileLevelId1;
+  pli_1_pm_0.params[cricket::kH264FmtpPacketizationMode] = "0";
+
+  {
+    VideoCodec pli_1_pm_blank(95, "H264");
+    pli_1_pm_blank.params[cricket::kH264FmtpProfileLevelId] = kProfileLevelId1;
+    pli_1_pm_blank.params.erase(
+        pli_1_pm_blank.params.find(cricket::kH264FmtpPacketizationMode));
+
+    // Matches since if packetization-mode is not specified it defaults to "0".
+    EXPECT_TRUE(pli_1_pm_0.Matches(pli_1_pm_blank));
+  }
+
+  {
+    VideoCodec pli_1_pm_1(95, "H264");
+    pli_1_pm_1.params[cricket::kH264FmtpProfileLevelId] = kProfileLevelId1;
+    pli_1_pm_1.params[cricket::kH264FmtpPacketizationMode] = "1";
+
+    // Does not match since packetization-mode is different.
+    EXPECT_FALSE(pli_1_pm_0.Matches(pli_1_pm_1));
+  }
+
+  {
+    VideoCodec pli_2_pm_0(95, "H264");
+    pli_2_pm_0.params[cricket::kH264FmtpProfileLevelId] = kProfileLevelId2;
+    pli_2_pm_0.params[cricket::kH264FmtpPacketizationMode] = "0";
+
+    // Does not match since profile-level-id is different.
+    EXPECT_FALSE(pli_1_pm_0.Matches(pli_2_pm_0));
+  }
+}
+
 TEST(CodecTest, TestDataCodecMatches) {
   // Test a codec with a static payload type.
   DataCodec c0(95, "D");
@@ -229,9 +268,9 @@ TEST(CodecTest, TestIntersectFeedbackParams) {
   const FeedbackParam b3("b", "3");
   const FeedbackParam c3("c", "3");
   TestCodec c1;
-  c1.AddFeedbackParam(a1); // Only match with c2.
-  c1.AddFeedbackParam(b2); // Same param different values.
-  c1.AddFeedbackParam(c3); // Not in c2.
+  c1.AddFeedbackParam(a1);  // Only match with c2.
+  c1.AddFeedbackParam(b2);  // Same param different values.
+  c1.AddFeedbackParam(c3);  // Not in c2.
   TestCodec c2;
   c2.AddFeedbackParam(a1);
   c2.AddFeedbackParam(b3);
@@ -313,15 +352,14 @@ TEST(CodecTest, TestToCodecParameters) {
   EXPECT_EQ(96, codec_params_1.payload_type);
   EXPECT_EQ(cricket::MEDIA_TYPE_VIDEO, codec_params_1.kind);
   EXPECT_EQ("V", codec_params_1.name);
-  EXPECT_EQ(rtc::Optional<int>(cricket::kVideoCodecClockrate),
-            codec_params_1.clock_rate);
-  EXPECT_EQ(rtc::Optional<int>(), codec_params_1.num_channels);
+  EXPECT_EQ(cricket::kVideoCodecClockrate, codec_params_1.clock_rate);
+  EXPECT_EQ(rtc::nullopt, codec_params_1.num_channels);
 
   const AudioCodec a(97, "A", 44100, 20000, 2);
   webrtc::RtpCodecParameters codec_params_2 = a.ToCodecParameters();
   EXPECT_EQ(97, codec_params_2.payload_type);
   EXPECT_EQ(cricket::MEDIA_TYPE_AUDIO, codec_params_2.kind);
   EXPECT_EQ("A", codec_params_2.name);
-  EXPECT_EQ(rtc::Optional<int>(44100), codec_params_2.clock_rate);
-  EXPECT_EQ(rtc::Optional<int>(2), codec_params_2.num_channels);
+  EXPECT_EQ(44100, codec_params_2.clock_rate);
+  EXPECT_EQ(2, codec_params_2.num_channels);
 }

@@ -31,13 +31,14 @@
 #ifndef WebViewClient_h
 #define WebViewClient_h
 
-#include "public/platform/WebPageVisibilityState.h"
-#include "public/platform/WebString.h"
 #include "WebAXEnums.h"
 #include "WebFrame.h"
 #include "WebPopupType.h"
 #include "WebTextDirection.h"
 #include "WebWidgetClient.h"
+#include "base/strings/string_piece.h"
+#include "public/platform/WebString.h"
+#include "third_party/WebKit/public/mojom/page/page_visibility_state.mojom-shared.h"
 
 namespace blink {
 
@@ -45,14 +46,12 @@ class WebDateTimeChooserCompletion;
 class WebFileChooserCompletion;
 class WebNode;
 class WebSpeechRecognizer;
-class WebStorageNamespace;
 class WebURL;
 class WebURLRequest;
 class WebView;
 class WebWidget;
 enum class WebSandboxFlags;
 struct WebDateTimeChooserParams;
-struct WebPoint;
 struct WebRect;
 struct WebSize;
 struct WebWindowFeatures;
@@ -62,7 +61,7 @@ struct WebWindowFeatures;
 // easily reused as part of an implementation of WebViewClient.
 class WebViewClient : protected WebWidgetClient {
  public:
-  ~WebViewClient() override {}
+  ~WebViewClient() override = default;
   // Factory methods -----------------------------------------------------
 
   // Create a new related WebView.  This method must clone its session storage
@@ -79,14 +78,18 @@ class WebViewClient : protected WebWidgetClient {
                               WebNavigationPolicy policy,
                               bool suppress_opener,
                               WebSandboxFlags) {
-    return 0;
+    return nullptr;
   }
 
   // Create a new popup WebWidget.
-  virtual WebWidget* CreatePopupMenu(WebPopupType) { return 0; }
+  virtual WebWidget* CreatePopup(WebLocalFrame*, WebPopupType) {
+    return nullptr;
+  }
 
-  // Create a session storage namespace object associated with this WebView.
-  virtual WebStorageNamespace* CreateSessionStorageNamespace() { return 0; }
+  // Returns the session storage namespace id associated with this WebView.
+  virtual base::StringPiece GetSessionStorageNamespaceId() {
+    return base::StringPiece();
+  }
 
   // Misc ----------------------------------------------------------------
 
@@ -112,12 +115,6 @@ class WebViewClient : protected WebWidgetClient {
   // in screen coordinates.
   virtual WebRect RootWindowRect() { return WebRect(); }
 
-  // Editing -------------------------------------------------------------
-
-  // These methods allow the client to intercept and overrule editing
-  // operations.
-  virtual void DidChangeContents() {}
-
   // Dialogs -------------------------------------------------------------
 
   // Ask users to choose date/time for the specified parameters. When a user
@@ -129,21 +126,6 @@ class WebViewClient : protected WebWidgetClient {
                                    WebDateTimeChooserCompletion*) {
     return false;
   }
-
-  // Show a notification popup for the specified form validation messages
-  // besides the anchor rectangle. An implementation of this function should
-  // not hide the popup until hideValidationMessage call.
-  virtual void ShowValidationMessage(const WebRect& anchor_in_viewport,
-                                     const WebString& main_text,
-                                     WebTextDirection main_text_dir,
-                                     const WebString& supplemental_text,
-                                     WebTextDirection supplemental_text_dir) {}
-
-  // Hide notifation popup for form validation messages.
-  virtual void HideValidationMessage() {}
-
-  // Move the existing notifation popup to the new anchor position.
-  virtual void MoveValidationMessage(const WebRect& anchor_in_viewport) {}
 
   // UI ------------------------------------------------------------------
 
@@ -192,7 +174,7 @@ class WebViewClient : protected WebWidgetClient {
   virtual void DidAutoResize(const WebSize& new_size) {}
 
   // Called when the View acquires focus.
-  virtual void DidFocus() {}
+  virtual void DidFocus(WebLocalFrame* calling_frame) {}
 
   // Session history -----------------------------------------------------
 
@@ -218,7 +200,7 @@ class WebViewClient : protected WebWidgetClient {
   // Speech --------------------------------------------------------------
 
   // Access the embedder API for speech recognition services.
-  virtual WebSpeechRecognizer* SpeechRecognizer() { return 0; }
+  virtual WebSpeechRecognizer* SpeechRecognizer() { return nullptr; }
 
   // Zoom ----------------------------------------------------------------
 
@@ -244,14 +226,13 @@ class WebViewClient : protected WebWidgetClient {
   void DidOverscroll(const WebFloatSize& overscroll_delta,
                      const WebFloatSize& accumulated_overscroll,
                      const WebFloatPoint& position_in_viewport,
-                     const WebFloatSize& velocity_in_viewport) override {}
+                     const WebFloatSize& velocity_in_viewport,
+                     const WebOverscrollBehavior& behavior) override {}
   void HasTouchEventHandlers(bool) override {}
   WebLayerTreeView* InitializeLayerTreeView() override { return nullptr; }
   WebScreenInfo GetScreenInfo() override { return WebScreenInfo(); }
   void SetTouchAction(WebTouchAction touch_action) override {}
-  void ShowUnhandledTapUIIfNeeded(const WebPoint& tapped_position,
-                                  const WebNode& tapped_node,
-                                  bool page_changed) override {}
+  void ShowUnhandledTapUIIfNeeded(const WebTappedInfo& tapped_info) override {}
   void Show(WebNavigationPolicy) override {}
   virtual WebWidgetClient* WidgetClient() { return this; }
 

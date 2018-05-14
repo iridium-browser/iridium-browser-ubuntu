@@ -4,7 +4,13 @@
 
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 
+#include <memory>
+
 MockAutocompleteProviderClient::MockAutocompleteProviderClient() {
+  contextual_suggestions_service_ =
+      std::make_unique<ContextualSuggestionsService>(
+          /*signin_manager=*/nullptr, /*token_service=*/nullptr,
+          GetRequestContext());
 }
 
 MockAutocompleteProviderClient::~MockAutocompleteProviderClient() {

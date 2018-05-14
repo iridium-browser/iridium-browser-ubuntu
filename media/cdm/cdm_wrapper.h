@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "media/cdm/api/content_decryption_module.h"
 #include "media/cdm/supported_cdm_versions.h"
@@ -18,6 +19,7 @@
 #include "ppapi/cpp/logging.h"  // nogncheck
 #define PLATFORM_DCHECK PP_DCHECK
 #else
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "media/base/media_switches.h"  // nogncheck
 #define PLATFORM_DCHECK DCHECK
@@ -29,14 +31,11 @@ namespace {
 
 bool IsExperimentalCdmInterfaceSupported() {
 #if defined(USE_PPAPI_CDM_ADAPTER)
-#if defined(SUPPORT_EXPERIMENTAL_CDM_INTERFACE)
-  return true;
-#else
+  // No new CDM interface will be supported using pepper CDM.
   return false;
-#endif  // defined(SUPPORT_EXPERIMENTAL_CDM_INTERFACE)
 #else
   return base::FeatureList::IsEnabled(media::kSupportExperimentalCdmInterface);
-#endif  // defined(USE_PPAPI_CDM_ADAPTER)
+#endif
 }
 
 }  // namespace
@@ -67,6 +66,9 @@ typedef void* (*CreateCdmFunc)(int cdm_interface_version,
 //
 // Since this file is highly templated and default implementations are short
 // (just a shim layer in most cases), everything is done in this header file.
+//
+// TODO(crbug.com/799169): After pepper CDM support is removed, this file can
+// depend on media/ and we can clean this class up, e.g. pass in CdmConfig.
 class CdmWrapper {
  public:
   static CdmWrapper* Create(CreateCdmFunc create_cdm_func,
@@ -80,11 +82,25 @@ class CdmWrapper {
   // Returns the version of the CDM interface that the created CDM uses.
   virtual int GetInterfaceVersion() = 0;
 
-  virtual void Initialize(bool allow_distinctive_identifier,
-                          bool allow_persistent_state) = 0;
+  // Initializes the CDM instance and returns whether OnInitialized() will be
+  // called on the host. The caller should NOT wait for OnInitialized() if false
+  // is returned.
+  virtual bool Initialize(bool allow_distinctive_identifier,
+                          bool allow_persistent_state,
+                          bool use_hw_secure_codecs) = 0;
+
   virtual void SetServerCertificate(uint32_t promise_id,
                                     const uint8_t* server_certificate_data,
                                     uint32_t server_certificate_data_size) = 0;
+
+  // Gets the key status for a policy that contains the |min_hdcp_version|.
+  // Returns whether GetStatusForPolicy() is supported. If true, the CDM should
+  // resolve or reject the promise. If false, the caller will reject the
+  // promise.
+  virtual bool GetStatusForPolicy(uint32_t promise_id,
+                                  cdm::HdcpVersion min_hdcp_version)
+      WARN_UNUSED_RESULT = 0;
+
   virtual void CreateSessionAndGenerateRequest(uint32_t promise_id,
                                                cdm::SessionType session_type,
                                                cdm::InitDataType init_data_type,
@@ -126,7 +142,8 @@ class CdmWrapper {
       cdm::QueryResult result,
       uint32_t link_mask,
       uint32_t output_protection_mask) = 0;
-  virtual void OnStorageId(const uint8_t* storage_id,
+  virtual void OnStorageId(uint32_t version,
+                           const uint8_t* storage_id,
                            uint32_t storage_id_size) = 0;
 
  protected:
@@ -161,9 +178,12 @@ class CdmWrapperImpl : public CdmWrapper {
 
   int GetInterfaceVersion() override { return CdmInterface::kVersion; }
 
-  void Initialize(bool allow_distinctive_identifier,
-                  bool allow_persistent_state) override {
-    cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state);
+  bool Initialize(bool allow_distinctive_identifier,
+                  bool allow_persistent_state,
+                  bool use_hw_secure_codecs) override {
+    cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state,
+                     use_hw_secure_codecs);
+    return true;
   }
 
   void SetServerCertificate(uint32_t promise_id,
@@ -171,6 +191,12 @@ class CdmWrapperImpl : public CdmWrapper {
                             uint32_t server_certificate_data_size) override {
     cdm_->SetServerCertificate(promise_id, server_certificate_data,
                                server_certificate_data_size);
+  }
+
+  bool GetStatusForPolicy(uint32_t promise_id,
+                          cdm::HdcpVersion min_hdcp_version) override {
+    cdm_->GetStatusForPolicy(promise_id, {min_hdcp_version});
+    return true;
   }
 
   void CreateSessionAndGenerateRequest(uint32_t promise_id,
@@ -257,8 +283,10 @@ class CdmWrapperImpl : public CdmWrapper {
                                         output_protection_mask);
   }
 
-  void OnStorageId(const uint8_t* storage_id, uint32_t storage_id_size) {
-    cdm_->OnStorageId(storage_id, storage_id_size);
+  void OnStorageId(uint32_t version,
+                   const uint8_t* storage_id,
+                   uint32_t storage_id_size) {
+    cdm_->OnStorageId(version, storage_id, storage_id_size);
   }
 
  private:
@@ -269,12 +297,40 @@ class CdmWrapperImpl : public CdmWrapper {
   DISALLOW_COPY_AND_ASSIGN(CdmWrapperImpl);
 };
 
-// Overrides for cdm::Host_8 methods.
-// TODO(jrummell): Remove when CDM_8 no longer supported.
-// https://crbug.com/737296.
+// Specialization for cdm::ContentDecryptionModule_9 methods.
+// TODO(crbug.com/799219): Remove when CDM_9 no longer supported.
+
+template <>
+bool CdmWrapperImpl<cdm::ContentDecryptionModule_9>::Initialize(
+    bool allow_distinctive_identifier,
+    bool allow_persistent_state,
+    bool /* use_hw_secure_codecs*/) {
+  cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state);
+  return false;
+}
+
+// Specialization for cdm::ContentDecryptionModule_8 methods.
+// TODO(crbug.com/737296): Remove when CDM_8 no longer supported.
+
+template <>
+bool CdmWrapperImpl<cdm::ContentDecryptionModule_8>::Initialize(
+    bool allow_distinctive_identifier,
+    bool allow_persistent_state,
+    bool /* use_hw_secure_codecs*/) {
+  cdm_->Initialize(allow_distinctive_identifier, allow_persistent_state);
+  return false;
+}
+
+template <>
+bool CdmWrapperImpl<cdm::ContentDecryptionModule_8>::GetStatusForPolicy(
+    uint32_t /* promise_id */,
+    cdm::HdcpVersion /* min_hdcp_version */) {
+  return false;
+}
 
 template <>
 void CdmWrapperImpl<cdm::ContentDecryptionModule_8>::OnStorageId(
+    uint32_t version,
     const uint8_t* storage_id,
     uint32_t storage_id_size) {}
 
@@ -283,6 +339,7 @@ CdmWrapper* CdmWrapper::Create(CreateCdmFunc create_cdm_func,
                                uint32_t key_system_size,
                                GetCdmHostFunc get_cdm_host_func,
                                void* user_data) {
+  // cdm::ContentDecryptionModule::kVersion is always the latest stable version.
   static_assert(cdm::ContentDecryptionModule::kVersion ==
                     cdm::ContentDecryptionModule_9::kVersion,
                 "update the code below");
@@ -291,21 +348,29 @@ CdmWrapper* CdmWrapper::Create(CreateCdmFunc create_cdm_func,
   // Always update this DCHECK when updating this function.
   // If this check fails, update this function and DCHECK or update
   // IsSupportedCdmInterfaceVersion().
-  PLATFORM_DCHECK(!IsSupportedCdmInterfaceVersion(
-                      cdm::ContentDecryptionModule_9::kVersion + 1) &&
-                  IsSupportedCdmInterfaceVersion(
-                      cdm::ContentDecryptionModule_9::kVersion) &&
-                  IsSupportedCdmInterfaceVersion(
-                      cdm::ContentDecryptionModule_8::kVersion) &&
-                  !IsSupportedCdmInterfaceVersion(
-                      cdm::ContentDecryptionModule_8::kVersion - 1));
+  // TODO(xhwang): Static assert these at compile time.
+  const int kMinVersion = cdm::ContentDecryptionModule_8::kVersion;
+  const int kMaxVersion = cdm::ContentDecryptionModule_10::kVersion;
+  PLATFORM_DCHECK(!IsSupportedCdmInterfaceVersion(kMinVersion - 1));
+  for (int version = kMinVersion; version <= kMaxVersion; ++version)
+    PLATFORM_DCHECK(IsSupportedCdmInterfaceVersion(version));
+  PLATFORM_DCHECK(!IsSupportedCdmInterfaceVersion(kMaxVersion + 1));
 
   // Try to create the CDM using the latest CDM interface version.
   // This is only attempted if requested. For pepper plugins, this is done
   // at compile time. For mojo, it is done using a media feature setting.
   CdmWrapper* cdm_wrapper = nullptr;
 
+  // TODO(xhwang): Check whether we can use static loops to simplify this code.
   if (IsExperimentalCdmInterfaceSupported()) {
+    cdm_wrapper = CdmWrapperImpl<cdm::ContentDecryptionModule_10>::Create(
+        create_cdm_func, key_system, key_system_size, get_cdm_host_func,
+        user_data);
+  }
+
+  // If |cdm_wrapper| is NULL, try to create the CDM using older supported
+  // versions of the CDM interface here.
+  if (!cdm_wrapper) {
     cdm_wrapper = CdmWrapperImpl<cdm::ContentDecryptionModule_9>::Create(
         create_cdm_func, key_system, key_system_size, get_cdm_host_func,
         user_data);

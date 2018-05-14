@@ -12,9 +12,9 @@ import android.os.Looper;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.TraceEvent;
-import org.chromium.base.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * This class is used to start a child process by connecting to a ChildProcessService.
@@ -87,8 +87,8 @@ public class ChildProcessLauncher {
     // The allocator used to create the connection.
     private final ChildConnectionAllocator mConnectionAllocator;
 
-    // The IBinder provided to the created service.
-    private final IBinder mIBinderCallback;
+    // The IBinder interfaces provided to the created service.
+    private final List<IBinder> mClientInterfaces;
 
     // The actual service connection. Set once we have connected to the service.
     private ChildProcessConnection mConnection;
@@ -101,12 +101,12 @@ public class ChildProcessLauncher {
      * @param commandLine the command line that should be passed to the started process.
      * @param filesToBeMapped the files that should be passed to the started process.
      * @param connectionAllocator the allocator used to create connections to the service.
-     * @param binderCallback the callback that should be passed to the started process.
+     * @param clientInterfaces the interfaces that should be passed to the started process so it can
+     * communicate with the parent process.
      */
-    @SuppressFBWarnings("EI_EXPOSE_REP2")
     public ChildProcessLauncher(Handler launcherHandler, Delegate delegate, String[] commandLine,
             FileDescriptorInfo[] filesToBeMapped, ChildConnectionAllocator connectionAllocator,
-            IBinder binderCallback) {
+            List<IBinder> clientInterfaces) {
         assert connectionAllocator != null;
         mLauncherHandler = launcherHandler;
         isRunningOnLauncherThread();
@@ -114,7 +114,7 @@ public class ChildProcessLauncher {
         mConnectionAllocator = connectionAllocator;
         mDelegate = delegate;
         mFilesToBeMapped = filesToBeMapped;
-        mIBinderCallback = binderCallback;
+        mClientInterfaces = clientInterfaces;
     }
 
     /**
@@ -136,8 +136,9 @@ public class ChildProcessLauncher {
                         public void onChildStarted() {}
 
                         @Override
-                        public void onChildStartFailed() {
+                        public void onChildStartFailed(ChildProcessConnection connection) {
                             assert isRunningOnLauncherThread();
+                            assert mConnection == connection;
                             Log.e(TAG, "ChildProcessConnection.start failed, trying again");
                             mLauncherHandler.post(new Runnable() {
                                 @Override
@@ -214,7 +215,6 @@ public class ChildProcessLauncher {
             });
             return false;
         }
-        assert mConnection != null;
 
         if (setupConnection) {
             setupConnection();
@@ -233,7 +233,7 @@ public class ChildProcessLauncher {
                 };
         Bundle connectionBundle = createConnectionBundle();
         mDelegate.onBeforeConnectionSetup(connectionBundle);
-        mConnection.setupConnection(connectionBundle, getIBinderCallback(), connectionCallback);
+        mConnection.setupConnection(connectionBundle, getClientInterfaces(), connectionCallback);
     }
 
     private void onServiceConnected() {
@@ -258,8 +258,8 @@ public class ChildProcessLauncher {
         return mConnection == null ? NULL_PROCESS_HANDLE : mConnection.getPid();
     }
 
-    public IBinder getIBinderCallback() {
-        return mIBinderCallback;
+    public List<IBinder> getClientInterfaces() {
+        return mClientInterfaces;
     }
 
     private boolean isRunningOnLauncherThread() {

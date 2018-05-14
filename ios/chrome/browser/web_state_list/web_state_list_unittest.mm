@@ -5,7 +5,6 @@
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/supports_user_data.h"
 #import "ios/chrome/browser/web_state_list/fake_web_state_list_delegate.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
@@ -36,6 +35,7 @@ class WebStateListTestObserver : public WebStateListObserver {
     web_state_moved_called_ = false;
     web_state_replaced_called_ = false;
     web_state_detached_called_ = false;
+    web_state_activated_called_ = false;
   }
 
   // Returns whether WebStateInsertedAt was invoked.
@@ -50,10 +50,16 @@ class WebStateListTestObserver : public WebStateListObserver {
   // Returns whether WebStateDetachedAt was invoked.
   bool web_state_detached_called() const { return web_state_detached_called_; }
 
+  // Returns whether WebStateActivatedAt was invoked.
+  bool web_state_activated_called() const {
+    return web_state_activated_called_;
+  }
+
   // WebStateListObserver implementation.
   void WebStateInsertedAt(WebStateList* web_state_list,
                           web::WebState* web_state,
-                          int index) override {
+                          int index,
+                          bool activating) override {
     web_state_inserted_called_ = true;
   }
 
@@ -77,11 +83,20 @@ class WebStateListTestObserver : public WebStateListObserver {
     web_state_detached_called_ = true;
   }
 
+  void WebStateActivatedAt(WebStateList* web_state_list,
+                           web::WebState* old_web_state,
+                           web::WebState* new_web_state,
+                           int active_index,
+                           int reason) override {
+    web_state_activated_called_ = true;
+  }
+
  private:
   bool web_state_inserted_called_ = false;
   bool web_state_moved_called_ = false;
   bool web_state_replaced_called_ = false;
   bool web_state_detached_called_ = false;
+  bool web_state_activated_called_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WebStateListTestObserver);
 };
@@ -135,13 +150,22 @@ class WebStateListTest : public PlatformTest {
   WebStateList web_state_list_;
   WebStateListTestObserver observer_;
 
-  std::unique_ptr<web::WebState> CreateWebState(const char* url) {
-    auto test_web_state = base::MakeUnique<web::TestWebState>();
+  std::unique_ptr<web::TestWebState> CreateWebState(const char* url) {
+    auto test_web_state = std::make_unique<web::TestWebState>();
     test_web_state->SetCurrentURL(GURL(url));
     test_web_state->SetNavigationManager(
-        base::MakeUnique<FakeNavigationManager>());
-    // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
-    return std::move(test_web_state);
+        std::make_unique<FakeNavigationManager>());
+    return test_web_state;
+  }
+
+  void AppendNewWebState(const char* url) {
+    AppendNewWebState(url, WebStateOpener());
+  }
+
+  void AppendNewWebState(const char* url, WebStateOpener opener) {
+    web_state_list_.InsertWebState(WebStateList::kInvalidIndex,
+                                   CreateWebState(url),
+                                   WebStateList::INSERT_NO_FLAGS, opener);
   }
 
  private:
@@ -152,7 +176,7 @@ TEST_F(WebStateListTest, IsEmpty) {
   EXPECT_EQ(0, web_state_list_.count());
   EXPECT_TRUE(web_state_list_.empty());
 
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
+  AppendNewWebState(kURL0);
 
   EXPECT_TRUE(observer_.web_state_inserted_called());
   EXPECT_EQ(1, web_state_list_.count());
@@ -160,29 +184,76 @@ TEST_F(WebStateListTest, IsEmpty) {
 }
 
 TEST_F(WebStateListTest, InsertUrlSingle) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
+  AppendNewWebState(kURL0);
 
   EXPECT_TRUE(observer_.web_state_inserted_called());
-  EXPECT_EQ(1, web_state_list_.count());
+  ASSERT_EQ(1, web_state_list_.count());
   EXPECT_EQ(kURL0, web_state_list_.GetWebStateAt(0)->GetVisibleURL().spec());
 }
 
 TEST_F(WebStateListTest, InsertUrlMultiple) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(0, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL2));
+  web_state_list_.InsertWebState(0, CreateWebState(kURL0),
+                                 WebStateList::INSERT_FORCE_INDEX,
+                                 WebStateOpener());
+  web_state_list_.InsertWebState(0, CreateWebState(kURL1),
+                                 WebStateList::INSERT_FORCE_INDEX,
+                                 WebStateOpener());
+  web_state_list_.InsertWebState(1, CreateWebState(kURL2),
+                                 WebStateList::INSERT_FORCE_INDEX,
+                                 WebStateOpener());
 
   EXPECT_TRUE(observer_.web_state_inserted_called());
-  EXPECT_EQ(3, web_state_list_.count());
+  ASSERT_EQ(3, web_state_list_.count());
   EXPECT_EQ(kURL1, web_state_list_.GetWebStateAt(0)->GetVisibleURL().spec());
   EXPECT_EQ(kURL2, web_state_list_.GetWebStateAt(1)->GetVisibleURL().spec());
   EXPECT_EQ(kURL0, web_state_list_.GetWebStateAt(2)->GetVisibleURL().spec());
 }
 
+TEST_F(WebStateListTest, ActivateWebState) {
+  AppendNewWebState(kURL0);
+  EXPECT_EQ(nullptr, web_state_list_.GetActiveWebState());
+
+  web_state_list_.ActivateWebStateAt(0);
+
+  EXPECT_TRUE(observer_.web_state_activated_called());
+  ASSERT_EQ(1, web_state_list_.count());
+  EXPECT_EQ(web_state_list_.GetWebStateAt(0),
+            web_state_list_.GetActiveWebState());
+}
+
+TEST_F(WebStateListTest, InsertActivate) {
+  web_state_list_.InsertWebState(
+      0, CreateWebState(kURL0),
+      WebStateList::INSERT_FORCE_INDEX | WebStateList::INSERT_ACTIVATE,
+      WebStateOpener());
+
+  EXPECT_TRUE(observer_.web_state_activated_called());
+  ASSERT_EQ(1, web_state_list_.count());
+  EXPECT_EQ(web_state_list_.GetWebStateAt(0),
+            web_state_list_.GetActiveWebState());
+}
+
+TEST_F(WebStateListTest, InsertInheritOpener) {
+  AppendNewWebState(kURL0);
+  web_state_list_.ActivateWebStateAt(0);
+  EXPECT_TRUE(observer_.web_state_activated_called());
+  ASSERT_EQ(1, web_state_list_.count());
+  ASSERT_EQ(web_state_list_.GetWebStateAt(0),
+            web_state_list_.GetActiveWebState());
+
+  web_state_list_.InsertWebState(
+      WebStateList::kInvalidIndex, CreateWebState(kURL1),
+      WebStateList::INSERT_INHERIT_OPENER, WebStateOpener());
+
+  ASSERT_EQ(2, web_state_list_.count());
+  ASSERT_EQ(web_state_list_.GetActiveWebState(),
+            web_state_list_.GetOpenerOfWebStateAt(1).opener);
+}
+
 TEST_F(WebStateListTest, MoveWebStateAtRightByOne) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -201,9 +272,9 @@ TEST_F(WebStateListTest, MoveWebStateAtRightByOne) {
 }
 
 TEST_F(WebStateListTest, MoveWebStateAtRightByMoreThanOne) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -222,9 +293,9 @@ TEST_F(WebStateListTest, MoveWebStateAtRightByMoreThanOne) {
 }
 
 TEST_F(WebStateListTest, MoveWebStateAtLeftByOne) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -243,9 +314,9 @@ TEST_F(WebStateListTest, MoveWebStateAtLeftByOne) {
 }
 
 TEST_F(WebStateListTest, MoveWebStateAtLeftByMoreThanOne) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -264,9 +335,9 @@ TEST_F(WebStateListTest, MoveWebStateAtLeftByMoreThanOne) {
 }
 
 TEST_F(WebStateListTest, MoveWebStateAtSameIndex) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -285,8 +356,8 @@ TEST_F(WebStateListTest, MoveWebStateAtSameIndex) {
 }
 
 TEST_F(WebStateListTest, ReplaceWebStateAt) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
 
   // Sanity check before replacing WebState.
   EXPECT_EQ(2, web_state_list_.count());
@@ -298,6 +369,7 @@ TEST_F(WebStateListTest, ReplaceWebStateAt) {
       web_state_list_.ReplaceWebStateAt(1, CreateWebState(kURL2)));
 
   EXPECT_TRUE(observer_.web_state_replaced_called());
+  EXPECT_TRUE(observer_.web_state_activated_called());
   EXPECT_EQ(2, web_state_list_.count());
   EXPECT_EQ(kURL0, web_state_list_.GetWebStateAt(0)->GetVisibleURL().spec());
   EXPECT_EQ(kURL2, web_state_list_.GetWebStateAt(1)->GetVisibleURL().spec());
@@ -305,9 +377,9 @@ TEST_F(WebStateListTest, ReplaceWebStateAt) {
 }
 
 TEST_F(WebStateListTest, DetachWebStateAtIndexBegining) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -325,9 +397,9 @@ TEST_F(WebStateListTest, DetachWebStateAtIndexBegining) {
 }
 
 TEST_F(WebStateListTest, DetachWebStateAtIndexMiddle) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -345,9 +417,9 @@ TEST_F(WebStateListTest, DetachWebStateAtIndexMiddle) {
 }
 
 TEST_F(WebStateListTest, DetachWebStateAtIndexLast) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   // Sanity check before closing WebState.
   EXPECT_EQ(3, web_state_list_.count());
@@ -383,9 +455,9 @@ TEST_F(WebStateListTest, OpenersEmptyList) {
 }
 
 TEST_F(WebStateListTest, OpenersNothingOpened) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
+  AppendNewWebState(kURL0);
+  AppendNewWebState(kURL1);
+  AppendNewWebState(kURL2);
 
   for (int index = 0; index < web_state_list_.count(); ++index) {
     web::WebState* opener = web_state_list_.GetWebStateAt(index);
@@ -406,14 +478,11 @@ TEST_F(WebStateListTest, OpenersNothingOpened) {
 }
 
 TEST_F(WebStateListTest, OpenersChildsAfterOpener) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
+  AppendNewWebState(kURL0);
   web::WebState* opener = web_state_list_.GetWebStateAt(0);
 
-  web_state_list_.InsertWebState(1, CreateWebState(kURL1));
-  web_state_list_.SetOpenerOfWebStateAt(1, WebStateOpener(opener));
-
-  web_state_list_.InsertWebState(2, CreateWebState(kURL2));
-  web_state_list_.SetOpenerOfWebStateAt(2, WebStateOpener(opener));
+  AppendNewWebState(kURL1, WebStateOpener(opener));
+  AppendNewWebState(kURL2, WebStateOpener(opener));
 
   const int start_index = web_state_list_.GetIndexOfWebState(opener);
   EXPECT_EQ(1, web_state_list_.GetIndexOfNextWebStateOpenedBy(
@@ -445,8 +514,9 @@ TEST_F(WebStateListTest, OpenersChildsAfterOpener) {
   // Add a new WebState with the same opener. It should be considered the next
   // WebState if groups are considered and the last independently on whether
   // groups are used or not.
-  web_state_list_.InsertWebState(3, CreateWebState(kURL2));
-  web_state_list_.SetOpenerOfWebStateAt(3, WebStateOpener(opener));
+  web_state_list_.InsertWebState(
+      3, CreateWebState(kURL2), WebStateList::INSERT_FORCE_INDEX,
+      WebStateOpener(web_state_list_.GetWebStateAt(0)));
 
   EXPECT_EQ(1, web_state_list_.GetIndexOfNextWebStateOpenedBy(
                    opener, start_index, false));
@@ -460,14 +530,12 @@ TEST_F(WebStateListTest, OpenersChildsAfterOpener) {
 }
 
 TEST_F(WebStateListTest, OpenersChildsBeforeOpener) {
-  web_state_list_.InsertWebState(0, CreateWebState(kURL0));
+  AppendNewWebState(kURL0);
   web::WebState* opener = web_state_list_.GetWebStateAt(0);
 
-  web_state_list_.InsertWebState(0, CreateWebState(kURL1));
-  web_state_list_.SetOpenerOfWebStateAt(0, WebStateOpener(opener));
-
-  web_state_list_.InsertWebState(1, CreateWebState(kURL2));
-  web_state_list_.SetOpenerOfWebStateAt(1, WebStateOpener(opener));
+  AppendNewWebState(kURL1, WebStateOpener(opener));
+  AppendNewWebState(kURL2, WebStateOpener(opener));
+  web_state_list_.MoveWebStateAt(0, 2);
 
   const int start_index = web_state_list_.GetIndexOfWebState(opener);
   EXPECT_EQ(WebStateList::kInvalidIndex,

@@ -9,8 +9,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
-import android.webkit.ValueCallback;
 
+import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
 
 import java.util.concurrent.Callable;
@@ -26,9 +26,7 @@ public class AwContentsClientCallbackHelper {
     /**
      * Interface to tell CallbackHelper to cancel posted callbacks.
      */
-    public static interface CancelCallbackPoller {
-        boolean cancelAllCallbacks();
-    }
+    public static interface CancelCallbackPoller { boolean shouldCancelAllCallbacks(); }
 
     // TODO(boliu): Consider removing DownloadInfo and LoginRequestInfo by using native
     // MessageLoop to post directly to AwContents.
@@ -79,10 +77,10 @@ public class AwContentsClientCallbackHelper {
     private static class OnSafeBrowsingHitInfo {
         final AwContentsClient.AwWebResourceRequest mRequest;
         final int mThreatType;
-        final ValueCallback<AwSafeBrowsingResponse> mCallback;
+        final Callback<AwSafeBrowsingResponse> mCallback;
 
         OnSafeBrowsingHitInfo(AwContentsClient.AwWebResourceRequest request, int threatType,
-                ValueCallback<AwSafeBrowsingResponse> callback) {
+                Callback<AwSafeBrowsingResponse> callback) {
             mRequest = request;
             mThreatType = threatType;
             mCallback = callback;
@@ -156,7 +154,7 @@ public class AwContentsClientCallbackHelper {
 
         @Override
         public void handleMessage(Message msg) {
-            if (mCancelCallbackPoller != null && mCancelCallbackPoller.cancelAllCallbacks()) {
+            if (mCancelCallbackPoller != null && mCancelCallbackPoller.shouldCancelAllCallbacks()) {
                 removeCallbacksAndMessages(null);
                 return;
             }
@@ -266,6 +264,10 @@ public class AwContentsClientCallbackHelper {
         mCancelCallbackPoller = poller;
     }
 
+    CancelCallbackPoller getCancelCallbackPoller() {
+        return mCancelCallbackPoller;
+    }
+
     public void postOnLoadResource(String url) {
         mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_LOAD_RESOURCE, url));
     }
@@ -293,7 +295,7 @@ public class AwContentsClientCallbackHelper {
     }
 
     public void postOnSafeBrowsingHit(AwContentsClient.AwWebResourceRequest request, int threatType,
-            ValueCallback<AwSafeBrowsingResponse> callback) {
+            Callback<AwSafeBrowsingResponse> callback) {
         OnSafeBrowsingHitInfo info = new OnSafeBrowsingHitInfo(request, threatType, callback);
         mHandler.sendMessage(mHandler.obtainMessage(MSG_ON_SAFE_BROWSING_HIT, info));
     }

@@ -33,7 +33,6 @@
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/geometry/FloatPoint3D.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Vector.h"
 
 namespace blink {
 
@@ -43,8 +42,7 @@ class PannerHandler;
 // AudioListener maintains the state of the listener in the audio scene as
 // defined in the OpenAL specification.
 
-class AudioListener : public GarbageCollectedFinalized<AudioListener>,
-                      public ScriptWrappable {
+class AudioListener : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -102,8 +100,8 @@ class AudioListener : public GarbageCollectedFinalized<AudioListener>,
   const float* GetUpZValues(size_t frames_to_process);
 
   // Position
-  void setPosition(float x, float y, float z) {
-    setPosition(FloatPoint3D(x, y, z));
+  void setPosition(float x, float y, float z, ExceptionState& exceptionState) {
+    setPosition(FloatPoint3D(x, y, z), exceptionState);
   }
 
   // Orientation and Up-vector
@@ -112,9 +110,10 @@ class AudioListener : public GarbageCollectedFinalized<AudioListener>,
                       float z,
                       float up_x,
                       float up_y,
-                      float up_z) {
-    setOrientation(FloatPoint3D(x, y, z));
-    SetUpVector(FloatPoint3D(up_x, up_y, up_z));
+                      float up_z,
+                      ExceptionState& exceptionState) {
+    setOrientation(FloatPoint3D(x, y, z), exceptionState);
+    SetUpVector(FloatPoint3D(up_x, up_y, up_z), exceptionState);
   }
 
   Mutex& ListenerLock() { return listener_lock_; }
@@ -123,20 +122,20 @@ class AudioListener : public GarbageCollectedFinalized<AudioListener>,
 
   // HRTF DB loader
   HRTFDatabaseLoader* HrtfDatabaseLoader() {
-    return hrtf_database_loader_.Get();
+    return hrtf_database_loader_.get();
   }
   void CreateAndLoadHRTFDatabaseLoader(float);
   bool IsHRTFDatabaseLoaded();
   void WaitForHRTFDatabaseLoaderThreadCompletion();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   AudioListener(BaseAudioContext&);
 
-  void setPosition(const FloatPoint3D&);
-  void setOrientation(const FloatPoint3D&);
-  void SetUpVector(const FloatPoint3D&);
+  void setPosition(const FloatPoint3D&, ExceptionState&);
+  void setOrientation(const FloatPoint3D&, ExceptionState&);
+  void SetUpVector(const FloatPoint3D&, ExceptionState&);
 
   void MarkPannersAsDirty(unsigned);
 
@@ -190,7 +189,7 @@ class AudioListener : public GarbageCollectedFinalized<AudioListener>,
   // unregisters it from m_panners.
   HashSet<PannerHandler*> panners_;
   // HRTF DB loader for panner node.
-  RefPtr<HRTFDatabaseLoader> hrtf_database_loader_;
+  scoped_refptr<HRTFDatabaseLoader> hrtf_database_loader_;
 };
 
 }  // namespace blink

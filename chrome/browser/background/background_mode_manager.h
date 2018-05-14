@@ -17,11 +17,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "chrome/browser/background/background_application_list_model.h"
-#include "chrome/browser/lifetime/scoped_keep_alive.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_icon_menu_model.h"
 #include "chrome/browser/ui/browser_list_observer.h"
+#include "components/keep_alive_registry/scoped_keep_alive.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/notification_observer.h"
@@ -60,12 +60,11 @@ typedef std::vector<base::Closure> CommandIdHandlerVector;
 // Additionally, when in background mode, Chrome will launch on OS login with
 // no open windows to allow apps with the "background" permission to run in the
 // background.
-class BackgroundModeManager
-    : public content::NotificationObserver,
-      public chrome::BrowserListObserver,
-      public BackgroundApplicationListModel::Observer,
-      public ProfileAttributesStorage::Observer,
-      public StatusIconMenuModel::Delegate {
+class BackgroundModeManager : public content::NotificationObserver,
+                              public BrowserListObserver,
+                              public BackgroundApplicationListModel::Observer,
+                              public ProfileAttributesStorage::Observer,
+                              public StatusIconMenuModel::Delegate {
  public:
   BackgroundModeManager(const base::CommandLine& command_line,
                         ProfileAttributesStorage* profile_storage);
@@ -297,7 +296,7 @@ class BackgroundModeManager
   // Overrides from StatusIconMenuModel::Delegate implementation.
   void ExecuteCommand(int command_id, int event_flags) override;
 
-  // chrome::BrowserListObserver implementation.
+  // BrowserListObserver implementation.
   void OnBrowserAdded(Browser* browser) override;
 
   // Enables or disables background mode as needed, taking into account the

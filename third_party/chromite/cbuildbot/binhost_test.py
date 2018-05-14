@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,12 +14,14 @@ import unittest
 import warnings
 
 from chromite.cbuildbot import binhost
+from chromite.lib.const import waterfall
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
+from chromite.lib import parallel
 
 
 class PrebuiltCompatibilityTest(cros_test_lib.TestCase):
@@ -45,12 +48,11 @@ class PrebuiltCompatibilityTest(cros_test_lib.TestCase):
   @classmethod
   def setUpClass(cls):
     assert cros_build_lib.IsInsideChroot()
-    logging.info('Generating board configs. This takes about 30m...')
+    logging.info('Generating board configs.')
     board_keys = binhost.GetAllImportantBoardKeys(cls.site_config)
     boards = set(key.board for key in board_keys)
-    for board in sorted(boards):
-      binhost.GenConfigsForBoard(board, regen=not cls.CACHING,
-                                 error_code_ok=False)
+    inputs = [[board, not cls.CACHING, False] for board in boards]
+    parallel.RunTasksInProcessPool(binhost.GenConfigsForBoard, inputs)
     fetcher = binhost.CompatIdFetcher(caching=cls.CACHING)
     cls.COMPAT_IDS = fetcher.FetchCompatIds(list(board_keys))
 
@@ -187,7 +189,7 @@ class PrebuiltCompatibilityTest(cros_test_lib.TestCase):
       production_config = (
           (config.build_type == config_lib.CONFIG_TYPE_PRECQ) or
           (config.active_waterfall and
-           config.active_waterfall != constants.WATERFALL_TRYBOT)
+           config.active_waterfall != waterfall.WATERFALL_TRYBOT)
       )
 
       if builds_chrome and production_config:

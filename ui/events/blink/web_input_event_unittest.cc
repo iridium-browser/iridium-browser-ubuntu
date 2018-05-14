@@ -20,9 +20,8 @@
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
 #if defined(USE_X11)
-#include <X11/keysym.h>
-#include <X11/Xlib.h>
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/gfx/x/x11.h"        // nogncheck
 #include "ui/gfx/x/x11_types.h"  // nogncheck
 #endif
 
@@ -30,8 +29,8 @@ namespace ui {
 
 namespace {
 
-gfx::Point GetScreenLocationFromEvent(const LocatedEvent& event) {
-  return event.root_location();
+gfx::PointF GetScreenLocationFromEvent(const LocatedEvent& event) {
+  return event.root_location_f();
 }
 
 }  // namespace
@@ -434,10 +433,10 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
                                    /* radius_x */ 0.0f,
                                    /* radius_y */ 0.0f,
                                    /* force */ 0.8f,
+                                   /* twist */ 269,
                                    /* tilt_x */ 89.5f,
                                    /* tilt_y */ -89.5f,
-                                   /* tangential_pressure */ 0.6f,
-                                   /* twist */ 269);
+                                   /* tangential_pressure */ 0.6f);
     MouseEvent ui_event(ET_MOUSE_PRESSED, gfx::Point(123, 321),
                         gfx::Point(123, 321), timestamp, EF_LEFT_MOUSE_BUTTON,
                         EF_LEFT_MOUSE_BUTTON, pointer_details);

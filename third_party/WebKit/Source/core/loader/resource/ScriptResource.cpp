@@ -26,29 +26,30 @@
 
 #include "core/loader/resource/ScriptResource.h"
 
-#include "core/frame/SubresourceIntegrity.h"
+#include "core/dom/Document.h"
+#include "core/loader/SubresourceIntegrityHelper.h"
 #include "platform/SharedBuffer.h"
 #include "platform/instrumentation/tracing/web_memory_allocator_dump.h"
 #include "platform/instrumentation/tracing/web_process_memory_dump.h"
+#include "platform/loader/SubresourceIntegrity.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/IntegrityMetadata.h"
 #include "platform/loader/fetch/ResourceClientWalker.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/TextResourceDecoderOptions.h"
 #include "platform/network/mime/MIMETypeRegistry.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
 ScriptResource* ScriptResource::Fetch(FetchParameters& params,
-                                      ResourceFetcher* fetcher) {
+                                      ResourceFetcher* fetcher,
+                                      ResourceClient* client) {
   DCHECK_EQ(params.GetResourceRequest().GetFrameType(),
-            WebURLRequest::kFrameTypeNone);
+            network::mojom::RequestContextFrameType::kNone);
   params.SetRequestContext(WebURLRequest::kRequestContextScript);
-  ScriptResource* resource = ToScriptResource(
-      fetcher->RequestResource(params, ScriptResourceFactory()));
-  if (resource && !params.IntegrityMetadata().IsEmpty())
-    resource->SetIntegrityMetadata(params.IntegrityMetadata());
-  return resource;
+  return ToScriptResource(
+      fetcher->RequestResource(params, ScriptResourceFactory(), client));
 }
 
 ScriptResource::ScriptResource(
@@ -57,25 +58,13 @@ ScriptResource::ScriptResource(
     const TextResourceDecoderOptions& decoder_options)
     : TextResource(resource_request, kScript, options, decoder_options) {}
 
-ScriptResource::~ScriptResource() {}
-
-void ScriptResource::DidAddClient(ResourceClient* client) {
-  DCHECK(ScriptResourceClient::IsExpectedType(client));
-  Resource::DidAddClient(client);
-}
-
-void ScriptResource::AppendData(const char* data, size_t length) {
-  Resource::AppendData(data, length);
-  ResourceClientWalker<ScriptResourceClient> walker(Clients());
-  while (ScriptResourceClient* client = walker.Next())
-    client->NotifyAppendData(this);
-}
+ScriptResource::~ScriptResource() = default;
 
 void ScriptResource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
                                   WebProcessMemoryDump* memory_dump) const {
   Resource::OnMemoryDump(level_of_detail, memory_dump);
   const String name = GetMemoryDumpName() + "/decoded_script";
-  auto dump = memory_dump->CreateMemoryAllocatorDump(name);
+  auto* dump = memory_dump->CreateMemoryAllocatorDump(name);
   dump->AddScalar("size", "bytes", source_text_.CharactersSizeInBytes());
   memory_dump->AddSuballocation(
       dump->Guid(), String(WTF::Partitions::kAllocatedObjectPoolName));
@@ -96,54 +85,31 @@ const String& ScriptResource::SourceText() {
 
 void ScriptResource::DestroyDecodedDataForFailedRevalidation() {
   source_text_ = AtomicString();
+  SetDecodedSize(0);
 }
 
-// static
-bool ScriptResource::MimeTypeAllowedByNosniff(
-    const ResourceResponse& response) {
-  return ParseContentTypeOptionsHeader(
-             response.HttpHeaderField(HTTPNames::X_Content_Type_Options)) !=
-             kContentTypeOptionsNosniff ||
-         MIMETypeRegistry::IsSupportedJavaScriptMIMEType(
-             response.HttpContentType());
-}
+AccessControlStatus ScriptResource::CalculateAccessControlStatus(
+    const SecurityOrigin* security_origin) const {
+  if (GetResponse().WasFetchedViaServiceWorker()) {
+    if (GetCORSStatus() == CORSStatus::kServiceWorkerOpaque)
+      return kOpaqueResource;
+    return kSharableCrossOrigin;
+  }
 
-AccessControlStatus ScriptResource::CalculateAccessControlStatus() const {
-  if (GetCORSStatus() == CORSStatus::kServiceWorkerOpaque)
-    return kOpaqueResource;
-
-  if (IsSameOriginOrCORSSuccessful())
+  if (security_origin && PassesAccessControlCheck(*security_origin))
     return kSharableCrossOrigin;
 
   return kNotSharableCrossOrigin;
 }
 
-void ScriptResource::CheckResourceIntegrity(Document& document) {
-  // Already checked? Retain existing result.
-  //
-  // TODO(vogelheim): If IntegrityDisposition() is kFailed, this should
-  // probably also generate a console message identical to the one produced
-  // by the CheckSubresourceIntegrity call below. See crbug.com/585267.
-  if (IntegrityDisposition() != ResourceIntegrityDisposition::kNotChecked)
-    return;
+bool ScriptResource::CanUseCacheValidator() const {
+  // Do not revalidate until ClassicPendingScript is removed, i.e. the script
+  // content is retrieved in ScriptLoader::ExecuteScriptBlock().
+  // crbug.com/692856
+  if (HasClientsOrObservers())
+    return false;
 
-  // Loading error occurred? Then result is uncheckable.
-  if (ErrorOccurred())
-    return;
-
-  // No integrity attributes to check? Then we're passing.
-  if (IntegrityMetadata().IsEmpty()) {
-    SetIntegrityDisposition(ResourceIntegrityDisposition::kPassed);
-    return;
-  }
-
-  CHECK(!!ResourceBuffer());
-  bool passed = SubresourceIntegrity::CheckSubresourceIntegrity(
-      IntegrityMetadata(), document, ResourceBuffer()->Data(),
-      ResourceBuffer()->size(), Url(), *this);
-  SetIntegrityDisposition(passed ? ResourceIntegrityDisposition::kPassed
-                                 : ResourceIntegrityDisposition::kFailed);
-  DCHECK_NE(IntegrityDisposition(), ResourceIntegrityDisposition::kNotChecked);
+  return Resource::CanUseCacheValidator();
 }
 
 }  // namespace blink

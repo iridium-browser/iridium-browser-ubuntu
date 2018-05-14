@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <algorithm>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -14,7 +15,6 @@
 #include "base/files/file_util.h"
 #include "base/i18n/case_conversion.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_scheduler/post_task.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
@@ -135,15 +135,18 @@ FileBrowserHandlerList FindFileBrowserHandlersForURL(
       const FileBrowserHandler* handler = handler_iter->get();
       if (!handler->MatchesURL(lowercase_url))
         continue;
+
       // Filter out Files app from handling ZIP files via a handler, as it's
-      // now handled by new ZIP unpacker extension based on File System Provider
-      // API.
+      // now handled by:
+      // - ZIP unpacker extension based on File System Provider API
+      // - Zip Archiver native extension component
       const URLPattern zip_pattern(URLPattern::SCHEME_EXTENSION,
                                    "chrome-extension://*/*.zip");
       if (handler->extension_id() == kFileManagerAppId &&
           zip_pattern.MatchesURL(selected_file_url) &&
-          !base::CommandLine::ForCurrentProcess()->HasSwitch(
-              chromeos::switches::kDisableNewZIPUnpacker)) {
+          (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+               chromeos::switches::kDisableNewZIPUnpacker) ||
+           chromeos::switches::IsZipArchiverUnpackerEnabled())) {
         continue;
       }
       results.push_back(handler);
@@ -353,7 +356,7 @@ void FileBrowserHandlerExecutor::ExecuteFileActionsOnUIThread(
     }
     queue->AddPendingTask(
         profile_, extension_->id(),
-        base::Bind(
+        base::BindOnce(
             &FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent,
             weak_ptr_factory_.GetWeakPtr(),
             base::Passed(std::move(file_definition_list)),
@@ -385,16 +388,16 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
 
   std::unique_ptr<base::ListValue> event_args(new base::ListValue());
   event_args->AppendString(action_id_);
-  auto details = base::MakeUnique<base::DictionaryValue>();
+  auto details = std::make_unique<base::DictionaryValue>();
   // Get file definitions. These will be replaced with Entry instances by
   // dispatchEvent() method from event_binding.js.
-  auto file_entries = base::MakeUnique<base::ListValue>();
+  auto file_entries = std::make_unique<base::ListValue>();
 
   for (EntryDefinitionList::const_iterator iter =
            entry_definition_list->begin();
        iter != entry_definition_list->end();
        ++iter) {
-    auto file_def = base::MakeUnique<base::DictionaryValue>();
+    auto file_def = std::make_unique<base::DictionaryValue>();
     file_def->SetString("fileSystemName", iter->file_system_name);
     file_def->SetString("fileSystemRoot", iter->file_system_root_url);
     file_def->SetString("fileFullPath",
@@ -405,7 +408,7 @@ void FileBrowserHandlerExecutor::SetupPermissionsAndDispatchEvent(
 
   details->Set("entries", std::move(file_entries));
   event_args->Append(std::move(details));
-  auto event = base::MakeUnique<extensions::Event>(
+  auto event = std::make_unique<extensions::Event>(
       extensions::events::FILE_BROWSER_HANDLER_ON_EXECUTE,
       "fileBrowserHandler.onExecute", std::move(event_args), profile_);
   router->DispatchEventToExtension(extension_->id(), std::move(event));

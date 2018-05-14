@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_HEAP_ARRAY_BUFFER_TRACKER_INL_H_
+#define V8_HEAP_ARRAY_BUFFER_TRACKER_INL_H_
+
 #include "src/conversions-inl.h"
 #include "src/heap/array-buffer-tracker.h"
 #include "src/heap/heap.h"
@@ -11,13 +14,12 @@ namespace v8 {
 namespace internal {
 
 void ArrayBufferTracker::RegisterNew(Heap* heap, JSArrayBuffer* buffer) {
-  void* data = buffer->backing_store();
-  if (!data) return;
+  if (buffer->backing_store() == nullptr) return;
 
-  size_t length = buffer->allocation_length();
+  const size_t length = NumberToSize(buffer->byte_length());
   Page* page = Page::FromAddress(buffer->address());
   {
-    base::LockGuard<base::RecursiveMutex> guard(page->mutex());
+    base::LockGuard<base::Mutex> guard(page->mutex());
     LocalArrayBufferTracker* tracker = page->local_tracker();
     if (tracker == nullptr) {
       page->AllocateLocalTracker();
@@ -33,18 +35,53 @@ void ArrayBufferTracker::RegisterNew(Heap* heap, JSArrayBuffer* buffer) {
 }
 
 void ArrayBufferTracker::Unregister(Heap* heap, JSArrayBuffer* buffer) {
-  void* data = buffer->backing_store();
-  if (!data) return;
+  if (buffer->backing_store() == nullptr) return;
 
   Page* page = Page::FromAddress(buffer->address());
-  size_t length = buffer->allocation_length();
+  const size_t length = NumberToSize(buffer->byte_length());
   {
-    base::LockGuard<base::RecursiveMutex> guard(page->mutex());
+    base::LockGuard<base::Mutex> guard(page->mutex());
     LocalArrayBufferTracker* tracker = page->local_tracker();
     DCHECK_NOT_NULL(tracker);
     tracker->Remove(buffer, length);
   }
   heap->update_external_memory(-static_cast<intptr_t>(length));
+}
+
+template <typename Callback>
+void LocalArrayBufferTracker::Free(Callback should_free) {
+  size_t new_retained_size = 0;
+  for (TrackingData::iterator it = array_buffers_.begin();
+       it != array_buffers_.end();) {
+    JSArrayBuffer* buffer = reinterpret_cast<JSArrayBuffer*>(*it);
+    const size_t length = buffer->allocation_length();
+    if (should_free(buffer)) {
+      buffer->FreeBackingStore();
+      it = array_buffers_.erase(it);
+    } else {
+      new_retained_size += length;
+      ++it;
+    }
+  }
+  const size_t freed_memory = retained_size_ - new_retained_size;
+  if (freed_memory > 0) {
+    heap_->update_external_memory_concurrently_freed(
+        static_cast<intptr_t>(freed_memory));
+  }
+  retained_size_ = new_retained_size;
+}
+
+template <typename MarkingState>
+void ArrayBufferTracker::FreeDead(Page* page, MarkingState* marking_state) {
+  // Callers need to ensure having the page lock.
+  LocalArrayBufferTracker* tracker = page->local_tracker();
+  if (tracker == nullptr) return;
+  tracker->Free([marking_state](JSArrayBuffer* buffer) {
+    return marking_state->IsWhite(buffer);
+  });
+  if (tracker->IsEmpty()) {
+    page->ReleaseLocalTracker();
+  }
 }
 
 void LocalArrayBufferTracker::Add(JSArrayBuffer* buffer, size_t length) {
@@ -68,3 +105,5 @@ void LocalArrayBufferTracker::Remove(JSArrayBuffer* buffer, size_t length) {
 
 }  // namespace internal
 }  // namespace v8
+
+#endif  // V8_HEAP_ARRAY_BUFFER_TRACKER_INL_H_

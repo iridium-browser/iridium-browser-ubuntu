@@ -305,8 +305,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         Set<ContextMenuItem> disabledOptions = getDisabledOptions(params);
         // Split the items into their respective groups.
         List<Pair<Integer, List<ContextMenuItem>>> groupedItems = new ArrayList<>();
-        if (params.isAnchor()
-                && !ChromeFeatureList.isEnabled(ChromeFeatureList.CUSTOM_CONTEXT_MENU)) {
+        if (params.isAnchor()) {
             populateItemGroup(LINK, R.string.contextmenu_link_title, groupedItems, supportedOptions,
                     disabledOptions);
         }
@@ -317,11 +316,6 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         if (params.isVideo()) {
             populateItemGroup(VIDEO, R.string.contextmenu_video_title, groupedItems,
                     supportedOptions, disabledOptions);
-        }
-        if (params.isAnchor()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.CUSTOM_CONTEXT_MENU)) {
-            populateItemGroup(LINK, R.string.contextmenu_link_title, groupedItems, supportedOptions,
-                    disabledOptions);
         }
 
         // If there are no groups there still needs to be a way to add items from the OTHER_GROUP
@@ -340,20 +334,17 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
 
         // These items don't belong to any official group so they are added to a possible visible
         // list.
-        int index = ChromeFeatureList.isEnabled(ChromeFeatureList.CUSTOM_CONTEXT_MENU)
-                ? groupedItems.size() - 1
-                : 0;
-        addValidItems(groupedItems.get(groupedItems.size() - 1 - index).second, OTHER_GROUP,
+        addValidItems(groupedItems.get(groupedItems.size() - 1).second, OTHER_GROUP,
                 supportedOptions, disabledOptions);
         if (mMode == CUSTOM_TAB_MODE) {
-            addValidItemsToFront(groupedItems.get(index).second, CUSTOM_TAB_GROUP, supportedOptions,
+            addValidItemsToFront(groupedItems.get(0).second, CUSTOM_TAB_GROUP, supportedOptions,
                     disabledOptions);
         }
 
         // If there are no items from the extra items within OTHER_GROUP and CUSTOM_TAB_GROUP, then
         // it's removed since there is nothing to show at all.
-        if (groupedItems.get(index).second.isEmpty()) {
-            groupedItems.remove(index);
+        if (groupedItems.get(0).second.isEmpty()) {
+            groupedItems.remove(0);
         }
 
         if (!groupedItems.isEmpty()) {
@@ -469,13 +460,7 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
             disabledOptions.add(ChromeContextMenuItem.COPY_LINK_TEXT);
         }
 
-        if (params.isAnchor() && !isAcceptedScheme(params.getLinkUrl())) {
-            disabledOptions.add(ChromeContextMenuItem.OPEN_IN_OTHER_WINDOW);
-            disabledOptions.add(ChromeContextMenuItem.OPEN_IN_NEW_TAB);
-            disabledOptions.add(ChromeContextMenuItem.OPEN_IN_INCOGNITO_TAB);
-        }
-
-        if (isEmptyUrl(params.getLinkUrl())) {
+        if (isEmptyUrl(params.getUrl()) || !isAcceptedScheme(params.getUrl())) {
             disabledOptions.add(ChromeContextMenuItem.OPEN_IN_OTHER_WINDOW);
             disabledOptions.add(ChromeContextMenuItem.OPEN_IN_NEW_TAB);
             disabledOptions.add(ChromeContextMenuItem.OPEN_IN_INCOGNITO_TAB);
@@ -581,13 +566,13 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
     public boolean onItemSelected(ContextMenuHelper helper, ContextMenuParams params, int itemId) {
         if (itemId == R.id.contextmenu_open_in_other_window) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IN_OTHER_WINDOW);
-            mDelegate.onOpenInOtherWindow(params.getLinkUrl(), params.getReferrer());
+            mDelegate.onOpenInOtherWindow(params.getUrl(), params.getReferrer());
         } else if (itemId == R.id.contextmenu_open_in_new_tab) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IN_NEW_TAB);
-            mDelegate.onOpenInNewTab(params.getLinkUrl(), params.getReferrer());
+            mDelegate.onOpenInNewTab(params.getUrl(), params.getReferrer());
         } else if (itemId == R.id.contextmenu_open_in_incognito_tab) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IN_INCOGNITO_TAB);
-            mDelegate.onOpenInNewIncognitoTab(params.getLinkUrl());
+            mDelegate.onOpenInNewIncognitoTab(params.getUrl());
         } else if (itemId == R.id.contextmenu_open_image) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IMAGE);
             mDelegate.onOpenImageUrl(params.getSrcUrl(), params.getReferrer());
@@ -667,9 +652,9 @@ public class ChromeContextMenuPopulator implements ContextMenuPopulator {
         } else if (itemId == R.id.contextmenu_share_image) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_SHARE_IMAGE);
             helper.shareImage();
-        } else if (itemId == R.id.menu_id_open_in_chrome) {
+        } else if (itemId == R.id.contextmenu_open_in_chrome) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IN_CHROME);
-            mDelegate.onOpenInChrome(params.getLinkUrl(), params.getPageUrl());
+            mDelegate.onOpenInChrome(params.getUrl(), params.getPageUrl());
         } else if (itemId == R.id.contextmenu_open_in_new_chrome_tab) {
             ContextMenuUma.record(params, ContextMenuUma.ACTION_OPEN_IN_NEW_CHROME_TAB);
             mDelegate.onOpenInNewChromeTabFromCCT(params.getUrl(), false);

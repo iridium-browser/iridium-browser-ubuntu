@@ -28,11 +28,9 @@ void RunCrashReporter(const std::string& crash_type,
                       const std::string& board,
                       const std::string& cpu_abi,
                       mojo::edk::ScopedPlatformHandle pipe) {
-  base::FileHandleMappingVector fd_map = {
-      std::make_pair(pipe.get().handle, STDIN_FILENO)};
-
   base::LaunchOptions options;
-  options.fds_to_remap = &fd_map;
+  options.fds_to_remap.push_back(
+      std::make_pair(pipe.get().handle, STDIN_FILENO));
 
   auto process =
       base::LaunchProcess({kCrashReporterPath, "--arc_java_crash=" + crash_type,
@@ -83,26 +81,12 @@ ArcCrashCollectorBridge* ArcCrashCollectorBridge::GetForBrowserContext(
 ArcCrashCollectorBridge::ArcCrashCollectorBridge(
     content::BrowserContext* context,
     ArcBridgeService* bridge_service)
-    : arc_bridge_service_(bridge_service), binding_(this) {
-  arc_bridge_service_->crash_collector()->AddObserver(this);
+    : arc_bridge_service_(bridge_service) {
+  arc_bridge_service_->crash_collector()->SetHost(this);
 }
 
 ArcCrashCollectorBridge::~ArcCrashCollectorBridge() {
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->crash_collector()->RemoveObserver(this);
-}
-
-void ArcCrashCollectorBridge::OnInstanceReady() {
-  mojom::CrashCollectorHostPtr host_ptr;
-  binding_.Bind(mojo::MakeRequest(&host_ptr));
-  auto* instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->crash_collector(), Init);
-  DCHECK(instance);
-  instance->Init(std::move(host_ptr));
+  arc_bridge_service_->crash_collector()->SetHost(nullptr);
 }
 
 void ArcCrashCollectorBridge::DumpCrash(const std::string& type,
@@ -113,7 +97,7 @@ void ArcCrashCollectorBridge::DumpCrash(const std::string& type,
   base::PostTaskWithTraits(
       FROM_HERE, {base::WithBaseSyncPrimitives()},
       base::BindOnce(&RunCrashReporter, type, device_, board_, cpu_abi_,
-                     base::Passed(std::move(pipe_handle))));
+                     std::move(pipe_handle)));
 }
 
 void ArcCrashCollectorBridge::SetBuildProperties(const std::string& device,

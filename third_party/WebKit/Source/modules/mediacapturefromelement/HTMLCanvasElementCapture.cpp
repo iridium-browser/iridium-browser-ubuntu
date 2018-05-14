@@ -6,10 +6,9 @@
 
 #include <memory>
 #include "core/dom/ExceptionCode.h"
-#include "core/html/HTMLCanvasElement.h"
+#include "core/html/canvas/HTMLCanvasElement.h"
 #include "modules/mediacapturefromelement/CanvasCaptureMediaStreamTrack.h"
 #include "modules/mediastream/MediaStream.h"
-#include "platform/wtf/PtrUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCanvasCaptureHandler.h"
 #include "public/platform/WebMediaStream.h"
@@ -22,13 +21,15 @@ const double kDefaultFrameRate = 60.0;
 namespace blink {
 
 MediaStream* HTMLCanvasElementCapture::captureStream(
+    ScriptState* script_state,
     HTMLCanvasElement& element,
     ExceptionState& exception_state) {
-  return HTMLCanvasElementCapture::captureStream(element, false, 0,
-                                                 exception_state);
+  return HTMLCanvasElementCapture::captureStream(script_state, element, false,
+                                                 0, exception_state);
 }
 
 MediaStream* HTMLCanvasElementCapture::captureStream(
+    ScriptState* script_state,
     HTMLCanvasElement& element,
     double frame_rate,
     ExceptionState& exception_state) {
@@ -38,11 +39,12 @@ MediaStream* HTMLCanvasElementCapture::captureStream(
     return nullptr;
   }
 
-  return HTMLCanvasElementCapture::captureStream(element, true, frame_rate,
-                                                 exception_state);
+  return HTMLCanvasElementCapture::captureStream(script_state, element, true,
+                                                 frame_rate, exception_state);
 }
 
 MediaStream* HTMLCanvasElementCapture::captureStream(
+    ScriptState* script_state,
     HTMLCanvasElement& element,
     bool given_frame_rate,
     double frame_rate,
@@ -69,19 +71,22 @@ MediaStream* HTMLCanvasElementCapture::captureStream(
     return nullptr;
   }
 
+  ExecutionContext* context = ExecutionContext::From(script_state);
+  DCHECK(context);
   CanvasCaptureMediaStreamTrack* canvas_track;
-  if (given_frame_rate)
+  if (given_frame_rate) {
     canvas_track = CanvasCaptureMediaStreamTrack::Create(
-        track, &element, std::move(handler), frame_rate);
-  else
-    canvas_track = CanvasCaptureMediaStreamTrack::Create(track, &element,
-                                                         std::move(handler));
+        track, &element, context, std::move(handler), frame_rate);
+  } else {
+    canvas_track = CanvasCaptureMediaStreamTrack::Create(
+        track, &element, context, std::move(handler));
+  }
   // We want to capture a frame in the beginning.
   canvas_track->requestFrame();
 
   MediaStreamTrackVector tracks;
   tracks.push_back(canvas_track);
-  return MediaStream::Create(element.GetExecutionContext(), tracks);
+  return MediaStream::Create(context, tracks);
 }
 
 }  // namespace blink

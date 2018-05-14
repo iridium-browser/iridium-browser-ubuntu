@@ -5,7 +5,7 @@
 #include "platform/scroll/ProgrammaticScrollAnimator.h"
 
 #include <memory>
-#include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorKeyframeModel.h"
 #include "platform/animation/CompositorScrollOffsetAnimationCurve.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/GraphicsLayer.h"
@@ -21,7 +21,7 @@ ProgrammaticScrollAnimator::ProgrammaticScrollAnimator(
     ScrollableArea* scrollable_area)
     : scrollable_area_(scrollable_area), start_time_(0.0) {}
 
-ProgrammaticScrollAnimator::~ProgrammaticScrollAnimator() {}
+ProgrammaticScrollAnimator::~ProgrammaticScrollAnimator() = default;
 
 void ProgrammaticScrollAnimator::ResetAnimationState() {
   ScrollAnimatorCompositorCoordinator::ResetAnimationState();
@@ -122,8 +122,8 @@ void ProgrammaticScrollAnimator::UpdateCompositorAnimations() {
   }
 
   if (run_state_ == RunState::kWaitingToSendToCompositor) {
-    if (!compositor_animation_attached_to_element_id_)
-      ReattachCompositorPlayerIfNeeded(
+    if (!element_id_)
+      ReattachCompositorAnimationIfNeeded(
           GetScrollableArea()->GetCompositorAnimationTimeline());
 
     bool sent_to_compositor = false;
@@ -134,8 +134,8 @@ void ProgrammaticScrollAnimator::UpdateCompositorAnimations() {
     // crbug.com/730705
     if (!scrollable_area_->ShouldScrollOnMainThread() &&
         !is_sequenced_scroll_) {
-      std::unique_ptr<CompositorAnimation> animation =
-          CompositorAnimation::Create(
+      std::unique_ptr<CompositorKeyframeModel> animation =
+          CompositorKeyframeModel::Create(
               *animation_curve_, CompositorTargetProperty::SCROLL_OFFSET, 0, 0);
 
       int animation_id = animation->Id();
@@ -163,7 +163,7 @@ void ProgrammaticScrollAnimator::UpdateCompositorAnimations() {
 
 void ProgrammaticScrollAnimator::LayerForCompositedScrollingDidChange(
     CompositorAnimationTimeline* timeline) {
-  ReattachCompositorPlayerIfNeeded(timeline);
+  ReattachCompositorAnimationIfNeeded(timeline);
 
   // If the composited scrolling layer is lost during a composited animation,
   // continue the animation on the main thread.
@@ -198,7 +198,7 @@ void ProgrammaticScrollAnimator::AnimationFinished() {
   }
 }
 
-DEFINE_TRACE(ProgrammaticScrollAnimator) {
+void ProgrammaticScrollAnimator::Trace(blink::Visitor* visitor) {
   visitor->Trace(scrollable_area_);
   ScrollAnimatorCompositorCoordinator::Trace(visitor);
 }

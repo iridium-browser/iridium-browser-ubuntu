@@ -26,6 +26,7 @@
 #ifndef TypingCommand_h
 #define TypingCommand_h
 
+#include "core/editing/TextGranularity.h"
 #include "core/editing/commands/CompositeEditCommand.h"
 
 namespace blink {
@@ -52,9 +53,7 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   enum Option {
     kSelectInsertedText = 1 << 0,
     kKillRing = 1 << 1,
-    kRetainAutocorrectionIndicator = 1 << 2,
-    kPreventSpellChecking = 1 << 3,
-    kSmartDelete = 1 << 4
+    kSmartDelete = 1 << 2
   };
   typedef unsigned Options;
 
@@ -77,6 +76,7 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
       const String&,
       const SelectionInDOMTree&,
       Options,
+      EditingState*,
       TextCompositionType = kTextCompositionNone,
       const bool is_incremental_insertion = false,
       InputEvent::InputType = InputEvent::InputType::kInsertText);
@@ -86,10 +86,10 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   static void CloseTyping(LocalFrame*);
 
   static TypingCommand* LastTypingCommandIfStillOpenForTyping(LocalFrame*);
+  static void UpdateSelectionIfDifferentFromCurrentSelection(TypingCommand*,
+                                                             LocalFrame*);
 
-  void InsertText(const String& text, bool select_inserted_text, EditingState*);
   void InsertTextRunWithoutNewlines(const String& text,
-                                    bool select_inserted_text,
                                     EditingState*);
   void InsertLineBreak(EditingState*);
   void InsertParagraphSeparatorInQuotedContent(EditingState*);
@@ -102,7 +102,8 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   }
   void AdjustSelectionAfterIncrementalInsertion(LocalFrame*,
                                                 const size_t selection_start,
-                                                const size_t text_length);
+                                                const size_t text_length,
+                                                EditingState*);
 
   ETypingCommand CommandTypeOfOpenCommand() const { return command_type_; }
   TextCompositionType CompositionType() const { return composition_type_; }
@@ -141,19 +142,14 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   bool IsOpenForMoreTyping() const { return open_for_more_typing_; }
   void CloseTyping() { open_for_more_typing_ = false; }
 
+  void InsertTextInternal(const String& text,
+                          bool select_inserted_text,
+                          EditingState*);
+
   void DoApply(EditingState*) override;
   InputEvent::InputType GetInputType() const override;
   bool IsTypingCommand() const override;
   bool PreservesTypingStyle() const override { return preserves_typing_style_; }
-  void SetShouldRetainAutocorrectionIndicator(bool retain) override {
-    should_retain_autocorrection_indicator_ = retain;
-  }
-  void SetShouldPreventSpellChecking(bool prevent) {
-    should_prevent_spell_checking_ = prevent;
-  }
-
-  static void UpdateSelectionIfDifferentFromCurrentSelection(TypingCommand*,
-                                                             LocalFrame*);
 
   void UpdatePreservesTypingStyle(ETypingCommand);
   void TypingAddedToOpenCommand(ETypingCommand);
@@ -165,41 +161,34 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
 
   bool IsIncrementalInsertion() const { return is_incremental_insertion_; }
 
-  void DeleteKeyPressedInternal(const VisibleSelection& selection_to_delete,
-                                const VisibleSelection& selection_after_undo,
-                                bool kill_ring,
-                                EditingState*);
+  void DeleteKeyPressedInternal(
+      const VisibleSelection& selection_to_delete,
+      const SelectionForUndoStep& selection_after_undo,
+      bool kill_ring,
+      EditingState*);
 
-  void DeleteSelectionIfRange(const VisibleSelection&,
-                              EditingState*,
-                              bool smart_delete = false,
-                              bool merge_blocks_after_delete = true,
-                              bool expand_for_special_elements = true,
-                              bool sanitize_markup = true);
+  void DeleteSelectionIfRange(const VisibleSelection&, EditingState*);
 
   void ForwardDeleteKeyPressedInternal(
       const VisibleSelection& selection_to_delete,
-      const VisibleSelection& selection_after_undo,
+      const SelectionForUndoStep& selection_after_undo,
       bool kill_ring,
       EditingState*);
 
   ETypingCommand command_type_;
   String text_to_insert_;
   bool open_for_more_typing_;
-  bool select_inserted_text_;
+  const bool select_inserted_text_;
   bool smart_delete_;
-  TextGranularity granularity_;
+  const TextGranularity granularity_;
   TextCompositionType composition_type_;
-  bool kill_ring_;
+  const bool kill_ring_;
   bool preserves_typing_style_;
 
   // Undoing a series of backward deletes will restore a selection around all of
   // the characters that were deleted, but only if the typing command being
   // undone was opened with a backward delete.
   bool opened_by_backward_delete_;
-
-  bool should_retain_autocorrection_indicator_;
-  bool should_prevent_spell_checking_;
 
   bool is_incremental_insertion_;
   size_t selection_start_;

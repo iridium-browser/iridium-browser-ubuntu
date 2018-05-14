@@ -6,15 +6,17 @@
 #include "base/command_line.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_list_observer.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
@@ -27,6 +29,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
 #include "components/sync/base/sync_prefs.h"
@@ -34,7 +37,6 @@
 #include "components/sync/driver/sync_client.h"
 #include "components/sync/model/fake_sync_change_processor.h"
 #include "components/sync/model/sync_error_factory_mock.h"
-#include "components/sync_sessions/fake_sync_sessions_client.h"
 #include "components/sync_sessions/sessions_sync_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -47,11 +49,30 @@ using testing::_;
 using testing::Invoke;
 using testing::Return;
 
+@implementation AppMenuController (TestingAPI)
+- (BookmarkMenuBridge*)bookmarkMenuBridge {
+  return bookmarkMenuBridge_.get();
+}
+@end
+
+@interface TestBookmarkMenuCocoaController : BookmarkMenuCocoaController
+@property(nonatomic, readonly) const bookmarks::BookmarkNode* lastOpenedNode;
+@end
+
+@implementation TestBookmarkMenuCocoaController {
+  const bookmarks::BookmarkNode* lastOpenedNode_;
+}
+@synthesize lastOpenedNode = lastOpenedNode_;
+- (void)openURLForNode:(const bookmarks::BookmarkNode*)node {
+  lastOpenedNode_ = node;
+}
+@end
+
 namespace {
 
 class MockAppMenuModel : public AppMenuModel {
  public:
-  MockAppMenuModel() : AppMenuModel() {}
+  MockAppMenuModel() : AppMenuModel(nullptr, nullptr) {}
   ~MockAppMenuModel() {}
   MOCK_METHOD2(ExecuteCommand, void(int command_id, int event_flags));
 };
@@ -63,6 +84,23 @@ class DummyRouter : public sync_sessions::LocalSessionEventRouter {
       sync_sessions::LocalSessionEventHandler* handler) override {}
   void Stop() override {}
 };
+
+class BrowserRemovedObserver : public BrowserListObserver {
+ public:
+  BrowserRemovedObserver() { BrowserList::AddObserver(this); }
+  ~BrowserRemovedObserver() override { BrowserList::RemoveObserver(this); }
+  void WaitUntilBrowserRemoved() { run_loop_.Run(); }
+  void OnBrowserRemoved(Browser* browser) override { run_loop_.Quit(); }
+
+ private:
+  base::RunLoop run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserRemovedObserver);
+};
+
+}  // namespace
+
+namespace test {
 
 class AppMenuControllerTest : public CocoaProfileTest {
  public:
@@ -77,24 +115,24 @@ class AppMenuControllerTest : public CocoaProfileTest {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
-    local_device_ = base::MakeUnique<syncer::LocalDeviceInfoProviderMock>(
+    local_device_ = std::make_unique<syncer::LocalDeviceInfoProviderMock>(
         "AppMenuControllerTest", "Test Machine", "Chromium 10k", "Chrome 10k",
         sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id");
 
     controller_.reset([[AppMenuController alloc] initWithBrowser:browser()]);
 
-    fake_model_ = base::MakeUnique<MockAppMenuModel>();
+    fake_model_ = std::make_unique<MockAppMenuModel>();
 
-    sync_prefs_ = base::MakeUnique<syncer::SyncPrefs>(profile()->GetPrefs());
+    sync_prefs_ = std::make_unique<syncer::SyncPrefs>(profile()->GetPrefs());
 
     mock_sync_service_ = static_cast<browser_sync::ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile()));
 
-    manager_ = base::MakeUnique<sync_sessions::SessionsSyncManager>(
+    manager_ = std::make_unique<sync_sessions::SessionsSyncManager>(
         ProfileSyncServiceFactory::GetForProfile(profile())
             ->GetSyncClient()
             ->GetSyncSessionsClient(),
-        sync_prefs_.get(), local_device_.get(), &dummy_router_, base::Closure(),
+        sync_prefs_.get(), local_device_.get(), &dummy_router_,
         base::Closure());
 
     manager_->MergeDataAndStartSyncing(
@@ -103,6 +141,17 @@ class AppMenuControllerTest : public CocoaProfileTest {
             new syncer::FakeSyncChangeProcessor),
         std::unique_ptr<syncer::SyncErrorFactory>(
             new syncer::SyncErrorFactoryMock));
+  }
+
+  TestBookmarkMenuCocoaController* SetTestBookmarksMenuDelegate(
+      BookmarkMenuBridge* bridge) {
+    base::scoped_nsobject<TestBookmarkMenuCocoaController> test_controller(
+        [[TestBookmarkMenuCocoaController alloc] initWithBridge:bridge]);
+    bridge->ClearBookmarkMenu();
+    [bridge->BookmarkMenu() setDelegate:test_controller];
+    bridge->controller_ =
+        base::scoped_nsobject<BookmarkMenuCocoaController>(test_controller);
+    return test_controller;
   }
 
   void RegisterRecentTabs(RecentTabsBuilderTestHelper* helper) {
@@ -128,7 +177,7 @@ class AppMenuControllerTest : public CocoaProfileTest {
                 IsDataTypeControllerRunning(syncer::PROXY_TABS))
         .WillRepeatedly(Return(true));
     EXPECT_CALL(*mock_sync_service_, GetOpenTabsUIDelegateMock())
-        .WillRepeatedly(Return(manager_.get()));
+        .WillRepeatedly(Return(manager_->GetOpenTabsUIDelegate()));
   }
 
   AppMenuController* controller() {
@@ -188,7 +237,7 @@ TEST_F(AppMenuControllerTest, RecentTabsFavIcon) {
   EXPECT_EQ(6, [recent_tabs_menu numberOfItems]);
 
   // Send a icon changed event and verify that the icon is updated.
-  gfx::Image icon(ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+  gfx::Image icon(ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_BOOKMARKS_FAVICON));
   recent_tabs_sub_menu_model.SetIcon(3, icon);
   EXPECT_NSNE(icon.ToNSImage(), [[recent_tabs_menu itemAtIndex:3] image]);
@@ -270,18 +319,51 @@ TEST_F(AppMenuControllerTest, RecentTabDeleteOrder) {
   // If the delete order is wrong then the test will crash on exit.
 }
 
-class BrowserRemovedObserver : public chrome::BrowserListObserver {
- public:
-  BrowserRemovedObserver() { BrowserList::AddObserver(this); }
-  ~BrowserRemovedObserver() override { BrowserList::RemoveObserver(this); }
-  void WaitUntilBrowserRemoved() { run_loop_.Run(); }
-  void OnBrowserRemoved(Browser* browser) override { run_loop_.Quit(); }
+// Simulate opening a bookmark from the bookmark submenu.
+TEST_F(AppMenuControllerTest, OpenBookmark) {
+  // Ensure there's at least one bookmark.
+  bookmarks::BookmarkModel* model =
+      BookmarkModelFactory::GetForBrowserContext(profile());
+  ASSERT_TRUE(model);
+  const bookmarks::BookmarkNode* parent = model->bookmark_bar_node();
+  const bookmarks::BookmarkNode* about = model->AddURL(
+      parent, 0, base::ASCIIToUTF16("About"), GURL("chrome://chrome"));
 
- private:
-  base::RunLoop run_loop_;
+  EXPECT_FALSE([controller_ bookmarkMenuBridge]);
 
-  DISALLOW_COPY_AND_ASSIGN(BrowserRemovedObserver);
-};
+  [controller_ menuNeedsUpdate:[controller_ menu]];
+  BookmarkMenuBridge* bridge = [controller_ bookmarkMenuBridge];
+  EXPECT_TRUE(bridge);
+
+  NSMenu* bookmarks_menu =
+      [[[controller_ menu] itemWithTitle:@"Bookmarks"] submenu];
+  EXPECT_TRUE(bookmarks_menu);
+  EXPECT_TRUE([bookmarks_menu delegate]);
+
+  // The bookmark item actions would do Browser::OpenURL(), which will fail in a
+  // unit test. So swap in a test delegate.
+  TestBookmarkMenuCocoaController* test_controller =
+      SetTestBookmarksMenuDelegate(bridge);
+
+  // The fixed items from the default model.
+  EXPECT_EQ(5u, [bookmarks_menu numberOfItems]);
+
+  // When AppKit shows the menu, the bookmark items are added (and a separator).
+  [[bookmarks_menu delegate] menuNeedsUpdate:bookmarks_menu];
+  EXPECT_EQ(7u, [bookmarks_menu numberOfItems]);
+
+  base::scoped_nsobject<NSMenuItem> item(
+      [[bookmarks_menu itemWithTitle:@"About"] retain]);
+  EXPECT_TRUE(item);
+  EXPECT_TRUE([item target]);
+  EXPECT_TRUE([item action]);
+
+  // Simulate how AppKit would click the item (menuDidClose happens first).
+  [controller_ menuDidClose:[controller_ menu]];
+  EXPECT_FALSE([test_controller lastOpenedNode]);
+  [[item target] performSelector:[item action] withObject:item];
+  EXPECT_EQ(about, [test_controller lastOpenedNode]);
+}
 
 // Test that AppMenuController can be destroyed after the Browser.
 // This can happen because the AppMenuController's owner (ToolbarController)
@@ -296,4 +378,4 @@ TEST_F(AppMenuControllerTest, DestroyedAfterBrowser) {
   // |controller_| is released in TearDown().
 }
 
-}  // namespace
+}  // namespace test

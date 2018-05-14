@@ -38,18 +38,17 @@ class CONTENT_EXPORT AppCacheBackendImpl {
                    const GURL& manifest_url);
   void GetResourceList(
       int host_id, std::vector<AppCacheResourceInfo>* resource_infos);
-  bool SelectCacheForWorker(int host_id, int parent_process_id,
-                            int parent_host_id);
   bool SelectCacheForSharedWorker(int host_id, int64_t appcache_id);
   bool MarkAsForeignEntry(int host_id,
                           const GURL& document_url,
                           int64_t cache_document_was_loaded_from);
-  bool GetStatusWithCallback(int host_id, const GetStatusCallback& callback,
-                             void* callback_param);
-  bool StartUpdateWithCallback(int host_id, const StartUpdateCallback& callback,
-                               void* callback_param);
-  bool SwapCacheWithCallback(int host_id, const SwapCacheCallback& callback,
-                             void* callback_param);
+
+  // The xxxWithCallback functions take ownership of the callback iff the host
+  // is found (and the return value is true). If the result is false, the
+  // callback is still available to the caller of these methods.
+  bool GetStatusWithCallback(int host_id, GetStatusCallback* callback);
+  bool StartUpdateWithCallback(int host_id, StartUpdateCallback* callback);
+  bool SwapCacheWithCallback(int host_id, SwapCacheCallback* callback);
 
   // Returns a pointer to a registered host. The backend retains ownership.
   AppCacheHost* GetHost(int host_id) {

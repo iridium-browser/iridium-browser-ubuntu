@@ -7,49 +7,28 @@
 
 #import <UIKit/UIKit.h>
 
-#include "base/mac/scoped_nsobject.h"
 #import "ios/chrome/browser/ui/side_swipe/side_swipe_controller.h"
 
 @class SideSwipeGestureRecognizer;
+@protocol SideSwipeToolbarSnapshotProviding;
 @class TabModel;
-@class WebToolbarController;
 
-@interface SwipeView : UIView {
-  base::scoped_nsobject<UIImageView> image_;
-  base::scoped_nsobject<UIImageView> shadowView_;
-  base::scoped_nsobject<UIImageView> toolbarHolder_;
-}
-@end
-
-@interface CardSideSwipeView : UIView {
-  // The direction of the swipe that initiated this horizontal view.
-  UISwipeGestureRecognizerDirection direction_;
-
-  // Card views currently displayed.
-  base::scoped_nsobject<SwipeView> leftCard_;
-  base::scoped_nsobject<SwipeView> rightCard_;
-
-  // Most recent touch location.
-  CGPoint currentPoint_;
-
-  // Space reserved at the top for the toolbar.
-  CGFloat topMargin_;
-
-  // Tab model.
-  TabModel* model_;  // weak
-
-  // The image view containing the background image.
-  base::scoped_nsobject<UIImageView> backgroundView_;
-}
+@interface CardSideSwipeView : UIView
 
 @property(nonatomic, weak) id<SideSwipeControllerDelegate> delegate;
+// Snapshot provider for the top toolbar.
+@property(nonatomic, weak) id<SideSwipeToolbarSnapshotProviding>
+    topToolbarSnapshotProvider;
+// Snapshot provider for the bottom toolbar.
+@property(nonatomic, weak) id<SideSwipeToolbarSnapshotProviding>
+    bottomToolbarSnapshotProvider;
+// Space reserved at the top for the toolbar.
 @property(nonatomic, assign) CGFloat topMargin;
 
-- (id)initWithFrame:(CGRect)frame
-          topMargin:(CGFloat)margin
-              model:(TabModel*)model;
-- (void)updateViewsForDirection:(UISwipeGestureRecognizerDirection)direction
-                    withToolbar:(WebToolbarController*)toolbarController;
+- (instancetype)initWithFrame:(CGRect)frame
+                    topMargin:(CGFloat)margin
+                        model:(TabModel*)model;
+- (void)updateViewsForDirection:(UISwipeGestureRecognizerDirection)direction;
 - (void)handleHorizontalPan:(SideSwipeGestureRecognizer*)gesture;
 
 @end

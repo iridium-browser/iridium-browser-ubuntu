@@ -25,7 +25,7 @@ class LineLayoutText : public LineLayoutItem {
 
   explicit LineLayoutText(std::nullptr_t) : LineLayoutItem(nullptr) {}
 
-  LineLayoutText() {}
+  LineLayoutText() = default;
 
   InlineTextBox* FirstTextBox() const { return ToText()->FirstTextBox(); }
 
@@ -51,6 +51,10 @@ class LineLayoutText : public LineLayoutItem {
 
   bool IsAllCollapsibleWhitespace() const {
     return ToText()->IsAllCollapsibleWhitespace();
+  }
+
+  OnlyWhitespaceOrNbsp ContainsOnlyWhitespaceOrNbsp() const {
+    return ToText()->ContainsOnlyWhitespaceOrNbsp();
   }
 
   UChar CharacterAt(unsigned offset) const {
@@ -111,13 +115,11 @@ class LineLayoutText : public LineLayoutItem {
     return ToText()->HyphenWidth(font, text_direction);
   }
 
-  std::pair<int, int> SelectionStartEnd() const {
-    return ToText()->SelectionStartEnd();
-  }
-
   unsigned TextStartOffset() const { return ToText()->TextStartOffset(); }
 
   float MinLogicalWidth() const { return ToText()->MinLogicalWidth(); }
+
+  UChar PreviousCharacter() const { return ToText()->PreviousCharacter(); }
 
  private:
   LayoutText* ToText() { return ToLayoutText(GetLayoutObject()); }

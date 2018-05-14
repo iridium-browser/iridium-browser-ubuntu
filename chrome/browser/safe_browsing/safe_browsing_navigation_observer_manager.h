@@ -5,10 +5,10 @@
 #ifndef CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_NAVIGATION_OBSERVER_MANAGER_H_
 #define CHROME_BROWSER_SAFE_BROWSING_SAFE_BROWSING_NAVIGATION_OBSERVER_MANAGER_H_
 
-#include <deque>
+#include "base/containers/circular_deque.h"
 #include "base/feature_list.h"
 #include "base/supports_user_data.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/protobuf/src/google/protobuf/repeated_field.h"
 #include "url/gurl.h"
@@ -27,12 +27,29 @@ typedef google::protobuf::RepeatedPtrField<safe_browsing::ReferrerChainEntry>
 // User data stored in DownloadItem for referrer chain information.
 class ReferrerChainData : public base::SupportsUserData::Data {
  public:
-  explicit ReferrerChainData(std::unique_ptr<ReferrerChain> referrer_chain);
+  ReferrerChainData(std::unique_ptr<ReferrerChain> referrer_chain,
+                    size_t referrer_chain_length,
+                    size_t recent_navigation_to_collect);
   ~ReferrerChainData() override;
   ReferrerChain* GetReferrerChain();
+  size_t referrer_chain_length() { return referrer_chain_length_; }
+  size_t recent_navigations_to_collect() {
+    return recent_navigations_to_collect_;
+  }
+
+  // Unique user data key used to get and set referrer chain data in
+  // DownloadItem.
+  static const char kDownloadReferrerChainDataKey[];
 
  private:
   std::unique_ptr<ReferrerChain> referrer_chain_;
+  // This is the actual referrer chain length before appending recent navigation
+  // events;
+  size_t referrer_chain_length_;
+  // |recent_navigations_to_collect_| is controlled by finch parameter. If the
+  // user is incognito mode or hasn't enabled extended reporting, this value is
+  // always 0.
+  size_t recent_navigations_to_collect_;
 };
 
 // Struct that manages insertion, cleanup, and lookup of NavigationEvent
@@ -84,8 +101,13 @@ struct NavigationEventList {
     return navigation_events_[index].get();
   }
 
+  const base::circular_deque<std::unique_ptr<NavigationEvent>>&
+  navigation_events() {
+    return navigation_events_;
+  }
+
  private:
-  std::deque<std::unique_ptr<NavigationEvent>> navigation_events_;
+  base::circular_deque<std::unique_ptr<NavigationEvent>> navigation_events_;
   const std::size_t size_limit_;
 };
 
@@ -111,11 +133,12 @@ class SafeBrowsingNavigationObserverManager
   // kUserGestureTTLInSecond.
   static bool IsUserGestureExpired(const base::Time& timestamp);
 
-  // Helper function to strip empty ref fragment from a URL. Many pages
-  // end up with a "#" at the end of their URLs due to navigation triggered by
+  // Helper function to strip ref fragment from a URL. Many pages end up with a
+  // fragment (e.g. http://bar.com/index.html#foo) at the end due to in-page
+  // navigation or a single "#" at the end due to navigation triggered by
   // href="#" and javascript onclick function. We don't want to have separate
   // entries for these cases in the maps.
-  static GURL ClearEmptyRef(const GURL& url);
+  static GURL ClearURLRef(const GURL& url);
 
   // Checks if we should enable observing navigations for safe browsing purpose.
   // Return true if the safe browsing safe browsing service is enabled and
@@ -183,14 +206,24 @@ class SafeBrowsingNavigationObserverManager
       int user_gesture_count_limit,
       ReferrerChain* out_referrer_chain);
 
-  // Record the creation of a new WebContents by |source_web_contents|. This is
+  // Records the creation of a new WebContents by |source_web_contents|. This is
   // used to detect cross-frame and cross-tab navigations.
   void RecordNewWebContents(content::WebContents* source_web_contents,
                             int source_render_process_id,
                             int source_render_frame_id,
                             GURL target_url,
                             content::WebContents* target_web_contents,
-                            bool not_yet_in_tabstrip);
+                            bool renderer_initiated);
+
+  // Based on user state, attribution result and finch parameter, calculates the
+  // number of recent navigations we want to append to the referrer chain.
+  static size_t CountOfRecentNavigationsToAppend(const Profile& profile,
+                                                 AttributionResult result);
+
+  // Appends |recent_navigation_count| number of recent navigation events to
+  // referrer chain in reverse chronological order.
+  void AppendRecentNavigations(size_t recent_navigation_count,
+                               ReferrerChain* out_referrer_chain);
 
  private:
   friend class base::RefCountedThreadSafe<

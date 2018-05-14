@@ -13,85 +13,50 @@
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/resource/CSSStyleSheetResource.h"
-#include "core/loader/resource/StyleSheetResourceClient.h"
 #include "core/page/Page.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/RawResource.h"
 #include "platform/loader/fetch/Resource.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
-#include "public/platform/WebCachePolicy.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
 #include "public/platform/WebURLRequest.h"
+#include "public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
 
 namespace blink {
 
+// NOTE: While this is a RawResourceClient, it loads both raw and css stylesheet
+// resources. Stylesheets can only safely use a RawResourceClient because it has
+// no custom interface and simply uses the base ResourceClient.
 class InspectorResourceContentLoader::ResourceClient final
     : public GarbageCollectedFinalized<
           InspectorResourceContentLoader::ResourceClient>,
-      private RawResourceClient,
-      private StyleSheetResourceClient {
+      private RawResourceClient {
   USING_GARBAGE_COLLECTED_MIXIN(ResourceClient);
 
  public:
   explicit ResourceClient(InspectorResourceContentLoader* loader)
       : loader_(loader) {}
 
-  void WaitForResource(Resource* resource) {
-    if (resource->GetType() == Resource::kRaw)
-      resource->AddClient(static_cast<RawResourceClient*>(this));
-    else
-      resource->AddClient(static_cast<StyleSheetResourceClient*>(this));
-  }
-
-  DEFINE_INLINE_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(loader_);
-    StyleSheetResourceClient::Trace(visitor);
     RawResourceClient::Trace(visitor);
   }
 
  private:
   Member<InspectorResourceContentLoader> loader_;
 
-  void SetCSSStyleSheet(const String&,
-                        const KURL&,
-                        ReferrerPolicy,
-                        const WTF::TextEncoding&,
-                        const CSSStyleSheetResource*) override;
-  void NotifyFinished(Resource*) override;
+  void NotifyFinished(Resource* resource) override {
+    if (loader_)
+      loader_->ResourceFinished(this);
+    ClearResource();
+  }
+
   String DebugName() const override {
     return "InspectorResourceContentLoader::ResourceClient";
   }
-  void ResourceFinished(Resource*);
 
   friend class InspectorResourceContentLoader;
 };
-
-void InspectorResourceContentLoader::ResourceClient::ResourceFinished(
-    Resource* resource) {
-  if (loader_)
-    loader_->ResourceFinished(this);
-
-  if (resource->GetType() == Resource::kRaw)
-    resource->RemoveClient(static_cast<RawResourceClient*>(this));
-  else
-    resource->RemoveClient(static_cast<StyleSheetResourceClient*>(this));
-}
-
-void InspectorResourceContentLoader::ResourceClient::SetCSSStyleSheet(
-    const String&,
-    const KURL& url,
-    ReferrerPolicy,
-    const WTF::TextEncoding&,
-    const CSSStyleSheetResource* resource) {
-  ResourceFinished(const_cast<CSSStyleSheetResource*>(resource));
-}
-
-void InspectorResourceContentLoader::ResourceClient::NotifyFinished(
-    Resource* resource) {
-  if (resource->GetType() == Resource::kCSSStyleSheet)
-    return;
-  ResourceFinished(resource);
-}
 
 InspectorResourceContentLoader::InspectorResourceContentLoader(
     LocalFrame* inspected_frame)
@@ -103,7 +68,7 @@ InspectorResourceContentLoader::InspectorResourceContentLoader(
 void InspectorResourceContentLoader::Start() {
   started_ = true;
   HeapVector<Member<Document>> documents;
-  InspectedFrames* inspected_frames = InspectedFrames::Create(inspected_frame_);
+  InspectedFrames* inspected_frames = new InspectedFrames(inspected_frame_);
   for (LocalFrame* frame : *inspected_frames) {
     documents.push_back(frame->GetDocument());
     documents.AppendVector(InspectorPageAgent::ImportsForFrame(frame));
@@ -115,11 +80,11 @@ void InspectorResourceContentLoader::Start() {
     HistoryItem* item =
         document->Loader() ? document->Loader()->GetHistoryItem() : nullptr;
     if (item) {
-      resource_request = item->GenerateResourceRequest(
-          WebCachePolicy::kReturnCacheDataDontLoad);
+      resource_request =
+          item->GenerateResourceRequest(mojom::FetchCacheMode::kOnlyIfCached);
     } else {
       resource_request = ResourceRequest(document->Url());
-      resource_request.SetCachePolicy(WebCachePolicy::kReturnCacheDataDontLoad);
+      resource_request.SetCacheMode(mojom::FetchCacheMode::kOnlyIfCached);
     }
     resource_request.SetRequestContext(WebURLRequest::kRequestContextInternal);
 
@@ -128,14 +93,11 @@ void InspectorResourceContentLoader::Start() {
       ResourceLoaderOptions options;
       options.initiator_info.name = FetchInitiatorTypeNames::internal;
       FetchParameters params(resource_request, options);
-      Resource* resource = RawResource::Fetch(params, document->Fetcher());
-      if (resource) {
-        // Prevent garbage collection by holding a reference to this resource.
-        resources_.push_back(resource);
-        ResourceClient* resource_client = new ResourceClient(this);
-        pending_resource_clients_.insert(resource_client);
-        resource_client->WaitForResource(resource);
-      }
+      ResourceClient* resource_client = new ResourceClient(this);
+      // Prevent garbage collection by holding a reference to this resource.
+      resources_.push_back(
+          RawResource::Fetch(params, document->Fetcher(), resource_client));
+      pending_resource_clients_.insert(resource_client);
     }
 
     HeapVector<Member<CSSStyleSheet>> style_sheets;
@@ -153,15 +115,14 @@ void InspectorResourceContentLoader::Start() {
       ResourceLoaderOptions options;
       options.initiator_info.name = FetchInitiatorTypeNames::internal;
       FetchParameters params(resource_request, options);
-      Resource* resource =
-          CSSStyleSheetResource::Fetch(params, document->Fetcher());
-      if (!resource)
-        continue;
-      // Prevent garbage collection by holding a reference to this resource.
-      resources_.push_back(resource);
       ResourceClient* resource_client = new ResourceClient(this);
-      pending_resource_clients_.insert(resource_client);
-      resource_client->WaitForResource(resource);
+      // Prevent garbage collection by holding a reference to this resource.
+      resources_.push_back(CSSStyleSheetResource::Fetch(
+          params, document->Fetcher(), resource_client));
+      // A cache hit for a css stylesheet will complete synchronously. Don't
+      // mark the client as pending if it already finished.
+      if (resource_client->GetResource())
+        pending_resource_clients_.insert(resource_client);
     }
   }
 
@@ -175,7 +136,7 @@ int InspectorResourceContentLoader::CreateClientId() {
 
 void InspectorResourceContentLoader::EnsureResourcesContentLoaded(
     int client_id,
-    std::unique_ptr<WTF::Closure> callback) {
+    base::OnceClosure callback) {
   if (!started_)
     Start();
   callbacks_.insert(client_id, Callbacks())
@@ -191,7 +152,7 @@ InspectorResourceContentLoader::~InspectorResourceContentLoader() {
   DCHECK(resources_.IsEmpty());
 }
 
-DEFINE_TRACE(InspectorResourceContentLoader) {
+void InspectorResourceContentLoader::Trace(blink::Visitor* visitor) {
   visitor->Trace(inspected_frame_);
   visitor->Trace(pending_resource_clients_);
   visitor->Trace(resources_);
@@ -201,6 +162,14 @@ void InspectorResourceContentLoader::DidCommitLoadForLocalFrame(
     LocalFrame* frame) {
   if (frame == inspected_frame_)
     Stop();
+}
+
+Resource* InspectorResourceContentLoader::ResourceForURL(const KURL& url) {
+  for (const auto& resource : resources_) {
+    if (resource->Url() == url)
+      return resource;
+  }
+  return nullptr;
 }
 
 void InspectorResourceContentLoader::Dispose() {
@@ -228,9 +197,9 @@ void InspectorResourceContentLoader::CheckDone() {
     return;
   HashMap<int, Callbacks> callbacks;
   callbacks.swap(callbacks_);
-  for (const auto& key_value : callbacks) {
-    for (const auto& callback : key_value.value)
-      (*callback)();
+  for (auto& key_value : callbacks) {
+    for (auto& callback : key_value.value)
+      std::move(callback).Run();
   }
 }
 

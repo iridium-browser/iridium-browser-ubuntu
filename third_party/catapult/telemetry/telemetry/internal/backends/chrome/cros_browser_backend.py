@@ -3,121 +3,65 @@
 # found in the LICENSE file.
 
 import logging
-import os
+import time
 
 from telemetry.core import exceptions
-from telemetry.core import util
 from telemetry import decorators
 from telemetry.internal.backends.chrome import chrome_browser_backend
 from telemetry.internal.backends.chrome import misc_web_contents_backend
-from telemetry.internal import forwarders
 
 import py_utils
 
 
 class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
-  def __init__(self, cros_platform_backend, browser_options, cri, is_guest):
-    super(CrOSBrowserBackend, self).__init__(
-        cros_platform_backend, supports_tab_control=True,
-        supports_extensions=not is_guest,
-        browser_options=browser_options)
+  def __init__(self, cros_platform_backend, browser_options,
+               browser_directory, profile_directory, is_guest):
     assert browser_options.IsCrosBrowserOptions()
-    # Initialize fields so that an explosion during init doesn't break in Close.
-    self._cri = cri
+    super(CrOSBrowserBackend, self).__init__(
+        cros_platform_backend,
+        browser_options=browser_options,
+        browser_directory=browser_directory,
+        profile_directory=profile_directory,
+        supports_extensions=not is_guest,
+        supports_tab_control=True)
     self._is_guest = is_guest
-    self._forwarder = None
-    self._remote_debugging_port = self._cri.GetRemotePort()
-    self._port = self._remote_debugging_port
-
-    extensions_to_load = browser_options.extensions_to_load
-
-    # Copy extensions to temp directories on the device.
-    # Note that we also perform this copy locally to ensure that
-    # the owner of the extensions is set to chronos.
-    for e in extensions_to_load:
-      extension_dir = cri.RunCmdOnDevice(
-          ['mktemp', '-d', '/tmp/extension_XXXXX'])[0].rstrip()
-      e.local_path = os.path.join(extension_dir, os.path.basename(e.path))
-      cri.PushFile(e.path, extension_dir)
-      cri.Chown(extension_dir)
-
-    self._cri.RestartUI(self.browser_options.clear_enterprise_policy)
-    py_utils.WaitFor(self.IsBrowserRunning, 20)
-
-    # Delete test user's cryptohome vault (user data directory).
-    if not self.browser_options.dont_override_profile:
-      self._cri.RunCmdOnDevice(['cryptohome', '--action=remove', '--force',
-                                '--user=%s' % self._username])
+    self._cri = cros_platform_backend.cri
 
   @property
   def log_file_path(self):
     return None
 
-  def GetBrowserStartupArgs(self):
-    args = super(CrOSBrowserBackend, self).GetBrowserStartupArgs()
+  def _GetDevToolsActivePortPath(self):
+    return '/home/chronos/DevToolsActivePort'
 
-    logging_patterns = ['*/chromeos/net/*',
-                        '*/chromeos/login/*',
-                        'chrome_browser_main_posix']
-    vmodule = '--vmodule='
-    for pattern in logging_patterns:
-      vmodule += '%s=2,' % pattern
-    vmodule = vmodule.rstrip(',')
+  def _FindDevToolsPortAndTarget(self):
+    devtools_file_path = self._GetDevToolsActivePortPath()
+    # GetFileContents may rise IOError or OSError, the caller will retry.
+    lines = self._cri.GetFileContents(devtools_file_path).splitlines()
+    if not lines:
+      raise EnvironmentError('DevTools file empty')
 
-    args.extend([
-        '--enable-smooth-scrolling',
-        '--enable-threaded-compositing',
-        # Allow devtools to connect to chrome.
-        '--remote-debugging-port=%i' % self._remote_debugging_port,
-        # Open a maximized window.
-        '--start-maximized',
-        # Disable system startup sound.
-        '--ash-disable-system-sounds',
-        # Ignore DMServer errors for policy fetches.
-        '--allow-failed-policy-fetch-for-test',
-        # Skip user image selection screen, and post login screens.
-        '--oobe-skip-postlogin',
-        # Disable chrome logging redirect. crbug.com/724273.
-        '--disable-logging-redirect',
-        # Debug logging.
-        vmodule
-    ])
-
-    # Disable GAIA services unless we're using GAIA login, or if there's an
-    # explicit request for it.
-    if (self.browser_options.disable_gaia_services and
-        not self.browser_options.gaia_login):
-      args.append('--disable-gaia-services')
-
-    trace_config_file = (self.platform_backend.tracing_controller_backend
-                         .GetChromeTraceConfigFile())
-    if trace_config_file:
-      args.append('--trace-config-file=%s' % trace_config_file)
-
-    return args
+    devtools_port = int(lines[0])
+    browser_target = lines[1] if len(lines) >= 2 else None
+    return devtools_port, browser_target
 
   @property
   def pid(self):
     return self._cri.GetChromePid()
 
-  @property
-  def browser_directory(self):
-    result = self._cri.GetChromeProcess()
-    if result and 'path' in result:
-      return os.path.dirname(result['path'])
-    return None
-
-  @property
-  def profile_directory(self):
-    return '/home/chronos/Default'
-
   def __del__(self):
     self.Close()
 
-  def Start(self):
+  def Start(self, startup_args, startup_url=None):
+    assert not startup_url, 'startup_url not supported by cros backend'
+
+    # Remove the stale file with the devtools port / browser target
+    # prior to restarting chrome.
+    self._cri.RmRF(self._GetDevToolsActivePortPath())
+
     # Escape all commas in the startup arguments we pass to Chrome
     # because dbus-send delimits array elements by commas
-    startup_args = [a.replace(',', '\\,') for a in self.GetBrowserStartupArgs()]
+    startup_args = [a.replace(',', '\\,') for a in startup_args]
 
     # Restart Chrome with the login extension and remote debugging.
     pid = self.pid
@@ -127,22 +71,14 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
             '/org/chromium/SessionManager',
             'org.chromium.SessionManagerInterface.EnableChromeTesting',
             'boolean:true',
-            'array:string:"%s"' % ','.join(startup_args)]
+            'array:string:"%s"' % ','.join(startup_args),
+            'array:string:']
     logging.info(' '.join(args))
     self._cri.RunCmdOnDevice(args)
 
-    if not self._cri.local:
-      # TODO(crbug.com/404771): Move port forwarding to network_controller.
-      self._port = util.GetUnreservedAvailableLocalPort()
-      self._forwarder = self._platform_backend.forwarder_factory.Create(
-          forwarders.PortPair(self._port, self._remote_debugging_port),
-          use_remote_port_forwarding=False)
-
     # Wait for new chrome and oobe.
     py_utils.WaitFor(lambda: pid != self.pid, 15)
-    self._WaitForBrowserToComeUp()
-    self._InitDevtoolsClientBackend(
-        remote_devtools_port=self._remote_debugging_port)
+    self.BindDevToolsClient()
     py_utils.WaitFor(lambda: self.oobe_exists, 30)
 
     if self.browser_options.auto_login:
@@ -152,9 +88,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
         # Guest browsing shuts down the current browser and launches an
         # incognito browser in a separate process, which we need to wait for.
         try:
-          # TODO(achuith): Reduce this timeout to 15 sec after crbug.com/631640
-          # is resolved.
-          py_utils.WaitFor(lambda: pid != self.pid, 60)
+          py_utils.WaitFor(lambda: pid != self.pid, 15)
         except py_utils.TimeoutException:
           self._RaiseOnLoginFailure(
               'Failed to restart browser in guest mode (pid %d).' % pid)
@@ -162,6 +96,9 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
       elif self.browser_options.gaia_login:
         self.oobe.NavigateGaiaLogin(self._username, self._password)
       else:
+        # Wait for few seconds(the time of password typing) to have mini ARC
+        # container up and running. Default is 0.
+        time.sleep(self.browser_options.login_delay)
         self.oobe.NavigateFakeLogin(
             self._username, self._password, self._gaia_id,
             not self.browser_options.disable_gaia_services)
@@ -186,17 +123,11 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
     py_utils.WaitFor(lambda: not self._IsCryptohomeMounted(), 180)
 
-    if self._forwarder:
-      self._forwarder.Close()
-      self._forwarder = None
-
-    if self._cri:
-      for e in self._extensions_to_load:
-        self._cri.RmRF(os.path.dirname(e.local_path))
-
     self._cri = None
 
   def IsBrowserRunning(self):
+    if not self._cri:
+      return False
     return bool(self.pid)
 
   def GetStandardOutput(self):
@@ -216,6 +147,16 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
 
   def SymbolizeMinidump(self, minidump_path):
     return None
+
+  @property
+  def supports_overview_mode(self): # pylint: disable=invalid-name
+    return True
+
+  def EnterOverviewMode(self, timeout):
+    self.devtools_client.window_manager_backend.EnterOverviewMode(timeout)
+
+  def ExitOverviewMode(self, timeout):
+    self.devtools_client.window_manager_backend.ExitOverviewMode(timeout)
 
   @property
   @decorators.Cache
@@ -252,7 +193,7 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     status = ''
     if not self._IsCryptohomeMounted():
       status += 'Cryptohome not mounted. '
-    if not self.HasBrowserFinishedLaunching():
+    if not self.HasDevToolsConnection():
       status += 'Browser didn\'t launch. '
     if self.oobe_exists:
       status += 'OOBE not dismissed.'
@@ -264,12 +205,15 @@ class CrOSBrowserBackend(chrome_browser_backend.ChromeBrowserBackend):
     return not self._GetLoginStatus()
 
   def _WaitForLogin(self):
+    # For incognito mode, the session manager actually relaunches chrome with
+    # new arguments, so we have to wait for the browser to restart and then
+    # bind the new DevTools agent to this backend. It's important to do this
+    # before waiting for _IsLoggedIn, otherwise the devtools connection check
+    # will still try to reach the older DevTools agent (and fail to do so).
+    self.BindDevToolsClient()
+
     # Wait for cryptohome to mount.
     py_utils.WaitFor(self._IsLoggedIn, 900)
-
-    # For incognito mode, the session manager actually relaunches chrome with
-    # new arguments, so we have to wait for the browser to come up.
-    self._WaitForBrowserToComeUp()
 
     # Wait for extensions to load.
     if self._supports_extensions:

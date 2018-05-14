@@ -5,13 +5,12 @@
 #include "platform/heap/HeapCompact.h"
 
 #include "platform/Histogram.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Heap.h"
 #include "platform/heap/SparseHeapBitmap.h"
-#include "platform/wtf/CurrentTime.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/wtf/HashMap.h"
 #include "platform/wtf/HashSet.h"
-#include "platform/wtf/Vector.h"
+#include "platform/wtf/Time.h"
 
 namespace blink {
 
@@ -30,7 +29,7 @@ class HeapCompact::MovableObjectFixups final {
     return WTF::WrapUnique(new MovableObjectFixups);
   }
 
-  ~MovableObjectFixups() {}
+  ~MovableObjectFixups() = default;
 
   // For the arenas being compacted, record all pages belonging to them.
   // This is needed to handle 'interior slots', pointers that themselves
@@ -226,7 +225,7 @@ class HeapCompact::MovableObjectFixups final {
 #endif
 
  private:
-  MovableObjectFixups() {}
+  MovableObjectFixups() = default;
 
   // Tracking movable and updatable references. For now, we keep a
   // map which for each movable object, recording the slot that
@@ -276,7 +275,7 @@ HeapCompact::HeapCompact()
       "unexpected ArenaIndices ordering");
 }
 
-HeapCompact::~HeapCompact() {}
+HeapCompact::~HeapCompact() = default;
 
 HeapCompact::MovableObjectFixups& HeapCompact::Fixups() {
   if (!fixups_)
@@ -284,7 +283,8 @@ HeapCompact::MovableObjectFixups& HeapCompact::Fixups() {
   return *fixups_;
 }
 
-bool HeapCompact::ShouldCompact(ThreadState* state,
+bool HeapCompact::ShouldCompact(ThreadHeap* heap,
+                                BlinkGC::StackState stack_state,
                                 BlinkGC::GCType gc_type,
                                 BlinkGC::GCReason reason) {
 #if !ENABLE_HEAP_COMPACTION
@@ -307,7 +307,7 @@ bool HeapCompact::ShouldCompact(ThreadState* state,
   // Why? Should the stack contain an iterator pointing into its
   // associated backing store, its references wouldn't be
   // correctly relocated.
-  if (state->GetStackState() == BlinkGC::kHeapPointersOnStack)
+  if (stack_state == BlinkGC::kHeapPointersOnStack)
     return false;
 
   // Compaction enable rules:
@@ -321,7 +321,7 @@ bool HeapCompact::ShouldCompact(ThreadState* state,
   // TODO: add some form of compaction overhead estimate to the marking
   // time estimate.
 
-  UpdateHeapResidency(state);
+  UpdateHeapResidency(heap);
 
 #if STRESS_TEST_HEAP_COMPACTION
   // Exercise the handling of object movement by compacting as
@@ -362,7 +362,7 @@ void HeapCompact::RegisterMovingObjectCallback(MovableReference reference,
   Fixups().AddFixupCallback(reference, callback, callback_data);
 }
 
-void HeapCompact::UpdateHeapResidency(ThreadState* thread_state) {
+void HeapCompact::UpdateHeapResidency(ThreadHeap* heap) {
   size_t total_arena_size = 0;
   size_t total_free_list_size = 0;
 
@@ -372,8 +372,7 @@ void HeapCompact::UpdateHeapResidency(ThreadState* thread_state) {
 #endif
   for (int i = BlinkGC::kVector1ArenaIndex; i <= BlinkGC::kHashTableArenaIndex;
        ++i) {
-    NormalPageArena* arena =
-        static_cast<NormalPageArena*>(thread_state->Arena(i));
+    NormalPageArena* arena = static_cast<NormalPageArena*>(heap->Arena(i));
     size_t arena_size = arena->ArenaSize();
     size_t free_list_size = arena->FreeListSize();
     total_arena_size += arena_size;
@@ -413,7 +412,7 @@ void HeapCompact::StartThreadCompaction() {
     return;
 
   if (!start_compaction_time_ms_)
-    start_compaction_time_ms_ = WTF::CurrentTimeMS();
+    start_compaction_time_ms_ = WTF::CurrentTimeTicksInMilliseconds();
 }
 
 void HeapCompact::FinishThreadCompaction() {
@@ -428,7 +427,7 @@ void HeapCompact::FinishThreadCompaction() {
   do_compact_ = false;
 
   double time_for_heap_compaction =
-      WTF::CurrentTimeMS() - start_compaction_time_ms_;
+      WTF::CurrentTimeTicksInMilliseconds() - start_compaction_time_ms_;
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       CustomCountHistogram, time_for_heap_compaction_histogram,
       ("BlinkGC.TimeForHeapCompaction", 1, 10 * 1000, 50));

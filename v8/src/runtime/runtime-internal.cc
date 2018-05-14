@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "src/api.h"
 #include "src/arguments.h"
 #include "src/ast/prettyprinter.h"
 #include "src/bootstrapper.h"
@@ -17,7 +18,7 @@
 #include "src/messages.h"
 #include "src/parsing/parse-info.h"
 #include "src/parsing/parsing.h"
-#include "src/wasm/wasm-module.h"
+#include "src/snapshot/snapshot.h"
 
 namespace v8 {
 namespace internal {
@@ -27,6 +28,12 @@ RUNTIME_FUNCTION(Runtime_CheckIsBootstrapping) {
   DCHECK_EQ(0, args.length());
   CHECK(isolate->bootstrapper()->IsActive());
   return isolate->heap()->undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_IsScriptWrapper) {
+  SealHandleScope shs(isolate);
+  DCHECK_EQ(1, args.length());
+  return isolate->heap()->ToBoolean(args[0]->IsScriptWrapper());
 }
 
 RUNTIME_FUNCTION(Runtime_ExportFromRuntime) {
@@ -59,7 +66,7 @@ RUNTIME_FUNCTION(Runtime_InstallToContext) {
     if (index == Context::kNotFound) {
       index = Context::IntrinsicIndexForName(name);
     }
-    CHECK(index != Context::kNotFound);
+    CHECK_NE(index, Context::kNotFound);
     native_context->set(index, *object);
   }
   return isolate->heap()->undefined_value();
@@ -205,37 +212,6 @@ RUNTIME_FUNCTION(Runtime_NewSyntaxError) {
   return *isolate->factory()->NewSyntaxError(message_template, arg0);
 }
 
-RUNTIME_FUNCTION(Runtime_ThrowCannotConvertToPrimitive) {
-  HandleScope scope(isolate);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kCannotConvertToPrimitive));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowIllegalInvocation) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(0, args.length());
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kIllegalInvocation));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowIncompatibleMethodReceiver) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(2, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(Object, arg0, 0);
-  CONVERT_ARG_HANDLE_CHECKED(Object, arg1, 1);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate,
-      NewTypeError(MessageTemplate::kIncompatibleMethodReceiver, arg0, arg1));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowInvalidHint) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(Object, hint, 0);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kInvalidHint, hint));
-}
-
 RUNTIME_FUNCTION(Runtime_ThrowInvalidStringLength) {
   HandleScope scope(isolate);
   THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewInvalidStringLengthError());
@@ -264,31 +240,12 @@ RUNTIME_FUNCTION(Runtime_ThrowSymbolIteratorInvalid) {
       isolate, NewTypeError(MessageTemplate::kSymbolIteratorInvalid));
 }
 
-RUNTIME_FUNCTION(Runtime_ThrowNonCallableInInstanceOfCheck) {
-  HandleScope scope(isolate);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kNonCallableInInstanceOfCheck));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowNonObjectInInstanceOfCheck) {
-  HandleScope scope(isolate);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kNonObjectInInstanceOfCheck));
-}
-
 RUNTIME_FUNCTION(Runtime_ThrowNotConstructor) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
   THROW_NEW_ERROR_RETURN_FAILURE(
       isolate, NewTypeError(MessageTemplate::kNotConstructor, object));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowGeneratorRunning) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(0, args.length());
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kGeneratorRunning));
 }
 
 RUNTIME_FUNCTION(Runtime_ThrowApplyNonFunction) {
@@ -324,8 +281,8 @@ RUNTIME_FUNCTION(Runtime_AllocateInNewSpace) {
   DCHECK_EQ(1, args.length());
   CONVERT_SMI_ARG_CHECKED(size, 0);
   CHECK(IsAligned(size, kPointerSize));
-  CHECK(size > 0);
-  CHECK(size <= kMaxRegularHeapObjectSize);
+  CHECK_GT(size, 0);
+  CHECK_LE(size, kMaxRegularHeapObjectSize);
   return *isolate->factory()->NewFillerObject(size, false, NEW_SPACE);
 }
 
@@ -335,7 +292,7 @@ RUNTIME_FUNCTION(Runtime_AllocateInTargetSpace) {
   CONVERT_SMI_ARG_CHECKED(size, 0);
   CONVERT_SMI_ARG_CHECKED(flags, 1);
   CHECK(IsAligned(size, kPointerSize));
-  CHECK(size > 0);
+  CHECK_GT(size, 0);
   bool double_align = AllocateDoubleAlignFlag::decode(flags);
   AllocationSpace space = AllocateTargetSpace::decode(flags);
   CHECK(size <= kMaxRegularHeapObjectSize || space == LO_SPACE);
@@ -376,9 +333,9 @@ bool ComputeLocation(Isolate* isolate, MessageLocation* target) {
     // Compute the location from the function and the relocation info of the
     // baseline code. For optimized code this will use the deoptimization
     // information to get canonical location information.
-    List<FrameSummary> frames(FLAG_max_inlining_levels + 1);
+    std::vector<FrameSummary> frames;
     it.frame()->Summarize(&frames);
-    auto& summary = frames.last().AsJavaScript();
+    auto& summary = frames.back().AsJavaScript();
     Handle<SharedFunctionInfo> shared(summary.function()->shared());
     Handle<Object> script(shared->script(), isolate);
     int pos = summary.abstract_code()->SourcePosition(summary.code_offset());
@@ -393,14 +350,15 @@ bool ComputeLocation(Isolate* isolate, MessageLocation* target) {
 }
 
 Handle<String> RenderCallSite(Isolate* isolate, Handle<Object> object,
-                              CallPrinter::IteratorHint* hint) {
+                              CallPrinter::ErrorHint* hint) {
   MessageLocation location;
   if (ComputeLocation(isolate, &location)) {
     ParseInfo info(location.shared());
-    if (parsing::ParseAny(&info, isolate)) {
+    if (parsing::ParseAny(&info, location.shared(), isolate)) {
+      info.ast_value_factory()->Internalize(isolate);
       CallPrinter printer(isolate, location.shared()->IsUserJavaScript());
       Handle<String> str = printer.Print(info.literal(), location.start_pos());
-      *hint = printer.GetIteratorHint();
+      *hint = printer.GetErrorHint();
       if (str->length() > 0) return str;
     } else {
       isolate->clear_pending_exception();
@@ -409,22 +367,32 @@ Handle<String> RenderCallSite(Isolate* isolate, Handle<Object> object,
   return Object::TypeOf(isolate, object);
 }
 
-void UpdateIteratorTemplate(CallPrinter::IteratorHint hint,
-                            MessageTemplate::Template* id) {
-  if (hint == CallPrinter::IteratorHint::kNormal) {
-    *id = MessageTemplate::kNotIterable;
-  }
+MessageTemplate::Template UpdateErrorTemplate(
+    CallPrinter::ErrorHint hint, MessageTemplate::Template default_id) {
+  switch (hint) {
+    case CallPrinter::ErrorHint::kNormalIterator:
+      return MessageTemplate::kNotIterable;
 
-  if (hint == CallPrinter::IteratorHint::kAsync) {
-    *id = MessageTemplate::kNotAsyncIterable;
+    case CallPrinter::ErrorHint::kCallAndNormalIterator:
+      return MessageTemplate::kNotCallableOrIterable;
+
+    case CallPrinter::ErrorHint::kAsyncIterator:
+      return MessageTemplate::kNotAsyncIterable;
+
+    case CallPrinter::ErrorHint::kCallAndAsyncIterator:
+      return MessageTemplate::kNotCallableOrAsyncIterable;
+
+    case CallPrinter::ErrorHint::kNone:
+      return default_id;
   }
+  return default_id;
 }
 
 }  // namespace
 
 MaybeHandle<Object> Runtime::ThrowIteratorError(Isolate* isolate,
                                                 Handle<Object> object) {
-  CallPrinter::IteratorHint hint = CallPrinter::kNone;
+  CallPrinter::ErrorHint hint = CallPrinter::kNone;
   Handle<String> callsite = RenderCallSite(isolate, object, &hint);
   MessageTemplate::Template id = MessageTemplate::kNonObjectPropertyLoad;
 
@@ -434,7 +402,7 @@ MaybeHandle<Object> Runtime::ThrowIteratorError(Isolate* isolate,
                     Object);
   }
 
-  UpdateIteratorTemplate(hint, &id);
+  id = UpdateErrorTemplate(hint, id);
   THROW_NEW_ERROR(isolate, NewTypeError(id, callsite), Object);
 }
 
@@ -442,26 +410,18 @@ RUNTIME_FUNCTION(Runtime_ThrowCalledNonCallable) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
-  CallPrinter::IteratorHint hint = CallPrinter::kNone;
+  CallPrinter::ErrorHint hint = CallPrinter::kNone;
   Handle<String> callsite = RenderCallSite(isolate, object, &hint);
   MessageTemplate::Template id = MessageTemplate::kCalledNonCallable;
-  UpdateIteratorTemplate(hint, &id);
+  id = UpdateErrorTemplate(hint, id);
   THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(id, callsite));
-}
-
-RUNTIME_FUNCTION(Runtime_ThrowCalledOnNullOrUndefined) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kCalledOnNullOrUndefined, name));
 }
 
 RUNTIME_FUNCTION(Runtime_ThrowConstructedNonConstructable) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
-  CallPrinter::IteratorHint hint = CallPrinter::kNone;
+  CallPrinter::ErrorHint hint = CallPrinter::kNone;
   Handle<String> callsite = RenderCallSite(isolate, object, &hint);
   MessageTemplate::Template id = MessageTemplate::kNotConstructor;
   THROW_NEW_ERROR_RETURN_FAILURE(isolate, NewTypeError(id, callsite));
@@ -481,14 +441,6 @@ RUNTIME_FUNCTION(Runtime_ThrowConstructorReturnedNonObject) {
       NewTypeError(MessageTemplate::kDerivedConstructorReturnedNonObject));
 }
 
-RUNTIME_FUNCTION(Runtime_ThrowUndefinedOrNullToObject) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(1, args.length());
-  CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
-  THROW_NEW_ERROR_RETURN_FAILURE(
-      isolate, NewTypeError(MessageTemplate::kUndefinedOrNullToObject, name));
-}
-
 // ES6 section 7.3.17 CreateListFromArrayLike (obj)
 RUNTIME_FUNCTION(Runtime_CreateListFromArrayLike) {
   HandleScope scope(isolate);
@@ -496,6 +448,38 @@ RUNTIME_FUNCTION(Runtime_CreateListFromArrayLike) {
   CONVERT_ARG_HANDLE_CHECKED(Object, object, 0);
   RETURN_RESULT_OR_FAILURE(isolate, Object::CreateListFromArrayLike(
                                         isolate, object, ElementTypes::kAll));
+}
+
+RUNTIME_FUNCTION(Runtime_DeserializeLazy) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+
+  DCHECK(FLAG_lazy_deserialization);
+
+  Handle<SharedFunctionInfo> shared(function->shared(), isolate);
+  int builtin_id = shared->lazy_deserialization_builtin_id();
+
+  // At this point, the builtins table should definitely have DeserializeLazy
+  // set at the position of the target builtin. Also, we should never lazily
+  // deserialize DeserializeLazy.
+
+  DCHECK_NE(Builtins::kDeserializeLazy, builtin_id);
+  DCHECK_EQ(Builtins::kDeserializeLazy,
+            isolate->builtins()->builtin(builtin_id)->builtin_index());
+
+  // The DeserializeLazy builtin tail-calls the deserialized builtin. This only
+  // works with JS-linkage.
+  DCHECK(Builtins::IsLazy(builtin_id));
+  DCHECK_EQ(Builtins::TFJ, Builtins::KindOf(builtin_id));
+
+  Code* code = Snapshot::DeserializeBuiltin(isolate, builtin_id);
+  DCHECK_EQ(builtin_id, code->builtin_index());
+  DCHECK_EQ(code, isolate->builtins()->builtin(builtin_id));
+  shared->set_code(code);
+  function->set_code(code);
+
+  return code;
 }
 
 RUNTIME_FUNCTION(Runtime_IncrementUseCounter) {
@@ -597,8 +581,38 @@ RUNTIME_FUNCTION(Runtime_CreateAsyncFromSyncIterator) {
         isolate, NewTypeError(MessageTemplate::kSymbolIteratorInvalid));
   }
 
+  Handle<Object> next;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, next,
+      Object::GetProperty(sync_iterator, isolate->factory()->next_string()));
+
   return *isolate->factory()->NewJSAsyncFromSyncIterator(
-      Handle<JSReceiver>::cast(sync_iterator));
+      Handle<JSReceiver>::cast(sync_iterator), next);
+}
+
+RUNTIME_FUNCTION(Runtime_CreateTemplateObject) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(TemplateObjectDescription, description, 0);
+
+  return *TemplateObjectDescription::CreateTemplateObject(description);
+}
+
+RUNTIME_FUNCTION(Runtime_ReportMessage) {
+  // Helper to report messages and continue JS execution. This is intended to
+  // behave similarly to reporting exceptions which reach the top-level in
+  // Execution.cc, but allow the JS code to continue. This is useful for
+  // implementing algorithms such as RunMicrotasks in JS.
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+
+  CONVERT_ARG_HANDLE_CHECKED(Object, message_obj, 0);
+
+  DCHECK(!isolate->has_pending_exception());
+  isolate->set_pending_exception(*message_obj);
+  isolate->ReportPendingMessagesFromJavaScript();
+  isolate->clear_pending_exception();
+  return isolate->heap()->undefined_value();
 }
 
 }  // namespace internal

@@ -26,17 +26,18 @@
 #include "core/html/parser/BackgroundHTMLParser.h"
 
 #include <memory>
-#include "core/HTMLNames.h"
+#include "base/single_thread_task_runner.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/html/parser/XSSAuditor.h"
+#include "core/html_names.h"
 #include "platform/CrossThreadFunctional.h"
 #include "platform/Histogram.h"
 #include "platform/WebTaskRunner.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
-#include "platform/wtf/CurrentTime.h"
 #include "platform/wtf/Functional.h"
 #include "platform/wtf/PtrUtil.h"
+#include "platform/wtf/Time.h"
 #include "platform/wtf/text/TextPosition.h"
 #include "public/platform/Platform.h"
 
@@ -86,12 +87,12 @@ static void CheckThatXSSInfosAreSafeToSendToAnotherThread(
 
 #endif
 
-WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
+base::WeakPtr<BackgroundHTMLParser> BackgroundHTMLParser::Create(
     std::unique_ptr<Configuration> config,
-    RefPtr<WebTaskRunner> loading_task_runner) {
+    scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner) {
   auto* background_parser = new BackgroundHTMLParser(
       std::move(config), std::move(loading_task_runner));
-  return background_parser->weak_factory_.CreateWeakPtr();
+  return background_parser->weak_factory_.GetWeakPtr();
 }
 
 void BackgroundHTMLParser::Init(
@@ -111,7 +112,7 @@ BackgroundHTMLParser::Configuration::Configuration()
 
 BackgroundHTMLParser::BackgroundHTMLParser(
     std::unique_ptr<Configuration> config,
-    RefPtr<WebTaskRunner> loading_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner)
     : weak_factory_(this),
       token_(WTF::WrapUnique(new HTMLToken)),
       tokenizer_(HTMLTokenizer::Create(config->options)),
@@ -134,15 +135,11 @@ BackgroundHTMLParser::BackgroundHTMLParser(
   DCHECK_GE(outstanding_token_limit_, pending_token_limit_);
 }
 
-BackgroundHTMLParser::~BackgroundHTMLParser() {}
+BackgroundHTMLParser::~BackgroundHTMLParser() = default;
 
 void BackgroundHTMLParser::AppendRawBytesFromMainThread(
-    std::unique_ptr<Vector<char>> buffer,
-    double bytes_received_time) {
+    std::unique_ptr<Vector<char>> buffer) {
   DCHECK(decoder_);
-  DEFINE_STATIC_LOCAL(CustomCountHistogram, queue_delay,
-                      ("Parser.AppendBytesDelay", 1, 5000, 50));
-  queue_delay.Count(MonotonicallyIncreasingTimeMS() - bytes_received_time);
   UpdateDocument(decoder_->Decode(buffer->data(), buffer->size()));
 }
 
@@ -260,11 +257,9 @@ void BackgroundHTMLParser::PumpTokenizer() {
 
       CompactHTMLToken token(token_.get(), position);
 
-      bool should_evaluate_for_document_write = false;
       bool is_csp_meta_tag = false;
       preload_scanner_->Scan(token, input_.Current(), pending_preloads_,
-                             &viewport_description_, &is_csp_meta_tag,
-                             &should_evaluate_for_document_write);
+                             &viewport_description_, &is_csp_meta_tag);
 
       simulated_token =
           tree_builder_simulator_.Simulate(token, tokenizer_.get());
@@ -280,10 +275,6 @@ void BackgroundHTMLParser::PumpTokenizer() {
       pending_tokens_->push_back(token);
       if (is_csp_meta_tag) {
         pending_csp_meta_token_index_ = pending_tokens_->size() - 1;
-      }
-      if (should_evaluate_for_document_write) {
-        likely_document_write_script_indices_.push_back(
-            pending_tokens_->size() - 1);
       }
     }
 
@@ -341,8 +332,6 @@ bool BackgroundHTMLParser::QueueChunkForMainThread() {
   chunk->preload_scanner_checkpoint = preload_scanner_->CreateCheckpoint();
   chunk->tokens = std::move(pending_tokens_);
   chunk->starting_script = starting_script_;
-  chunk->likely_document_write_script_indices.swap(
-      likely_document_write_script_indices_);
   chunk->pending_csp_meta_token_index = pending_csp_meta_token_index_;
   starting_script_ = false;
   pending_csp_meta_token_index_ =
@@ -363,11 +352,11 @@ template <typename FunctionType, typename... Ps>
 void BackgroundHTMLParser::RunOnMainThread(FunctionType function,
                                            Ps&&... parameters) {
   if (IsMainThread()) {
-    (*WTF::Bind(function, std::forward<Ps>(parameters)...))();
+    WTF::Bind(std::move(function), std::forward<Ps>(parameters)...).Run();
   } else {
-    loading_task_runner_->PostTask(
-        BLINK_FROM_HERE,
-        CrossThreadBind(function, std::forward<Ps>(parameters)...));
+    PostCrossThreadTask(
+        *loading_task_runner_, FROM_HERE,
+        CrossThreadBind(std::move(function), std::forward<Ps>(parameters)...));
   }
 }
 

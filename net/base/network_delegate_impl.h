@@ -7,12 +7,14 @@
 
 #include <stdint.h>
 
+#include <set>
+
 #include "base/strings/string16.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
-#include "net/proxy/proxy_retry_info.h"
+#include "net/proxy_resolution/proxy_retry_info.h"
 
 class GURL;
 
@@ -63,7 +65,6 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
   void OnBeforeRedirect(URLRequest* request, const GURL& new_location) override;
 
   void OnResponseStarted(URLRequest* request, int net_error) override;
-  void OnResponseStarted(URLRequest* request) override;
 
   void OnNetworkBytesReceived(URLRequest* request,
                               int64_t bytes_received) override;
@@ -86,16 +87,15 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
                        const CookieList& cookie_list) override;
 
   bool OnCanSetCookie(const URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       CookieOptions* options) override;
 
   bool OnCanAccessFile(const URLRequest& request,
                        const base::FilePath& original_path,
                        const base::FilePath& absolute_path) const override;
 
-  bool OnCanEnablePrivacyMode(
-      const GURL& url,
-      const GURL& first_party_for_cookies) const override;
+  bool OnCanEnablePrivacyMode(const GURL& url,
+                              const GURL& site_for_cookies) const override;
 
   bool OnAreExperimentalCookieFeaturesEnabled() const override;
 
@@ -106,7 +106,9 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
 
   bool OnCanQueueReportingReport(const url::Origin& origin) const override;
 
-  bool OnCanSendReportingReport(const url::Origin& origin) const override;
+  void OnCanSendReportingReports(std::set<url::Origin> origins,
+                                 base::OnceCallback<void(std::set<url::Origin>)>
+                                     result_callback) const override;
 
   bool OnCanSetReportingClient(const url::Origin& origin,
                                const GURL& endpoint) const override;

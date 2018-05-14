@@ -72,7 +72,7 @@ class MockSyncWebSocket : public SyncWebSocket {
     response.SetInteger("id", id_);
     base::DictionaryValue result;
     result.SetInteger("param", 1);
-    response.Set("result", base::MakeUnique<base::Value>(result));
+    response.SetKey("result", result.Clone());
     base::JSONWriter::Write(response, message);
     --queued_messages_;
     return SyncWebSocket::kOk;
@@ -519,7 +519,7 @@ TEST(ParseInspectorMessage, EventNoParams) {
       "{\"method\":\"method\"}", 0, &type, &event, &response));
   ASSERT_EQ(internal::kEventMessageType, type);
   ASSERT_STREQ("method", event.method.c_str());
-  ASSERT_TRUE(event.params->IsType(base::Value::Type::DICTIONARY));
+  ASSERT_TRUE(event.params->is_dict());
 }
 
 TEST(ParseInspectorMessage, EventWithParams) {
@@ -726,7 +726,7 @@ class OnConnectedSyncWebSocket : public SyncWebSocket {
 
     base::DictionaryValue response;
     response.SetInteger("id", id);
-    response.Set("result", base::MakeUnique<base::DictionaryValue>());
+    response.Set("result", std::make_unique<base::DictionaryValue>());
     std::string json_response;
     base::JSONWriter::Write(response, &json_response);
     queued_response_.push_back(json_response);
@@ -734,7 +734,7 @@ class OnConnectedSyncWebSocket : public SyncWebSocket {
     // Push one event.
     base::DictionaryValue event;
     event.SetString("method", "updateEvent");
-    event.Set("params", base::MakeUnique<base::DictionaryValue>());
+    event.Set("params", std::make_unique<base::DictionaryValue>());
     std::string json_event;
     base::JSONWriter::Write(event, &json_event);
     queued_response_.push_back(json_event);
@@ -998,7 +998,7 @@ class MockDevToolsEventListener : public DevToolsEventListener {
 
 std::unique_ptr<SyncWebSocket> CreateMockSyncWebSocket6(
     std::list<std::string>* messages) {
-  return base::MakeUnique<MockSyncWebSocket6>(messages);
+  return std::make_unique<MockSyncWebSocket6>(messages);
 }
 
 }  // namespace
@@ -1148,7 +1148,7 @@ class MockSyncWebSocket7 : public SyncWebSocket {
       response.SetInteger("id", 2);
     base::DictionaryValue result;
     result.SetInteger("param", 1);
-    response.Set("result", base::MakeUnique<base::Value>(result));
+    response.SetKey("result", result.Clone());
     base::JSONWriter::Write(response, message);
     sent_responses_++;
     return SyncWebSocket::kOk;

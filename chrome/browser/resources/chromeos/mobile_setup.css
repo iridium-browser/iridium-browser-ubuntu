@@ -4,15 +4,15 @@
 
 html,
 body {
-  -webkit-user-select: none;
   height: 100%;
   margin: 0;
   overflow: hidden;
   padding: 0;
+  user-select: none;
   width: 100%;
 }
 
-iframe {
+webview {
   overflow-x: scroll;
   overflow-y: scroll;
 }

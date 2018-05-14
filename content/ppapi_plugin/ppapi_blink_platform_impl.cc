@@ -13,7 +13,6 @@
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "content/child/child_thread_impl.h"
-#include "content/common/child_process_messages.h"
 #include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/shared_impl/proxy_lock.h"
 #include "third_party/WebKit/public/platform/WebStorageNamespace.h"
@@ -44,7 +43,7 @@ class PpapiBlinkPlatformImpl::SandboxSupport : public WebSandboxSupport {
   virtual ~SandboxSupport() {}
 
 #if defined(OS_MACOSX)
-  bool LoadFont(NSFont* srcFont, CGFontRef* out, uint32_t* fontID) override;
+  bool LoadFont(CTFontRef srcFont, CGFontRef* out, uint32_t* fontID) override;
 #elif defined(OS_POSIX)
   SandboxSupport();
   void GetFallbackFontForCharacter(
@@ -67,7 +66,7 @@ class PpapiBlinkPlatformImpl::SandboxSupport : public WebSandboxSupport {
 
 #if defined(OS_MACOSX)
 
-bool PpapiBlinkPlatformImpl::SandboxSupport::LoadFont(NSFont* src_font,
+bool PpapiBlinkPlatformImpl::SandboxSupport::LoadFont(CTFontRef src_font,
                                                       CGFontRef* out,
                                                       uint32_t* font_id) {
   // TODO(brettw) this should do the something similar to what
@@ -130,9 +129,10 @@ PpapiBlinkPlatformImpl::~PpapiBlinkPlatformImpl() {
 
 void PpapiBlinkPlatformImpl::Shutdown() {
 #if !defined(OS_ANDROID) && !defined(OS_WIN)
-  // SandboxSupport contains a map of WebFontFamily objects, which hold
-  // WebCStrings, which become invalidated when blink is shut down. Hence, we
-  // need to clear that map now, just before blink::shutdown() is called.
+  // SandboxSupport contains a map of WebFallbackFont objects, which hold
+  // WebStrings and WebVectors, which become invalidated when blink is shut
+  // down. Hence, we need to clear that map now, just before blink::shutdown()
+  // is called.
   sandbox_support_.reset();
 #endif
 }
@@ -143,12 +143,12 @@ blink::WebThread* PpapiBlinkPlatformImpl::CurrentThread() {
 
 blink::WebClipboard* PpapiBlinkPlatformImpl::Clipboard() {
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 blink::WebFileUtilities* PpapiBlinkPlatformImpl::GetFileUtilities() {
   NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 blink::WebSandboxSupport* PpapiBlinkPlatformImpl::GetSandboxSupport() {
@@ -175,24 +175,15 @@ bool PpapiBlinkPlatformImpl::IsLinkVisited(unsigned long long link_hash) {
   return false;
 }
 
-void PpapiBlinkPlatformImpl::CreateMessageChannel(
-    std::unique_ptr<blink::WebMessagePortChannel>* channel1,
-    std::unique_ptr<blink::WebMessagePortChannel>* channel2) {
-  NOTREACHED();
-  *channel1 = nullptr;
-  *channel2 = nullptr;
-}
-
-void PpapiBlinkPlatformImpl::setCookies(
-    const blink::WebURL& url,
-    const blink::WebURL& first_party_for_cookies,
-    const blink::WebString& value) {
+void PpapiBlinkPlatformImpl::setCookies(const blink::WebURL& url,
+                                        const blink::WebURL& site_for_cookies,
+                                        const blink::WebString& value) {
   NOTREACHED();
 }
 
 blink::WebString PpapiBlinkPlatformImpl::cookies(
     const blink::WebURL& url,
-    const blink::WebURL& first_party_for_cookies) {
+    const blink::WebURL& site_for_cookies) {
   NOTREACHED();
   return blink::WebString();
 }
@@ -203,14 +194,7 @@ blink::WebString PpapiBlinkPlatformImpl::DefaultLocale() {
 
 blink::WebThemeEngine* PpapiBlinkPlatformImpl::ThemeEngine() {
   NOTREACHED();
-  return NULL;
-}
-
-std::unique_ptr<blink::WebURLLoader> PpapiBlinkPlatformImpl::CreateURLLoader(
-    const blink::WebURLRequest& request,
-    base::SingleThreadTaskRunner* task_runner) {
-  NOTREACHED();
-  return NULL;
+  return nullptr;
 }
 
 void PpapiBlinkPlatformImpl::GetPluginList(

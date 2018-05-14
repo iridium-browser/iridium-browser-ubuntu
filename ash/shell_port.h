@@ -14,6 +14,7 @@
 #include "ash/wm/lock_state_observer.h"
 #include "base/observer_list.h"
 #include "base/optional.h"
+#include "services/viz/public/interfaces/compositing/video_detector_observer.mojom.h"
 #include "ui/aura/client/window_types.h"
 #include "ui/base/cursor/cursor_data.h"
 #include "ui/base/ui_base_types.h"
@@ -44,7 +45,6 @@ namespace ash {
 class AcceleratorController;
 class AshWindowTreeHost;
 struct AshWindowTreeHostInitParams;
-class ImmersiveFullscreenController;
 class KeyboardUI;
 class RootWindowController;
 class WindowCycleEventFilter;
@@ -72,31 +72,10 @@ class ASH_EXPORT ShellPort {
 
   virtual Config GetAshConfig() const = 0;
 
-  // Returns true if the first window shown on first run should be
-  // unconditionally maximized, overriding the heuristic that normally chooses
-  // the window size.
-  bool IsForceMaximizeOnFirstRun();
-
-  // Returns true if a system-modal dialog window is currently open.
-  bool IsSystemModalWindowOpen();
-
-  // Creates a modal background (a partially-opaque fullscreen window) on all
-  // displays for |window|.
-  void CreateModalBackground(aura::Window* window);
-
-  // Called when a modal window is removed. It will activate another modal
-  // window if any, or remove modal screens on all displays.
-  void OnModalWindowRemoved(aura::Window* removed);
-
   // The return value from this is supplied to AshTouchTransformController; see
   // it and TouchTransformSetter for details.
   virtual std::unique_ptr<display::TouchTransformSetter>
   CreateTouchTransformDelegate() = 0;
-
-  // For testing only: set simulation that a modal window is open
-  void SimulateModalWindowOpenForTesting(bool modal_window_open) {
-    simulate_modal_window_open_for_testing_ = modal_window_open;
-  }
 
   // See aura::client::CursorClient for details on these.
   virtual void LockCursor() = 0;
@@ -107,6 +86,15 @@ class ASH_EXPORT ShellPort {
   virtual void SetGlobalOverrideCursor(
       base::Optional<ui::CursorData> cursor) = 0;
   virtual bool IsMouseEventsEnabled() = 0;
+
+  // Tells the window server to enable or disable whether the cursor is visible
+  // due to touch events. This is a separate bit that gets set automatically
+  // when there is a touch event or a mouse event, but some things in ash want
+  // to manually flip this bit.
+  //
+  // Fat interface for just ShellPortMash so we can conditionally access it
+  // from within //ash/magnifier/.
+  virtual void SetCursorTouchVisible(bool enabled) = 0;
 
   // Shows the context menu for the wallpaper or shelf at |location_in_screen|.
   void ShowContextMenu(const gfx::Point& location_in_screen,
@@ -127,9 +115,6 @@ class ASH_EXPORT ShellPort {
 
   virtual std::unique_ptr<WorkspaceEventHandler> CreateWorkspaceEventHandler(
       aura::Window* workspace_window) = 0;
-
-  virtual std::unique_ptr<ImmersiveFullscreenController>
-  CreateImmersiveFullscreenController() = 0;
 
   // Creates the KeyboardUI. This is called early on.
   virtual std::unique_ptr<KeyboardUI> CreateKeyboardUI() = 0;
@@ -155,12 +140,6 @@ class ASH_EXPORT ShellPort {
   // TODO(jamescook): Remove this when VirtualKeyboardController has been moved.
   virtual void ToggleIgnoreExternalKeyboard() = 0;
 
-  // Enable or disable the laser pointer.
-  virtual void SetLaserPointerEnabled(bool enabled) = 0;
-
-  // Enable or disable the partial magnifier.
-  virtual void SetPartialMagnifierEnabled(bool enabled) = 0;
-
   virtual void CreatePointerWatcherAdapter() = 0;
 
   // Creates an AshWindowTreeHost. A return value of null results in a platform
@@ -172,6 +151,14 @@ class ASH_EXPORT ShellPort {
   // Allows ShellPort to install any additional state on the containers.
   virtual void OnCreatedRootWindowContainers(
       RootWindowController* root_window_controller) = 0;
+
+  // Called any time the set up system modal and blocking containers needs to
+  // sent to the server.
+  virtual void UpdateSystemModalAndBlockingContainers() = 0;
+
+  // Adds an observer for viz::VideoDetector.
+  virtual void AddVideoDetectorObserver(
+      viz::mojom::VideoDetectorObserverPtr observer) = 0;
 
  protected:
   ShellPort();
@@ -193,8 +180,6 @@ class ASH_EXPORT ShellPort {
   static ShellPort* instance_;
 
   base::ObserverList<LockStateObserver> lock_state_observers_;
-
-  bool simulate_modal_window_open_for_testing_ = false;
 };
 
 }  // namespace ash

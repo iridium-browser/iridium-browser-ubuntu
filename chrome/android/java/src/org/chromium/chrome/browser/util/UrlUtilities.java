@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.util;
 
+import android.net.Uri;
+import android.support.annotation.NonNull;
 import android.text.TextUtils;
 
 import org.chromium.base.CollectionUtil;
@@ -103,6 +105,23 @@ public class UrlUtilities {
     }
 
     /**
+     * @param url A URL.
+     *
+     * @return Whether the URL's scheme is HTTP or HTTPS.
+     */
+    public static boolean isHttpOrHttps(@NonNull String url) {
+        // URI#getScheme would throw URISyntaxException if the other parts contain invalid
+        // characters. For example, "http://foo.bar/has[square].html" has [] in the path, which
+        // is not valid in URI. Both Uri.parse().getScheme() and URL().getProtocol() work in
+        // this case.
+        //
+        // URL().getProtocol() throws MalformedURLException if the scheme is "invalid",
+        // including common ones like "about:", "javascript:", "data:", etc.
+        String scheme = Uri.parse(url).getScheme();
+        return UrlConstants.HTTP_SCHEME.equals(scheme) || UrlConstants.HTTPS_SCHEME.equals(scheme);
+    }
+
+    /**
      * Determines whether or not the given URLs belong to the same broad domain or host.
      * "Broad domain" is defined as the TLD + 1 or the host.
      *
@@ -125,15 +144,6 @@ public class UrlUtilities {
     public static boolean sameDomainOrHost(String primaryUrl, String secondaryUrl,
             boolean includePrivateRegistries) {
         return nativeSameDomainOrHost(primaryUrl, secondaryUrl, includePrivateRegistries);
-    }
-
-    /**
-     * Determines whether or not the given URLs have the same host.
-     * Unlike the above sameDomainOrHost(...) method, this does a simpler host matching, so
-     * http://news.google.com and http://finance.google.com do not have the same host.
-     */
-    public static boolean sameHost(String primaryUrl, String secondaryUrl) {
-        return nativeSameHost(primaryUrl, secondaryUrl);
     }
 
     /**
@@ -326,7 +336,6 @@ public class UrlUtilities {
     private static native boolean nativeIsAcceptedScheme(String url);
     private static native boolean nativeSameDomainOrHost(String primaryUrl, String secondaryUrl,
             boolean includePrivateRegistries);
-    private static native boolean nativeSameHost(String primaryUrl, String secondaryUrl);
     private static native String nativeGetDomainAndRegistry(String url,
             boolean includePrivateRegistries);
     public static native boolean nativeIsGoogleSearchUrl(String url);

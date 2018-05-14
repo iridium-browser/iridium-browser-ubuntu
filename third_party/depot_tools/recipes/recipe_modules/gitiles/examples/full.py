@@ -4,6 +4,7 @@
 
 DEPS = [
     'gitiles',
+    'recipe_engine/json',
     'recipe_engine/properties',
 ]
 
@@ -18,6 +19,8 @@ def RunSteps(api):
 
   data = api.gitiles.download_file(url, 'OWNERS', attempts=5)
   assert data == 'foobar'
+  data = api.gitiles.download_file(url, 'NONEXISTENT', attempts=1,
+                                   accept_statuses=[404])
 
 
 def GenTests(api):
@@ -57,5 +60,9 @@ def GenTests(api):
       + api.step_data(
           'fetch master:OWNERS',
           api.gitiles.make_encoded_file('foobar')
+      )
+      + api.step_data(
+          'fetch master:NONEXISTENT',
+          api.json.output({'value': None})
       )
   )

@@ -37,7 +37,7 @@ class MockPageContextCanvas : public SkCanvas {
   };
 
   MockPageContextCanvas() : SkCanvas(kPageWidth, kPageHeight) {}
-  ~MockPageContextCanvas() override {}
+  ~MockPageContextCanvas() override = default;
 
   void onDrawAnnotation(const SkRect& rect,
                         const char key[],
@@ -66,33 +66,34 @@ class PrintContextTest : public RenderingTest {
  protected:
   explicit PrintContextTest(LocalFrameClient* local_frame_client = nullptr)
       : RenderingTest(local_frame_client) {}
-  ~PrintContextTest() override {}
+  ~PrintContextTest() override = default;
 
   void SetUp() override {
     RenderingTest::SetUp();
-    print_context_ = new PrintContext(GetDocument().GetFrame());
+    print_context_ = new PrintContext(GetDocument().GetFrame(),
+                                      /*use_printing_layout=*/true);
   }
 
   PrintContext& GetPrintContext() { return *print_context_.Get(); }
 
   void SetBodyInnerHTML(String body_content) {
     GetDocument().body()->setAttribute(HTMLNames::styleAttr, "margin: 0");
-    GetDocument().body()->setInnerHTML(body_content);
+    GetDocument().body()->SetInnerHTMLFromString(body_content);
   }
 
   void PrintSinglePage(MockPageContextCanvas& canvas) {
     IntRect page_rect(0, 0, kPageWidth, kPageHeight);
     GetPrintContext().BeginPrintMode(page_rect.Width(), page_rect.Height());
     GetDocument().View()->UpdateAllLifecyclePhases();
-    PaintRecordBuilder builder(page_rect);
+    PaintRecordBuilder builder;
     GraphicsContext& context = builder.Context();
     context.SetPrinting(true);
     GetDocument().View()->PaintContents(context, kGlobalPaintPrinting,
                                         page_rect);
     {
-      DrawingRecorder recorder(context, *GetDocument().GetLayoutView(),
-                               DisplayItem::kPrintedContentDestinationLocations,
-                               page_rect);
+      DrawingRecorder recorder(
+          context, *GetDocument().GetLayoutView(),
+          DisplayItem::kPrintedContentDestinationLocations);
       GetPrintContext().OutputLinkedDestinations(context, page_rect);
     }
     builder.EndRecording()->Playback(&canvas);
@@ -165,6 +166,7 @@ TEST_F(PrintContextTest, LinkTarget) {
 }
 
 TEST_F(PrintContextTest, LinkTargetUnderAnonymousBlockBeforeBlock) {
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   MockPageContextCanvas canvas;
   SetBodyInnerHTML("<div style='padding-top: 50px'>" +
                    InlineHtmlForLink("http://www.google.com",
@@ -184,6 +186,7 @@ TEST_F(PrintContextTest, LinkTargetUnderAnonymousBlockBeforeBlock) {
 }
 
 TEST_F(PrintContextTest, LinkTargetContainingABlock) {
+  GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   MockPageContextCanvas canvas;
   SetBodyInnerHTML(
       "<div style='padding-top: 50px'>" +
@@ -229,13 +232,14 @@ TEST_F(PrintContextTest, LinkTargetUnderRelativelyPositionedInline) {
 
 TEST_F(PrintContextTest, LinkTargetSvg) {
   MockPageContextCanvas canvas;
-  SetBodyInnerHTML(
-      "<svg width='100' height='100'>"
-      "<a xlink:href='http://www.w3.org'><rect x='20' y='20' width='50' "
-      "height='50'/></a>"
-      "<text x='10' y='90'><a "
-      "xlink:href='http://www.google.com'><tspan>google</tspan></a></text>"
-      "</svg>");
+  SetBodyInnerHTML(R"HTML(
+    <svg width='100' height='100'>
+    <a xlink:href='http://www.w3.org'><rect x='20' y='20' width='50'
+    height='50'/></a>
+    <text x='10' y='90'><a
+    xlink:href='http://www.google.com'><tspan>google</tspan></a></text>
+    </svg>
+  )HTML");
   PrintSinglePage(canvas);
 
   const Vector<MockPageContextCanvas::Operation>& operations =
@@ -250,7 +254,7 @@ TEST_F(PrintContextTest, LinkTargetSvg) {
 
 TEST_F(PrintContextTest, LinkedTarget) {
   MockPageContextCanvas canvas;
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://a.com/"));
+  GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
   SetBodyInnerHTML(
       AbsoluteBlockHtmlForLink(
           50, 60, 70, 80,
@@ -275,7 +279,7 @@ TEST_F(PrintContextTest, LinkedTarget) {
 
 TEST_F(PrintContextTest, EmptyLinkedTarget) {
   MockPageContextCanvas canvas;
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://a.com/"));
+  GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
   SetBodyInnerHTML(AbsoluteBlockHtmlForLink(50, 60, 70, 80, "#fragment") +
                    HtmlForAnchor(250, 260, "fragment", ""));
   PrintSinglePage(canvas);
@@ -304,12 +308,13 @@ TEST_F(PrintContextTest, LinkTargetBoundingBox) {
 }
 
 TEST_F(PrintContextFrameTest, WithSubframe) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://a.com/"));
-  SetBodyInnerHTML(
-      "<style>::-webkit-scrollbar { display: none }</style>"
-      "<iframe src='http://b.com/' width='500' height='500'"
-      " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; "
-      "left: 90px'></iframe>");
+  GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
+  SetBodyInnerHTML(R"HTML(
+    <style>::-webkit-scrollbar { display: none }</style>
+    <iframe src='http://b.com/' width='500' height='500'
+     style='border-width: 5px; margin: 5px; position: absolute; top: 90px;
+    left: 90px'></iframe>
+  )HTML");
   SetChildFrameHTML(
       AbsoluteBlockHtmlForLink(50, 60, 70, 80, "#fragment") +
       AbsoluteBlockHtmlForLink(150, 160, 170, 180, "http://www.google.com") +
@@ -329,12 +334,13 @@ TEST_F(PrintContextFrameTest, WithSubframe) {
 }
 
 TEST_F(PrintContextFrameTest, WithScrolledSubframe) {
-  GetDocument().SetBaseURLOverride(KURL(kParsedURLString, "http://a.com/"));
-  SetBodyInnerHTML(
-      "<style>::-webkit-scrollbar { display: none }</style>"
-      "<iframe src='http://b.com/' width='500' height='500'"
-      " style='border-width: 5px; margin: 5px; position: absolute; top: 90px; "
-      "left: 90px'></iframe>");
+  GetDocument().SetBaseURLOverride(KURL("http://a.com/"));
+  SetBodyInnerHTML(R"HTML(
+    <style>::-webkit-scrollbar { display: none }</style>
+    <iframe src='http://b.com/' width='500' height='500'
+     style='border-width: 5px; margin: 5px; position: absolute; top: 90px;
+    left: 90px'></iframe>
+  )HTML");
   SetChildFrameHTML(
       AbsoluteBlockHtmlForLink(10, 10, 20, 20, "http://invisible.com") +
       AbsoluteBlockHtmlForLink(50, 60, 70, 80, "http://partly.visible.com") +
@@ -359,6 +365,77 @@ TEST_F(PrintContextFrameTest, WithScrolledSubframe) {
   EXPECT_SKRECT_EQ(150, 160, 170, 180, operations[1].rect);
   EXPECT_EQ(MockPageContextCanvas::kDrawRect, operations[2].type);
   EXPECT_SKRECT_EQ(250, 260, 270, 280, operations[2].rect);
+}
+
+// This tests that we properly resize and re-layout pages for printing.
+TEST_F(PrintContextFrameTest, BasicPrintPageLayout) {
+  FloatSize page_size(400, 400);
+  float maximum_shrink_ratio = 1.1;
+  auto* node = GetDocument().documentElement();
+
+  GetDocument().GetFrame()->StartPrinting(page_size, page_size,
+                                          maximum_shrink_ratio);
+  EXPECT_EQ(node->OffsetWidth(), 400);
+  GetDocument().GetFrame()->EndPrinting();
+  EXPECT_EQ(node->OffsetWidth(), 800);
+
+  SetBodyInnerHTML(R"HTML(
+      <div style='border: 0px; margin: 0px; background-color: #0000FF;
+      width:800px; height:400px'></div>)HTML");
+  GetDocument().GetFrame()->StartPrinting(page_size, page_size,
+                                          maximum_shrink_ratio);
+  EXPECT_EQ(node->OffsetWidth(), 440);
+  GetDocument().GetFrame()->EndPrinting();
+  EXPECT_EQ(node->OffsetWidth(), 800);
+}
+
+// This tests that we don't resize or re-layout subframes in printed
+// content.
+TEST_F(PrintContextFrameTest, SubframePrintPageLayout) {
+  SetBodyInnerHTML(R"HTML(
+      <div style='border: 0px; margin: 0px; background-color: #0000FF;
+      width:800px; height:400px'></div>
+      <iframe id="target" src='http://b.com/' width='100%' height='100%'
+      style='border: 0px; margin: 0px; position: absolute; top: 0px;
+      left: 0px'></iframe>)HTML");
+  FloatSize page_size(400, 400);
+  float maximum_shrink_ratio = 1.1;
+  auto* parent = GetDocument().documentElement();
+  // The child document element inside iframe.
+  auto* child = ChildDocument().documentElement();
+  // The iframe element in the document.
+  auto* target = GetDocument().getElementById("target");
+
+  GetDocument().GetFrame()->StartPrinting(page_size, page_size,
+                                          maximum_shrink_ratio);
+  EXPECT_EQ(parent->OffsetWidth(), 440);
+  EXPECT_EQ(child->OffsetWidth(), 800);
+  EXPECT_EQ(target->OffsetWidth(), 440);
+  GetDocument().GetFrame()->EndPrinting();
+  EXPECT_EQ(parent->OffsetWidth(), 800);
+  EXPECT_EQ(child->OffsetWidth(), 800);
+  EXPECT_EQ(target->OffsetWidth(), 800);
+
+  GetDocument().GetFrame()->StartPrintingWithoutPrintingLayout();
+  EXPECT_EQ(parent->OffsetWidth(), 800);
+  EXPECT_EQ(child->OffsetWidth(), 800);
+  EXPECT_EQ(target->OffsetWidth(), 800);
+  GetDocument().GetFrame()->EndPrinting();
+  EXPECT_EQ(parent->OffsetWidth(), 800);
+  EXPECT_EQ(child->OffsetWidth(), 800);
+  EXPECT_EQ(target->OffsetWidth(), 800);
+
+  ASSERT_TRUE(ChildDocument() != GetDocument());
+  ChildDocument().GetFrame()->StartPrinting(page_size, page_size,
+                                            maximum_shrink_ratio);
+  EXPECT_EQ(parent->OffsetWidth(), 800);
+  EXPECT_EQ(child->OffsetWidth(), 400);
+  EXPECT_EQ(target->OffsetWidth(), 800);
+  GetDocument().GetFrame()->EndPrinting();
+  EXPECT_EQ(parent->OffsetWidth(), 800);
+  //  The child frame should return to the original size.
+  EXPECT_EQ(child->OffsetWidth(), 800);
+  EXPECT_EQ(target->OffsetWidth(), 800);
 }
 
 }  // namespace blink

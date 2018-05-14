@@ -13,7 +13,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
-#include "components/offline_pages/features/features.h"
+#include "components/offline_pages/buildflags/buildflags.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_state/core/security_state.h"
@@ -36,6 +36,12 @@
 ChromeToolbarModelDelegate::ChromeToolbarModelDelegate() {}
 
 ChromeToolbarModelDelegate::~ChromeToolbarModelDelegate() {}
+
+content::NavigationEntry* ChromeToolbarModelDelegate::GetNavigationEntry()
+    const {
+  content::NavigationController* controller = GetNavigationController();
+  return controller ? controller->GetVisibleEntry() : nullptr;
+}
 
 base::string16 ChromeToolbarModelDelegate::FormattedStringWithEquivalentMeaning(
     const GURL& url,
@@ -63,23 +69,25 @@ bool ChromeToolbarModelDelegate::ShouldDisplayURL() const {
   //   of view-source:chrome://newtab, which should display its URL despite what
   //   chrome://newtab says.
   content::NavigationEntry* entry = GetNavigationEntry();
-  if (entry) {
-    if (entry->IsViewSourceMode() ||
-        entry->GetPageType() == content::PAGE_TYPE_INTERSTITIAL) {
-      return true;
-    }
+  if (!entry)
+    return true;
 
-    GURL url = entry->GetURL();
-    GURL virtual_url = entry->GetVirtualURL();
-    if (url.SchemeIs(content::kChromeUIScheme) ||
-        virtual_url.SchemeIs(content::kChromeUIScheme)) {
-      if (!url.SchemeIs(content::kChromeUIScheme))
-        url = virtual_url;
-      return url.host() != chrome::kChromeUINewTabHost;
-    }
+  if (entry->IsViewSourceMode() ||
+      entry->GetPageType() == content::PAGE_TYPE_INTERSTITIAL) {
+    return true;
   }
 
-  return !search::IsInstantNTP(GetActiveWebContents());
+  GURL url = entry->GetURL();
+  GURL virtual_url = entry->GetVirtualURL();
+  if (url.SchemeIs(content::kChromeUIScheme) ||
+      virtual_url.SchemeIs(content::kChromeUIScheme)) {
+    if (!url.SchemeIs(content::kChromeUIScheme))
+      url = virtual_url;
+    return url.host() != chrome::kChromeUINewTabHost;
+  }
+
+  Profile* profile = GetProfile();
+  return !profile || !search::IsInstantNTPURL(url, profile);
 }
 
 security_state::SecurityLevel ChromeToolbarModelDelegate::GetSecurityLevel()
@@ -150,12 +158,6 @@ ChromeToolbarModelDelegate::GetNavigationController() const {
   // window).
   content::WebContents* current_tab = GetActiveWebContents();
   return current_tab ? &current_tab->GetController() : nullptr;
-}
-
-content::NavigationEntry* ChromeToolbarModelDelegate::GetNavigationEntry()
-    const {
-  content::NavigationController* controller = GetNavigationController();
-  return controller ? controller->GetVisibleEntry() : nullptr;
 }
 
 Profile* ChromeToolbarModelDelegate::GetProfile() const {

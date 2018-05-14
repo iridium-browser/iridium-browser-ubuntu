@@ -6,52 +6,168 @@
 
 #include <algorithm>
 
-#include "base/memory/ptr_util.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/run_loop.h"
 #include "chrome/browser/notifications/notification_handler.h"
 #include "chrome/browser/profiles/profile.h"
 
 // static
 std::unique_ptr<KeyedService> StubNotificationDisplayService::FactoryForTests(
     content::BrowserContext* context) {
-  return base::MakeUnique<StubNotificationDisplayService>(
+  return std::make_unique<StubNotificationDisplayService>(
       Profile::FromBrowserContext(context));
 }
 
 StubNotificationDisplayService::StubNotificationDisplayService(Profile* profile)
-    : NotificationDisplayService(profile), profile_(profile) {}
+    : NotificationDisplayServiceImpl(profile), profile_(profile) {}
 
 StubNotificationDisplayService::~StubNotificationDisplayService() = default;
 
-void StubNotificationDisplayService::RemoveNotification(
-    NotificationCommon::Type notification_type,
-    const std::string& notification_id,
-    bool by_user) {
-  auto iter = std::find_if(
-      notifications_.begin(), notifications_.end(),
-      [notification_type, notification_id](const NotificationData& data) {
-        return data.first == notification_type &&
-               data.second.delegate_id() == notification_id;
-      });
+void StubNotificationDisplayService::SetNotificationAddedClosure(
+    base::RepeatingClosure closure) {
+  notification_added_closure_ = std::move(closure);
+}
 
+std::vector<message_center::Notification>
+StubNotificationDisplayService::GetDisplayedNotificationsForType(
+    NotificationHandler::Type type) const {
+  std::vector<message_center::Notification> notifications;
+  for (const auto& data : notifications_) {
+    if (data.type != type)
+      continue;
+
+    notifications.push_back(data.notification);
+  }
+
+  return notifications;
+}
+
+base::Optional<message_center::Notification>
+StubNotificationDisplayService::GetNotification(
+    const std::string& notification_id) {
+  auto iter = std::find_if(notifications_.begin(), notifications_.end(),
+                           [notification_id](const NotificationData& data) {
+                             return data.notification.id() == notification_id;
+                           });
+
+  if (iter == notifications_.end())
+    return base::nullopt;
+
+  return iter->notification;
+}
+
+const NotificationCommon::Metadata*
+StubNotificationDisplayService::GetMetadataForNotification(
+    const message_center::Notification& notification) {
+  auto iter = std::find_if(notifications_.begin(), notifications_.end(),
+                           [notification](const NotificationData& data) {
+                             return data.notification.id() == notification.id();
+                           });
+
+  if (iter == notifications_.end())
+    return nullptr;
+
+  return iter->metadata.get();
+}
+
+void StubNotificationDisplayService::SimulateClick(
+    NotificationHandler::Type notification_type,
+    const std::string& notification_id,
+    base::Optional<int> action_index,
+    base::Optional<base::string16> reply) {
+  auto iter = FindNotification(notification_type, notification_id);
   if (iter == notifications_.end())
     return;
 
   NotificationHandler* handler = GetNotificationHandler(notification_type);
+  if (notification_type == NotificationHandler::Type::TRANSIENT) {
+    DCHECK(!handler);
+
+    auto* delegate = iter->notification.delegate();
+    if (!delegate)
+      return;
+
+    if (reply.has_value()) {
+      DCHECK(action_index.has_value());
+      delegate->ButtonClickWithReply(action_index.value(), reply.value());
+    } else if (action_index.has_value()) {
+      delegate->ButtonClick(action_index.value());
+    } else {
+      delegate->Click();
+    }
+    return;
+  }
+
   DCHECK(handler);
-  handler->OnClose(profile_, iter->second.origin_url().spec(), notification_id,
-                   by_user);
+  base::RunLoop run_loop;
+  handler->OnClick(profile_, iter->notification.origin_url(), notification_id,
+                   action_index, reply, run_loop.QuitClosure());
+  run_loop.Run();
+}
+
+void StubNotificationDisplayService::SimulateSettingsClick(
+    NotificationHandler::Type notification_type,
+    const std::string& notification_id) {
+  auto iter = FindNotification(notification_type, notification_id);
+  if (iter == notifications_.end())
+    return;
+
+  NotificationHandler* handler = GetNotificationHandler(notification_type);
+  if (notification_type == NotificationHandler::Type::TRANSIENT) {
+    DCHECK(!handler);
+    if (iter->notification.delegate())
+      iter->notification.delegate()->SettingsClick();
+  } else {
+    DCHECK(handler);
+    handler->OpenSettings(profile_, iter->notification.origin_url());
+  }
+}
+
+void StubNotificationDisplayService::RemoveNotification(
+    NotificationHandler::Type notification_type,
+    const std::string& notification_id,
+    bool by_user,
+    bool silent) {
+  auto iter = FindNotification(notification_type, notification_id);
+  if (iter == notifications_.end())
+    return;
+
+  if (!silent) {
+    NotificationHandler* handler = GetNotificationHandler(notification_type);
+    if (notification_type == NotificationHandler::Type::TRANSIENT) {
+      DCHECK(!handler);
+      if (iter->notification.delegate())
+        iter->notification.delegate()->Close(by_user);
+    } else {
+      base::RunLoop run_loop;
+      handler->OnClose(profile_, iter->notification.origin_url(),
+                       notification_id, by_user, run_loop.QuitClosure());
+      run_loop.Run();
+    }
+  }
+
   notifications_.erase(iter);
 }
 
 void StubNotificationDisplayService::RemoveAllNotifications(
-    NotificationCommon::Type notification_type,
+    NotificationHandler::Type notification_type,
     bool by_user) {
   NotificationHandler* handler = GetNotificationHandler(notification_type);
-  DCHECK(handler);
+  DCHECK_NE(!!handler,
+            notification_type == NotificationHandler::Type::TRANSIENT);
   for (auto iter = notifications_.begin(); iter != notifications_.end();) {
-    if (iter->first == notification_type) {
-      handler->OnClose(profile_, iter->second.origin_url().spec(),
-                       iter->second.id(), by_user);
+    if (iter->type == notification_type) {
+      if (handler) {
+        base::RunLoop run_loop;
+        handler->OnClose(profile_, iter->notification.origin_url(),
+                         iter->notification.id(), by_user,
+                         run_loop.QuitClosure());
+        run_loop.Run();
+      } else if (iter->notification.delegate()) {
+        iter->notification.delegate()->Close(by_user);
+      }
       iter = notifications_.erase(iter);
     } else {
       iter++;
@@ -59,37 +175,102 @@ void StubNotificationDisplayService::RemoveAllNotifications(
   }
 }
 
+void StubNotificationDisplayService::SetProcessNotificationOperationDelegate(
+    const ProcessNotificationOperationCallback& delegate) {
+  process_notification_operation_delegate_ = delegate;
+}
+
 void StubNotificationDisplayService::Display(
-    NotificationCommon::Type notification_type,
-    const std::string& notification_id,
-    const Notification& notification) {
+    NotificationHandler::Type notification_type,
+    const message_center::Notification& notification,
+    std::unique_ptr<NotificationCommon::Metadata> metadata) {
   // This mimics notification replacement behaviour; the Close() method on a
   // notification's delegate is not meant to be invoked in this situation.
-  Close(notification_type, notification_id);
+  RemoveNotification(notification_type, notification.id(), false /* by_user */,
+                     true /* silent */);
 
-  notifications_.emplace_back(notification_type, notification);
+  NotificationHandler* handler = GetNotificationHandler(notification_type);
+  if (notification_type == NotificationHandler::Type::TRANSIENT)
+    DCHECK(!handler);
+  else
+    handler->OnShow(profile_, notification.id());
+
+  notifications_.emplace_back(notification_type, notification,
+                              std::move(metadata));
+
+  if (notification_added_closure_)
+    notification_added_closure_.Run();
 }
 
 void StubNotificationDisplayService::Close(
-    NotificationCommon::Type notification_type,
+    NotificationHandler::Type notification_type,
     const std::string& notification_id) {
-  notifications_.erase(
-      std::remove_if(
-          notifications_.begin(), notifications_.end(),
-          [notification_type, notification_id](const NotificationData& data) {
-            return data.first == notification_type &&
-                   data.second.delegate_id() == notification_id;
-          }),
-      notifications_.end());
+  RemoveNotification(notification_type, notification_id, false /* by_user */,
+                     false /* silent */);
 }
 
 void StubNotificationDisplayService::GetDisplayed(
     const DisplayedNotificationsCallback& callback) {
   std::unique_ptr<std::set<std::string>> notifications =
-      base::MakeUnique<std::set<std::string>>();
+      std::make_unique<std::set<std::string>>();
 
   for (const auto& notification_data : notifications_)
-    notifications->insert(notification_data.second.delegate_id());
+    notifications->insert(notification_data.notification.id());
 
   callback.Run(std::move(notifications), true /* supports_synchronization */);
+}
+
+void StubNotificationDisplayService::ProcessNotificationOperation(
+    NotificationCommon::Operation operation,
+    NotificationHandler::Type notification_type,
+    const GURL& origin,
+    const std::string& notification_id,
+    const base::Optional<int>& action_index,
+    const base::Optional<base::string16>& reply,
+    const base::Optional<bool>& by_user) {
+  if (process_notification_operation_delegate_) {
+    process_notification_operation_delegate_.Run(operation, notification_type,
+                                                 origin, notification_id,
+                                                 action_index, reply, by_user);
+    return;
+  }
+
+  NotificationDisplayServiceImpl::ProcessNotificationOperation(
+      operation, notification_type, origin, notification_id, action_index,
+      reply, by_user);
+}
+
+StubNotificationDisplayService::NotificationData::NotificationData(
+    NotificationHandler::Type type,
+    const message_center::Notification& notification,
+    std::unique_ptr<NotificationCommon::Metadata> metadata)
+    : type(type), notification(notification), metadata(std::move(metadata)) {}
+
+StubNotificationDisplayService::NotificationData::NotificationData(
+    NotificationData&& other)
+    : type(other.type),
+      notification(other.notification),
+      metadata(std::move(other.metadata)) {}
+
+StubNotificationDisplayService::NotificationData::~NotificationData() {}
+
+StubNotificationDisplayService::NotificationData&
+StubNotificationDisplayService::NotificationData::operator=(
+    NotificationData&& other) {
+  type = other.type;
+  notification = std::move(other.notification);
+  metadata = std::move(other.metadata);
+  return *this;
+}
+
+std::vector<StubNotificationDisplayService::NotificationData>::iterator
+StubNotificationDisplayService::FindNotification(
+    NotificationHandler::Type notification_type,
+    const std::string& notification_id) {
+  return std::find_if(
+      notifications_.begin(), notifications_.end(),
+      [notification_type, notification_id](const NotificationData& data) {
+        return data.type == notification_type &&
+               data.notification.id() == notification_id;
+      });
 }

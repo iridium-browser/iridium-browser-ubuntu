@@ -36,19 +36,22 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/SpaceSplitString.h"
 #include "core/frame/Deprecation.h"
 #include "core/frame/HostsUsingFeatures.h"
+#include "core/origin_trials/origin_trials.h"
 #include "modules/mediastream/MediaConstraintsImpl.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/mediastream/MediaStreamConstraints.h"
 #include "modules/mediastream/MediaTrackConstraints.h"
+#include "modules/mediastream/OverconstrainedError.h"
 #include "modules/mediastream/UserMediaController.h"
 #include "platform/mediastream/MediaStreamCenter.h"
 #include "platform/mediastream/MediaStreamDescriptor.h"
-#include "public/platform/WebFeaturePolicyFeature.h"
+#include "third_party/WebKit/public/mojom/feature_policy/feature_policy.mojom-blink.h"
 
 namespace blink {
 
@@ -307,15 +310,14 @@ WebMediaConstraints ParseOptions(ExecutionContext* context,
                                  MediaErrorState& error_state) {
   WebMediaConstraints constraints;
 
-  Dictionary constraints_dictionary;
-  if (options.isNull()) {
+  if (options.IsNull()) {
     // Do nothing.
-  } else if (options.isMediaTrackConstraints()) {
+  } else if (options.IsMediaTrackConstraints()) {
     constraints = MediaConstraintsImpl::Create(
-        context, options.getAsMediaTrackConstraints(), error_state);
+        context, options.GetAsMediaTrackConstraints(), error_state);
   } else {
-    DCHECK(options.isBoolean());
-    if (options.getAsBoolean()) {
+    DCHECK(options.IsBoolean());
+    if (options.GetAsBoolean()) {
       constraints = MediaConstraintsImpl::Create();
     }
   }
@@ -325,12 +327,53 @@ WebMediaConstraints ParseOptions(ExecutionContext* context,
 
 }  // namespace
 
+class UserMediaRequest::V8Callbacks final : public UserMediaRequest::Callbacks {
+ public:
+  static V8Callbacks* Create(
+      V8NavigatorUserMediaSuccessCallback* success_callback,
+      V8NavigatorUserMediaErrorCallback* error_callback) {
+    return new V8Callbacks(success_callback, error_callback);
+  }
+
+  ~V8Callbacks() override = default;
+
+  void Trace(blink::Visitor* visitor) override {
+    visitor->Trace(success_callback_);
+    visitor->Trace(error_callback_);
+    UserMediaRequest::Callbacks::Trace(visitor);
+  }
+
+  void OnSuccess(ScriptWrappable* callback_this_value,
+                 MediaStream* stream) override {
+    success_callback_->InvokeAndReportException(callback_this_value, stream);
+  }
+  void OnError(ScriptWrappable* callback_this_value,
+               DOMExceptionOrOverconstrainedError error) override {
+    error_callback_->InvokeAndReportException(callback_this_value, error);
+  }
+
+ private:
+  V8Callbacks(V8NavigatorUserMediaSuccessCallback* success_callback,
+              V8NavigatorUserMediaErrorCallback* error_callback)
+      : success_callback_(ToV8PersistentCallbackFunction(success_callback)),
+        error_callback_(ToV8PersistentCallbackFunction(error_callback)) {}
+
+  // As Blink does not hold a UserMediaRequest and lets content/ hold it,
+  // we cannot use wrapper-tracing to keep the underlying callback functions.
+  // Plus, it's guaranteed that the callbacks are one-shot type (not repeated
+  // type) and the owner UserMediaRequest will be discarded in a limited
+  // timeframe. Thus these persistent handles are okay.
+  Member<V8PersistentCallbackFunction<V8NavigatorUserMediaSuccessCallback>>
+      success_callback_;
+  Member<V8PersistentCallbackFunction<V8NavigatorUserMediaErrorCallback>>
+      error_callback_;
+};
+
 UserMediaRequest* UserMediaRequest::Create(
     ExecutionContext* context,
     UserMediaController* controller,
     const MediaStreamConstraints& options,
-    NavigatorUserMediaSuccessCallback* success_callback,
-    NavigatorUserMediaErrorCallback* error_callback,
+    Callbacks* callbacks,
     MediaErrorState& error_state) {
   WebMediaConstraints audio =
       ParseOptions(context, options.audio(), error_state);
@@ -353,31 +396,53 @@ UserMediaRequest* UserMediaRequest::Create(
   if (!video.IsNull())
     CountVideoConstraintUses(context, video);
 
-  return new UserMediaRequest(context, controller, audio, video,
-                              success_callback, error_callback);
+  return new UserMediaRequest(context, controller, audio, video, callbacks);
+}
+
+UserMediaRequest* UserMediaRequest::Create(
+    ExecutionContext* context,
+    UserMediaController* controller,
+    const MediaStreamConstraints& options,
+    V8NavigatorUserMediaSuccessCallback* success_callback,
+    V8NavigatorUserMediaErrorCallback* error_callback,
+    MediaErrorState& error_state) {
+  return Create(context, controller, options,
+                V8Callbacks::Create(success_callback, error_callback),
+                error_state);
 }
 
 UserMediaRequest* UserMediaRequest::CreateForTesting(
     const WebMediaConstraints& audio,
     const WebMediaConstraints& video) {
-  return new UserMediaRequest(nullptr, nullptr, audio, video, nullptr, nullptr);
+  return new UserMediaRequest(nullptr, nullptr, audio, video, nullptr);
 }
 
-UserMediaRequest::UserMediaRequest(
-    ExecutionContext* context,
-    UserMediaController* controller,
-    WebMediaConstraints audio,
-    WebMediaConstraints video,
-    NavigatorUserMediaSuccessCallback* success_callback,
-    NavigatorUserMediaErrorCallback* error_callback)
+UserMediaRequest::UserMediaRequest(ExecutionContext* context,
+                                   UserMediaController* controller,
+                                   WebMediaConstraints audio,
+                                   WebMediaConstraints video,
+                                   Callbacks* callbacks)
     : ContextLifecycleObserver(context),
       audio_(audio),
       video_(video),
+      should_disable_hardware_noise_suppression_(
+          OriginTrials::disableHardwareNoiseSuppressionEnabled(context)),
+      should_enable_experimental_hw_echo_cancellation_(
+          OriginTrials::experimentalHardwareEchoCancellationEnabled(context)),
       controller_(controller),
-      success_callback_(success_callback),
-      error_callback_(error_callback) {}
+      callbacks_(callbacks) {
+  if (should_disable_hardware_noise_suppression_) {
+    UseCounter::Count(context,
+                      WebFeature::kUserMediaDisableHardwareNoiseSuppression);
+  }
+  if (should_enable_experimental_hw_echo_cancellation_) {
+    UseCounter::Count(
+        context,
+        WebFeature::kUserMediaEnableExperimentalHardwareEchoCancellation);
+  }
+}
 
-UserMediaRequest::~UserMediaRequest() {}
+UserMediaRequest::~UserMediaRequest() = default;
 
 bool UserMediaRequest::Audio() const {
   return !audio_.IsNull();
@@ -395,6 +460,15 @@ WebMediaConstraints UserMediaRequest::VideoConstraints() const {
   return video_;
 }
 
+bool UserMediaRequest::ShouldDisableHardwareNoiseSuppression() const {
+  return should_disable_hardware_noise_suppression_;
+}
+
+bool UserMediaRequest::ShouldEnableExperimentalHardwareEchoCancellation()
+    const {
+  return should_enable_experimental_hw_echo_cancellation_;
+}
+
 bool UserMediaRequest::IsSecureContextUse(String& error_message) {
   Document* document = OwnerDocument();
 
@@ -403,13 +477,31 @@ bool UserMediaRequest::IsSecureContextUse(String& error_message) {
                       WebFeature::kGetUserMediaSecureOrigin);
     UseCounter::CountCrossOriginIframe(
         *document, WebFeature::kGetUserMediaSecureOriginIframe);
+
+    // Feature policy deprecation messages.
     if (Audio()) {
-      Deprecation::CountDeprecationFeaturePolicy(
-          *document, WebFeaturePolicyFeature::kMicrophone);
+      if (RuntimeEnabledFeatures::FeaturePolicyForPermissionsEnabled()) {
+        if (!document->GetFrame()->IsFeatureEnabled(
+                mojom::FeaturePolicyFeature::kMicrophone)) {
+          UseCounter::Count(
+              document, WebFeature::kMicrophoneDisabledByFeaturePolicyEstimate);
+        }
+      } else {
+        Deprecation::CountDeprecationFeaturePolicy(
+            *document, mojom::FeaturePolicyFeature::kMicrophone);
+      }
     }
     if (Video()) {
-      Deprecation::CountDeprecationFeaturePolicy(
-          *document, WebFeaturePolicyFeature::kCamera);
+      if (RuntimeEnabledFeatures::FeaturePolicyForPermissionsEnabled()) {
+        if (!document->GetFrame()->IsFeatureEnabled(
+                mojom::FeaturePolicyFeature::kCamera)) {
+          UseCounter::Count(document,
+                            WebFeature::kCameraDisabledByFeaturePolicyEstimate);
+        }
+      } else {
+        Deprecation::CountDeprecationFeaturePolicy(
+            *document, mojom::FeaturePolicyFeature::kCamera);
+      }
     }
 
     HostsUsingFeatures::CountAnyWorld(
@@ -433,7 +525,7 @@ Document* UserMediaRequest::OwnerDocument() {
     return ToDocument(context);
   }
 
-  return 0;
+  return nullptr;
 }
 
 void UserMediaRequest::Start() {
@@ -462,14 +554,7 @@ void UserMediaRequest::Succeed(MediaStreamDescriptor* stream_descriptor) {
     (*iter)->SetConstraints(video_);
   }
 
-  success_callback_->handleEvent(stream);
-}
-
-void UserMediaRequest::FailPermissionDenied(const String& message) {
-  if (!GetExecutionContext())
-    return;
-  error_callback_->handleEvent(NavigatorUserMediaError::Create(
-      NavigatorUserMediaError::kNamePermissionDenied, message, String()));
+  callbacks_->OnSuccess(nullptr, stream);
 }
 
 void UserMediaRequest::FailConstraint(const String& constraint_name,
@@ -477,19 +562,48 @@ void UserMediaRequest::FailConstraint(const String& constraint_name,
   DCHECK(!constraint_name.IsEmpty());
   if (!GetExecutionContext())
     return;
-  error_callback_->handleEvent(NavigatorUserMediaError::Create(
-      NavigatorUserMediaError::kNameConstraintNotSatisfied, message,
-      constraint_name));
+  callbacks_->OnError(
+      nullptr, DOMExceptionOrOverconstrainedError::FromOverconstrainedError(
+                   OverconstrainedError::Create(constraint_name, message)));
 }
 
-void UserMediaRequest::FailUASpecific(const String& name,
-                                      const String& message,
-                                      const String& constraint_name) {
-  DCHECK(!name.IsEmpty());
+void UserMediaRequest::Fail(WebUserMediaRequest::Error name,
+                            const String& message) {
   if (!GetExecutionContext())
     return;
-  error_callback_->handleEvent(
-      NavigatorUserMediaError::Create(name, message, constraint_name));
+
+  ExceptionCode ec = kNotSupportedError;
+  switch (name) {
+    case WebUserMediaRequest::Error::kPermissionDenied:
+    case WebUserMediaRequest::Error::kPermissionDismissed:
+    case WebUserMediaRequest::Error::kInvalidState:
+    case WebUserMediaRequest::Error::kFailedDueToShutdown:
+    case WebUserMediaRequest::Error::kKillSwitchOn:
+      ec = kNotAllowedError;
+      break;
+    case WebUserMediaRequest::Error::kDevicesNotFound:
+      ec = kNotFoundError;
+      break;
+    case WebUserMediaRequest::Error::kTabCapture:
+    case WebUserMediaRequest::Error::kScreenCapture:
+    case WebUserMediaRequest::Error::kCapture:
+      ec = kAbortError;
+      break;
+    case WebUserMediaRequest::Error::kTrackStart:
+      ec = kNotReadableError;
+      break;
+    case WebUserMediaRequest::Error::kNotSupported:
+      ec = kNotSupportedError;
+      break;
+    case WebUserMediaRequest::Error::kSecurityError:
+      ec = kSecurityError;
+      break;
+    default:
+      NOTREACHED();
+  }
+  callbacks_->OnError(nullptr,
+                      DOMExceptionOrOverconstrainedError::FromDOMException(
+                          DOMException::Create(ec, message)));
 }
 
 void UserMediaRequest::ContextDestroyed(ExecutionContext*) {
@@ -499,10 +613,9 @@ void UserMediaRequest::ContextDestroyed(ExecutionContext*) {
   }
 }
 
-DEFINE_TRACE(UserMediaRequest) {
+void UserMediaRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(controller_);
-  visitor->Trace(success_callback_);
-  visitor->Trace(error_callback_);
+  visitor->Trace(callbacks_);
   ContextLifecycleObserver::Trace(visitor);
 }
 

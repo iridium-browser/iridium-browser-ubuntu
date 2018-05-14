@@ -40,7 +40,9 @@ TestScreen* TestScreen::Create(const gfx::Size& size,
                         window_tree_client);
 }
 
-TestScreen::~TestScreen() {}
+TestScreen::~TestScreen() {
+  delete host_;
+}
 
 WindowTreeHost* TestScreen::CreateHostForPrimaryDisplay() {
   DCHECK(!host_);
@@ -55,7 +57,9 @@ WindowTreeHost* TestScreen::CreateHostForPrimaryDisplay() {
   // Makes sure InputMethod is default focused so that IME basics can work.
   host_->GetInputMethod()->OnFocus();
   host_->window()->AddObserver(this);
-  host_->InitHost();
+  // Other test code may have already initialized the compositor.
+  if (!host_->compositor()->root_layer())
+    host_->InitHost();
   host_->window()->Show();
   return host_;
 }
@@ -66,6 +70,12 @@ void TestScreen::SetDeviceScaleFactor(float device_scale_factor) {
   display.SetScaleAndBounds(device_scale_factor, bounds_in_pixel);
   display_list().UpdateDisplay(display);
   host_->OnHostResizedInPixels(bounds_in_pixel.size());
+}
+
+void TestScreen::SetColorSpace(const gfx::ColorSpace& color_space) {
+  display::Display display(GetPrimaryDisplay());
+  display.set_color_space(color_space);
+  display_list().UpdateDisplay(display);
 }
 
 void TestScreen::SetDisplayRotation(display::Display::Rotation rotation) {
@@ -128,8 +138,10 @@ gfx::Transform TestScreen::GetUIScaleTransform() const {
   return ui_scale;
 }
 
-void TestScreen::OnWindowBoundsChanged(
-    Window* window, const gfx::Rect& old_bounds, const gfx::Rect& new_bounds) {
+void TestScreen::OnWindowBoundsChanged(Window* window,
+                                       const gfx::Rect& old_bounds,
+                                       const gfx::Rect& new_bounds,
+                                       ui::PropertyChangeReason reason) {
   DCHECK_EQ(host_->window(), window);
   display::Display display(GetPrimaryDisplay());
   display.SetSize(gfx::ScaleToFlooredSize(new_bounds.size(),
@@ -138,8 +150,10 @@ void TestScreen::OnWindowBoundsChanged(
 }
 
 void TestScreen::OnWindowDestroying(Window* window) {
-  if (host_->window() == window)
+  if (host_->window() == window) {
+    host_->window()->RemoveObserver(this);
     host_ = NULL;
+  }
 }
 
 gfx::Point TestScreen::GetCursorScreenPoint() {

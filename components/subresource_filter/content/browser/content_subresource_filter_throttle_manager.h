@@ -5,13 +5,15 @@
 #ifndef COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_CONTENT_SUBRESOURCE_FILTER_THROTTLE_MANAGER_H_
 #define COMPONENTS_SUBRESOURCE_FILTER_CONTENT_BROWSER_CONTENT_SUBRESOURCE_FILTER_THROTTLE_MANAGER_H_
 
+#include <map>
 #include <memory>
-#include <unordered_map>
+#include <set>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
+#include "base/stl_util.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer.h"
 #include "components/subresource_filter/content/browser/verified_ruleset_dealer.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
@@ -19,7 +21,6 @@
 #include "content/public/browser/web_contents_observer.h"
 
 namespace content {
-struct OpenURLParams;
 class NavigationHandle;
 class NavigationThrottle;
 class RenderFrameHost;
@@ -58,13 +59,6 @@ class ContentSubresourceFilterThrottleManager
     // The embedder may be interested in displaying UI to the user when the
     // first load is disallowed for a given page load.
     virtual void OnFirstSubresourceLoadDisallowed() {}
-
-    // Whether the stronger version of the popup blocker is enabled for this
-    // page load.
-    virtual bool AllowStrongPopupBlocking();
-
-    // Whether we should be using ruleset rules for this page load.
-    virtual bool AllowRulesetRules();
   };
 
   ContentSubresourceFilterThrottleManager(
@@ -86,13 +80,13 @@ class ContentSubresourceFilterThrottleManager
       content::NavigationHandle* navigation_handle,
       std::vector<std::unique_ptr<content::NavigationThrottle>>* throttles);
 
-  // Returns whether or not the current WebContents is allowed to create a new
-  // window.
-  bool ShouldDisallowNewWindow(const content::OpenURLParams* open_url_params);
+  PageLoadStatistics* page_load_statistics() const { return statistics_.get(); }
 
   VerifiedRuleset::Handle* ruleset_handle_for_testing() {
     return ruleset_handle_.get();
   }
+
+  bool IsFrameTaggedAsAdForTesting(content::RenderFrameHost* frame_host);
 
  protected:
   // content::WebContentsObserver:
@@ -112,6 +106,9 @@ class ContentSubresourceFilterThrottleManager
       content::NavigationHandle* navigation_handle,
       ActivationDecision activation_decision,
       const ActivationState& activation_state) override;
+  void OnSubframeNavigationEvaluated(
+      content::NavigationHandle* navigation_handle,
+      LoadPolicy load_policy) override;
 
  private:
   std::unique_ptr<SubframeNavigationFilteringThrottle>
@@ -140,18 +137,36 @@ class ContentSubresourceFilterThrottleManager
   void OnActivationThrottleDestroyed(
       content::NavigationHandle* navigation_handle);
 
+  // Adds the navigation's RenderFrameHost to activated_frame_hosts_ if it is a
+  // special navigation which did not go through navigation throttles and its
+  // parent frame is activated as well. The filter for these frames is set
+  // to nullptr.
+  void MaybeActivateSubframeSpecialUrls(
+      content::NavigationHandle* navigation_handle);
+
   // For each RenderFrameHost where the last committed load has subresource
   // filtering activated, owns the corresponding AsyncDocumentSubresourceFilter.
-  std::unordered_map<content::RenderFrameHost*,
-                     std::unique_ptr<AsyncDocumentSubresourceFilter>>
+  // It is possible for a frame to have a null filter.
+  std::map<content::RenderFrameHost*,
+           std::unique_ptr<AsyncDocumentSubresourceFilter>>
       activated_frame_hosts_;
 
   // For each ongoing navigation that requires activation state computation,
   // keeps track of the throttle that is carrying out that computation, so that
   // the result can be retrieved when the navigation is ready to commit.
-  std::unordered_map<content::NavigationHandle*,
-                     ActivationStateComputingNavigationThrottle*>
+  // is_ad_subframe is set if SubframeNavigationFilteringThrottle finds that the
+  // subframe URL matches the ruleset.
+  struct OngoingThrottleInfo {
+    ActivationStateComputingNavigationThrottle* throttle = nullptr;
+    bool is_ad_subframe = false;
+  };
+
+  std::map<content::NavigationHandle*, OngoingThrottleInfo>
       ongoing_activation_throttles_;
+
+  // Set of frames that have been identified as ads, either through matching the
+  // ruleset or if their parent frame was an ad frame.
+  std::set<content::RenderFrameHost*> ad_frames_;
 
   ScopedObserver<SubresourceFilterObserverManager, SubresourceFilterObserver>
       scoped_observer_;

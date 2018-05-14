@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2016 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -6,13 +7,18 @@
 
 from __future__ import print_function
 
-from chromite.cbuildbot import validation_pool_unittest
 from chromite.lib import cl_messages
 from chromite.lib import constants
+from chromite.lib import cros_test_lib
 from chromite.lib import triage_lib
+from chromite.lib import patch_unittest
 
-class TestCreateValidationFailureMessage(validation_pool_unittest.MoxBase):
+class TestCreateValidationFailureMessage(cros_test_lib.MockTestCase):
   """Tests CreateValidationFailureMessage."""
+
+  def setUp(self):
+    self._patch_factory = patch_unittest.MockPatchFactory()
+    self.GetPatches = self._patch_factory.GetPatches
 
   def _AssertMessage(self, change, suspects, messages, sanity=True,
                      infra_fail=False, lab_fail=False, no_stat=None,

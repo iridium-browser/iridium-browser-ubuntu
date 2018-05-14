@@ -9,8 +9,8 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "google_apis/gcm/engine/connection_handler_impl.h"
 #include "google_apis/gcm/monitoring/gcm_stats_recorder.h"
@@ -19,7 +19,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/log/net_log_source_type.h"
-#include "net/proxy/proxy_info.h"
+#include "net/proxy_resolution/proxy_info.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/ssl/ssl_config_service.h"
@@ -62,7 +62,7 @@ ConnectionFactoryImpl::ConnectionFactoryImpl(
       http_network_session_(http_network_session),
       net_log_(
           net::NetLogWithSource::Make(net_log, net::NetLogSourceType::SOCKET)),
-      pac_request_(NULL),
+      proxy_resolve_request_(NULL),
       connecting_(false),
       waiting_for_backoff_(false),
       waiting_for_network_online_(false),
@@ -78,9 +78,10 @@ ConnectionFactoryImpl::ConnectionFactoryImpl(
 ConnectionFactoryImpl::~ConnectionFactoryImpl() {
   CloseSocket();
   net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
-  if (pac_request_) {
-    gcm_network_session_->proxy_service()->CancelPacRequest(pac_request_);
-    pac_request_ = NULL;
+  if (proxy_resolve_request_) {
+    gcm_network_session_->proxy_resolution_service()->CancelRequest(
+        proxy_resolve_request_);
+    proxy_resolve_request_ = NULL;
   }
 }
 
@@ -325,15 +326,11 @@ void ConnectionFactoryImpl::StartConnection() {
   GURL current_endpoint = GetCurrentEndpoint();
   recorder_->RecordConnectionInitiated(current_endpoint.host());
   UpdateFromHttpNetworkSession();
-  int status = gcm_network_session_->proxy_service()->ResolveProxy(
-      current_endpoint,
-      std::string(),
-      &proxy_info_,
+  int status = gcm_network_session_->proxy_resolution_service()->ResolveProxy(
+      current_endpoint, std::string(), &proxy_info_,
       base::Bind(&ConnectionFactoryImpl::OnProxyResolveDone,
                  weak_ptr_factory_.GetWeakPtr()),
-      &pac_request_,
-      NULL,
-      net_log_);
+      &proxy_resolve_request_, NULL, net_log_);
   if (status != net::ERR_IO_PENDING)
     OnProxyResolveDone(status);
 }
@@ -347,7 +344,44 @@ void ConnectionFactoryImpl::InitHandler() {
     event_tracker_.WriteToLoginRequest(&login_request);
   }
 
-  connection_handler_->Init(login_request, socket_handle_.socket());
+  net::NetworkTrafficAnnotationTag traffic_annotation =
+      net::DefineNetworkTrafficAnnotation("gcm_connection_factory", R"(
+        semantics {
+          sender: "GCM Connection Factory"
+          description:
+            "TCP connection to the Google Cloud Messaging notification "
+            "servers. Supports reliable bi-directional messaging and push "
+            "notifications for multiple consumers."
+          trigger:
+            "The connection is created when an application (e.g. Chrome Sync) "
+            "or a website using Web Push starts the GCM service, and is kept "
+            "alive as long as there are valid applications registered. "
+            "Messaging is application/website controlled."
+          data:
+            "Arbitrary application-specific data."
+          destination: GOOGLE_OWNED_SERVICE
+        }
+        policy {
+          cookies_allowed: NO
+          setting:
+            "Users can stop messages related to Sync by disabling Sync for "
+            "everything in settings. Messages related to Web Push can be "
+            "stopped by revoking the site permissions in settings. Messages "
+            "related to extensions can be stopped by uninstalling the "
+            "extension."
+          chrome_policy {
+            SyncDisabled {
+              SyncDisabled: True
+            }
+          }
+        }
+        comments:
+          "'SyncDisabled' policy disables messages that are based on Sync, "
+          "but does not have any effect on other Google Cloud messages."
+        )");
+
+  connection_handler_->Init(login_request, traffic_annotation,
+                            socket_handle_.socket());
 }
 
 std::unique_ptr<net::BackoffEntry> ConnectionFactoryImpl::CreateBackoffEntry(
@@ -370,10 +404,6 @@ base::TimeTicks ConnectionFactoryImpl::NowTicks() {
 }
 
 void ConnectionFactoryImpl::OnConnectDone(int result) {
-  // TODO(zea): Remove ScopedTracker below once crbug.com/455884 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455884 ConnectionFactoryImpl::OnConnectDone"));
   if (result != net::OK) {
     // If the connection fails, try another proxy.
     result = ReconsiderProxyAfterError(result);
@@ -388,7 +418,7 @@ void ConnectionFactoryImpl::OnConnectDone(int result) {
     recorder_->RecordConnectionFailure(result);
     CloseSocket();
     backoff_entry_->InformOfRequest(false);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("GCM.ConnectionFailureErrorCode", result);
+    base::UmaHistogramSparse("GCM.ConnectionFailureErrorCode", result);
 
     event_tracker_.ConnectionAttemptFailed(result);
     event_tracker_.EndConnectionAttempt();
@@ -427,7 +457,7 @@ void ConnectionFactoryImpl::ConnectionHandlerCallback(int result) {
   if (result != net::OK) {
     // TODO(zea): Consider how to handle errors that may require some sort of
     // user intervention (login page, etc.).
-    UMA_HISTOGRAM_SPARSE_SLOWLY("GCM.ConnectionDisconnectErrorCode", result);
+    base::UmaHistogramSparse("GCM.ConnectionDisconnectErrorCode", result);
     SignalConnectionReset(SOCKET_FAILURE);
     return;
   }
@@ -451,7 +481,7 @@ void ConnectionFactoryImpl::ConnectionHandlerCallback(int result) {
 // HttpStreamFactoryImpl::Job::DoResolveProxyComplete. This should be
 // refactored into some common place.
 void ConnectionFactoryImpl::OnProxyResolveDone(int status) {
-  pac_request_ = NULL;
+  proxy_resolve_request_ = NULL;
   DVLOG(1) << "Proxy resolution status: " << status;
 
   DCHECK_NE(status, net::ERR_IO_PENDING);
@@ -501,7 +531,7 @@ void ConnectionFactoryImpl::OnProxyResolveDone(int status) {
 // a proxy it always returns ERR_IO_PENDING and posts a call to
 // OnProxyResolveDone with the result of the reconsideration.
 int ConnectionFactoryImpl::ReconsiderProxyAfterError(int error) {
-  DCHECK(!pac_request_);
+  DCHECK(!proxy_resolve_request_);
   DCHECK_NE(error, net::OK);
   DCHECK_NE(error, net::ERR_IO_PENDING);
   // A failure to resolve the hostname or any error related to establishing a
@@ -553,35 +583,26 @@ int ConnectionFactoryImpl::ReconsiderProxyAfterError(int error) {
         proxy_info_.proxy_server().host_port_pair());
   }
 
-  int status = gcm_network_session_->proxy_service()->ReconsiderProxyAfterError(
-      GetCurrentEndpoint(), std::string(), error, &proxy_info_,
-      base::Bind(&ConnectionFactoryImpl::OnProxyResolveDone,
-                 weak_ptr_factory_.GetWeakPtr()),
-      &pac_request_, NULL, net_log_);
-  if (status == net::OK || status == net::ERR_IO_PENDING) {
-    CloseSocket();
-  } else {
-    // If ReconsiderProxyAfterError() failed synchronously, it means
-    // there was nothing left to fall-back to, so fail the transaction
+  if (!proxy_info_.Fallback(error, net_log_)) {
+    // There was nothing left to fall-back to, so fail the transaction
     // with the last connection error we got.
-    status = error;
+    return error;
   }
 
-  // If there is new proxy info, post OnProxyResolveDone to retry it. Otherwise,
-  // if there was an error falling back, fail synchronously.
-  if (status == net::OK) {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&ConnectionFactoryImpl::OnProxyResolveDone,
-                   weak_ptr_factory_.GetWeakPtr(), status));
-    status = net::ERR_IO_PENDING;
-  }
-  return status;
+  CloseSocket();
+
+  // If there is new proxy info, post OnProxyResolveDone to retry it.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&ConnectionFactoryImpl::OnProxyResolveDone,
+                            weak_ptr_factory_.GetWeakPtr(), net::OK));
+
+  return net::ERR_IO_PENDING;
 }
 
 void ConnectionFactoryImpl::ReportSuccessfulProxyConnection() {
-  if (gcm_network_session_ && gcm_network_session_->proxy_service())
-    gcm_network_session_->proxy_service()->ReportSuccess(proxy_info_, NULL);
+  if (gcm_network_session_ && gcm_network_session_->proxy_resolution_service())
+    gcm_network_session_->proxy_resolution_service()->ReportSuccess(proxy_info_,
+        NULL);
 }
 
 void ConnectionFactoryImpl::CloseSocket() {

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <set>
 #include <string>
 
 #include "base/callback.h"
@@ -16,7 +17,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/cookies/canonical_cookie.h"
-#include "net/proxy/proxy_retry_info.h"
+#include "net/proxy_resolution/proxy_retry_info.h"
 
 class GURL;
 
@@ -102,13 +103,13 @@ class NET_EXPORT NetworkDelegate {
   bool CanGetCookies(const URLRequest& request,
                      const CookieList& cookie_list);
   bool CanSetCookie(const URLRequest& request,
-                    const std::string& cookie_line,
+                    const net::CanonicalCookie& cookie,
                     CookieOptions* options);
   bool CanAccessFile(const URLRequest& request,
                      const base::FilePath& original_path,
                      const base::FilePath& absolute_path) const;
   bool CanEnablePrivacyMode(const GURL& url,
-                            const GURL& first_party_for_cookies) const;
+                            const GURL& site_for_cookies) const;
 
   bool AreExperimentalCookieFeaturesEnabled() const;
 
@@ -118,7 +119,9 @@ class NET_EXPORT NetworkDelegate {
       const GURL& referrer_url) const;
 
   bool CanQueueReportingReport(const url::Origin& origin) const;
-  bool CanSendReportingReport(const url::Origin& origin) const;
+  void CanSendReportingReports(
+      std::set<url::Origin> origins,
+      base::OnceCallback<void(std::set<url::Origin>)> result_callback) const;
   bool CanSetReportingClient(const url::Origin& origin,
                              const GURL& endpoint) const;
   bool CanUseReportingClient(const url::Origin& origin,
@@ -206,8 +209,6 @@ class NET_EXPORT NetworkDelegate {
 
   // This corresponds to URLRequestDelegate::OnResponseStarted.
   virtual void OnResponseStarted(URLRequest* request, int net_error);
-  // Deprecated.
-  virtual void OnResponseStarted(URLRequest* request);
 
   // Called when bytes are received from the network, such as after receiving
   // headers or reading raw response bytes. This includes localhost requests.
@@ -278,7 +279,7 @@ class NET_EXPORT NetworkDelegate {
   // to the cookie. This method will never be invoked when
   // LOAD_DO_NOT_SAVE_COOKIES is specified.
   virtual bool OnCanSetCookie(const URLRequest& request,
-                              const std::string& cookie_line,
+                              const net::CanonicalCookie& cookie,
                               CookieOptions* options) = 0;
 
   // Called when a file access is attempted to allow the network delegate to
@@ -293,9 +294,8 @@ class NET_EXPORT NetworkDelegate {
   // Returns true if the given |url| has to be requested over connection that
   // is not tracked by the server. Usually is false, unless user privacy
   // settings block cookies from being get or set.
-  virtual bool OnCanEnablePrivacyMode(
-      const GURL& url,
-      const GURL& first_party_for_cookies) const = 0;
+  virtual bool OnCanEnablePrivacyMode(const GURL& url,
+                                      const GURL& site_for_cookies) const = 0;
 
   // Returns true if the embedder has enabled the experimental features, and
   // false otherwise.
@@ -313,7 +313,10 @@ class NET_EXPORT NetworkDelegate {
 
   virtual bool OnCanQueueReportingReport(const url::Origin& origin) const = 0;
 
-  virtual bool OnCanSendReportingReport(const url::Origin& origin) const = 0;
+  virtual void OnCanSendReportingReports(
+      std::set<url::Origin> origins,
+      base::OnceCallback<void(std::set<url::Origin>)> result_callback)
+      const = 0;
 
   virtual bool OnCanSetReportingClient(const url::Origin& origin,
                                        const GURL& endpoint) const = 0;

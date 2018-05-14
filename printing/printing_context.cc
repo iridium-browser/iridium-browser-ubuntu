@@ -23,11 +23,10 @@ PrintingContext::PrintingContext(Delegate* delegate)
     : delegate_(delegate),
       in_print_job_(false),
       abort_printing_(false) {
-  CHECK(delegate_);
+  DCHECK(delegate_);
 }
 
-PrintingContext::~PrintingContext() {
-}
+PrintingContext::~PrintingContext() = default;
 
 void PrintingContext::set_margin_type(MarginType type) {
   DCHECK(type != CUSTOM_MARGINS);
@@ -35,6 +34,7 @@ void PrintingContext::set_margin_type(MarginType type) {
 }
 
 void PrintingContext::set_is_modifiable(bool is_modifiable) {
+  settings_.set_is_modifiable(is_modifiable);
 #if defined(OS_WIN)
   settings_.set_print_text_with_gdi(is_modifiable);
 #endif
@@ -140,5 +140,17 @@ PrintingContext::Result PrintingContext::UpdatePrintSettings(
   return UpdatePrinterSettings(open_in_external_preview, show_system_dialog,
                                page_count);
 }
+
+#if defined(OS_CHROMEOS)
+PrintingContext::Result PrintingContext::UpdatePrintSettingsFromPOD(
+    std::unique_ptr<PrintSettings> job_settings) {
+  ResetSettings();
+  settings_ = *job_settings;
+
+  return UpdatePrinterSettings(false /* external_preview */,
+                               false /* show_system_dialog */,
+                               0 /* page_count is only used on Android */);
+}
+#endif
 
 }  // namespace printing

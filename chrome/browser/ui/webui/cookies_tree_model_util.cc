@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/i18n/time_formatting.h"
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -256,7 +255,7 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
       dict->SetString(kKeyOrigin, service_worker_info.origin.spec());
       dict->SetString(kKeySize,
                       ui::FormatBytes(service_worker_info.total_size_bytes));
-      auto scopes = base::MakeUnique<base::ListValue>();
+      auto scopes = std::make_unique<base::ListValue>();
       for (std::vector<GURL>::const_iterator it =
                service_worker_info.scopes.begin();
            it != service_worker_info.scopes.end();
@@ -264,6 +263,16 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
         scopes->AppendString(it->spec());
       }
       dict->Set(kKeyScopes, std::move(scopes));
+      break;
+    }
+    case CookieTreeNode::DetailedInfo::TYPE_SHARED_WORKER: {
+      dict->SetString(kKeyType, "shared_worker");
+
+      const BrowsingDataSharedWorkerHelper::SharedWorkerInfo&
+          shared_worker_info = *node.GetDetailedInfo().shared_worker_info;
+
+      dict->SetString(kKeyOrigin, shared_worker_info.worker.spec());
+      dict->SetString(kKeyName, shared_worker_info.name);
       break;
     }
     case CookieTreeNode::DetailedInfo::TYPE_CACHE_STORAGE: {
@@ -306,7 +315,7 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
   const extensions::ExtensionSet* protecting_apps =
       node.GetModel()->ExtensionsProtectingNode(node);
   if (protecting_apps && !protecting_apps->is_empty()) {
-    auto app_infos = base::MakeUnique<base::ListValue>();
+    auto app_infos = std::make_unique<base::ListValue>();
     for (extensions::ExtensionSet::const_iterator it = protecting_apps->begin();
          it != protecting_apps->end(); ++it) {
       std::unique_ptr<base::DictionaryValue> app_info(

@@ -45,9 +45,9 @@
 #include "ui/gfx/paint_vector_icon.h"
 #endif
 
-#if defined(USE_ASH)
-#include "ash/accelerators/accelerator_table.h"  // nogncheck
-#endif  // defined(USE_ASH)
+#if defined(OS_CHROMEOS)
+#include "ash/accelerators/accelerator_table.h"
+#endif
 
 namespace {
 
@@ -220,7 +220,7 @@ RecentTabsSubMenuModel::RecentTabsSubMenuModel(
   // Retrieve accelerator key for IDC_RESTORE_TAB now, because on ASH, it's not
   // defined in |accelerator_provider|, but in shell, so simply retrieve it now
   // for all ASH and non-ASH for use in |GetAcceleratorForCommandId|.
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   for (size_t i = 0; i < ash::kAcceleratorDataLength; ++i) {
     const ash::AcceleratorData& accel_data = ash::kAcceleratorData[i];
     if (accel_data.action == ash::RESTORE_TAB) {
@@ -234,7 +234,7 @@ RecentTabsSubMenuModel::RecentTabsSubMenuModel(
     accelerator_provider->GetAcceleratorForCommandId(
         IDC_RESTORE_TAB, &reopen_closed_tab_accelerator_);
   }
-#endif  // defined(USE_ASH)
+#endif  // defined(OS_CHROMEOS)
 
   if (accelerator_provider) {
     accelerator_provider->GetAcceleratorForCommandId(
@@ -464,6 +464,10 @@ void RecentTabsSubMenuModel::BuildLocalEntries() {
           break;
         }
         case sessions::TabRestoreService::WINDOW: {
+          // TODO(chrisha): Make this menu entry better. When windows contain a
+          // single tab, display that tab directly in the menu. Otherwise, offer
+          // a hover over or alternative mechanism for seeing which tabs were in
+          // the window.
           BuildLocalWindowItem(
               entry->id,
               static_cast<const sessions::TabRestoreService::Window&>(*entry)
@@ -584,24 +588,24 @@ void RecentTabsSubMenuModel::BuildOtherDevicesTabItem(
 
 void RecentTabsSubMenuModel::AddDeviceFavicon(
     int index_in_menu,
-    sync_sessions::SyncedSession::DeviceType device_type) {
+    sync_pb::SyncEnums::DeviceType device_type) {
 #if defined(OS_MACOSX)
   int favicon_id = -1;
   switch (device_type) {
-    case sync_sessions::SyncedSession::TYPE_PHONE:
+    case sync_pb::SyncEnums::TYPE_PHONE:
       favicon_id = IDR_PHONE_FAVICON;
       break;
 
-    case sync_sessions::SyncedSession::TYPE_TABLET:
+    case sync_pb::SyncEnums::TYPE_TABLET:
       favicon_id = IDR_TABLET_FAVICON;
       break;
 
-    case sync_sessions::SyncedSession::TYPE_CHROMEOS:
-    case sync_sessions::SyncedSession::TYPE_WIN:
-    case sync_sessions::SyncedSession::TYPE_MACOSX:
-    case sync_sessions::SyncedSession::TYPE_LINUX:
-    case sync_sessions::SyncedSession::TYPE_OTHER:
-    case sync_sessions::SyncedSession::TYPE_UNSET:
+    case sync_pb::SyncEnums::TYPE_CROS:
+    case sync_pb::SyncEnums::TYPE_WIN:
+    case sync_pb::SyncEnums::TYPE_MAC:
+    case sync_pb::SyncEnums::TYPE_LINUX:
+    case sync_pb::SyncEnums::TYPE_OTHER:
+    case sync_pb::SyncEnums::TYPE_UNSET:
       favicon_id = IDR_LAPTOP_FAVICON;
       break;
   }
@@ -611,20 +615,20 @@ void RecentTabsSubMenuModel::AddDeviceFavicon(
 #else
   const gfx::VectorIcon* favicon = nullptr;
   switch (device_type) {
-    case sync_sessions::SyncedSession::TYPE_PHONE:
+    case sync_pb::SyncEnums::TYPE_PHONE:
       favicon = &kSmartphoneIcon;
       break;
 
-    case sync_sessions::SyncedSession::TYPE_TABLET:
+    case sync_pb::SyncEnums::TYPE_TABLET:
       favicon = &kTabletIcon;
       break;
 
-    case sync_sessions::SyncedSession::TYPE_CHROMEOS:
-    case sync_sessions::SyncedSession::TYPE_WIN:
-    case sync_sessions::SyncedSession::TYPE_MACOSX:
-    case sync_sessions::SyncedSession::TYPE_LINUX:
-    case sync_sessions::SyncedSession::TYPE_OTHER:
-    case sync_sessions::SyncedSession::TYPE_UNSET:
+    case sync_pb::SyncEnums::TYPE_CROS:
+    case sync_pb::SyncEnums::TYPE_WIN:
+    case sync_pb::SyncEnums::TYPE_MAC:
+    case sync_pb::SyncEnums::TYPE_LINUX:
+    case sync_pb::SyncEnums::TYPE_OTHER:
+    case sync_pb::SyncEnums::TYPE_UNSET:
       favicon = &kLaptopIcon;
       break;
   }

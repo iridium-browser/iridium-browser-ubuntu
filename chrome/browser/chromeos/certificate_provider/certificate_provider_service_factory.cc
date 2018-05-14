@@ -11,7 +11,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/values.h"
@@ -28,7 +27,9 @@
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/common/extension.h"
 #include "net/cert/x509_certificate.h"
+#include "net/cert/x509_util.h"
 #include "net/ssl/ssl_private_key.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace chromeos {
 
@@ -50,9 +51,9 @@ class DefaultDelegate : public CertificateProviderService::Delegate,
   bool DispatchSignRequestToExtension(
       const std::string& extension_id,
       int request_id,
-      net::SSLPrivateKey::Hash hash,
+      uint16_t algorithm,
       const scoped_refptr<net::X509Certificate>& certificate,
-      const std::string& digest) override;
+      base::span<const uint8_t> digest) override;
 
   // extensions::ExtensionRegistryObserver:
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
@@ -103,9 +104,9 @@ void DefaultDelegate::BroadcastCertificateRequest(int request_id) {
 bool DefaultDelegate::DispatchSignRequestToExtension(
     const std::string& extension_id,
     int request_id,
-    net::SSLPrivateKey::Hash hash,
+    uint16_t algorithm,
     const scoped_refptr<net::X509Certificate>& certificate,
-    const std::string& digest) {
+    base::span<const uint8_t> digest) {
   const std::string event_name(api_cp::OnSignDigestRequested::kEventName);
   if (!event_router_->ExtensionHasEventListener(extension_id, event_name))
     return false;
@@ -113,30 +114,29 @@ bool DefaultDelegate::DispatchSignRequestToExtension(
   api_cp::SignRequest request;
   service_->pin_dialog_manager()->AddSignRequestId(extension_id, request_id);
   request.sign_request_id = request_id;
-  switch (hash) {
-    case net::SSLPrivateKey::Hash::MD5_SHA1:
+  switch (algorithm) {
+    case SSL_SIGN_RSA_PKCS1_MD5_SHA1:
       request.hash = api_cp::HASH_MD5_SHA1;
       break;
-    case net::SSLPrivateKey::Hash::SHA1:
+    case SSL_SIGN_RSA_PKCS1_SHA1:
       request.hash = api_cp::HASH_SHA1;
       break;
-    case net::SSLPrivateKey::Hash::SHA256:
+    case SSL_SIGN_RSA_PKCS1_SHA256:
       request.hash = api_cp::HASH_SHA256;
       break;
-    case net::SSLPrivateKey::Hash::SHA384:
+    case SSL_SIGN_RSA_PKCS1_SHA384:
       request.hash = api_cp::HASH_SHA384;
       break;
-    case net::SSLPrivateKey::Hash::SHA512:
+    case SSL_SIGN_RSA_PKCS1_SHA512:
       request.hash = api_cp::HASH_SHA512;
       break;
+    default:
+      LOG(ERROR) << "Unknown signature algorithm";
+      return false;
   }
   request.digest.assign(digest.begin(), digest.end());
-  std::string cert_der;
-  if (!net::X509Certificate::GetDEREncoded(certificate->os_cert_handle(),
-                                           &cert_der)) {
-    LOG(ERROR) << "Could not DER encode the certificate.";
-    return false;  // Behave as if the extension wasn't registered anymore.
-  }
+  base::StringPiece cert_der =
+      net::x509_util::CryptoBufferAsStringPiece(certificate->cert_buffer());
   request.certificate.assign(cert_der.begin(), cert_der.end());
 
   std::unique_ptr<base::ListValue> internal_args(new base::ListValue);
@@ -145,7 +145,7 @@ bool DefaultDelegate::DispatchSignRequestToExtension(
 
   event_router_->DispatchEventToExtension(
       extension_id,
-      base::MakeUnique<extensions::Event>(
+      std::make_unique<extensions::Event>(
           extensions::events::CERTIFICATEPROVIDER_ON_SIGN_DIGEST_REQUESTED,
           event_name, std::move(internal_args)));
   return true;
@@ -195,7 +195,7 @@ bool CertificateProviderServiceFactory::ServiceIsNULLWhileTesting() const {
 KeyedService* CertificateProviderServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   CertificateProviderService* const service = new CertificateProviderService();
-  service->SetDelegate(base::MakeUnique<DefaultDelegate>(
+  service->SetDelegate(std::make_unique<DefaultDelegate>(
       service,
       extensions::ExtensionRegistryFactory::GetForBrowserContext(context),
       extensions::EventRouterFactory::GetForBrowserContext(context)));

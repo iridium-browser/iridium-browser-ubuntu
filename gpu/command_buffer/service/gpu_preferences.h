@@ -6,12 +6,14 @@
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_PREFERENCES_H_
 
 #include <stddef.h>
+#include <vector>
 
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/gpu_export.h"
 #include "media/media_features.h"
+#include "ui/gfx/buffer_types.h"
 
 namespace gpu {
 
@@ -41,39 +43,44 @@ struct GPU_EXPORT GpuPreferences {
   // Run the GPU process as a thread in the browser process.
   bool in_process_gpu = false;
 
-  // Prioritizes the UI's command stream in the GPU process.
-  bool ui_prioritize_in_gpu_process = false;
-
-  // Enable the GPU process scheduler.
-  bool enable_gpu_scheduler = false;
-
   // Disables hardware acceleration of video decode, where available.
   bool disable_accelerated_video_decode = false;
 
-#if defined(OS_CHROMEOS)
-  // Disables VA-API accelerated video encode.
-  bool disable_vaapi_accelerated_video_encode = false;
-#endif
+  // Disables hardware acceleration of video decode, where available.
+  bool disable_accelerated_video_encode = false;
 
-#if BUILDFLAG(ENABLE_WEBRTC)
-  // Disables HW encode acceleration for WebRTC.
-  bool disable_web_rtc_hw_encoding = false;
-#endif
+  // Causes the GPU process to display a dialog on launch.
+  bool gpu_startup_dialog = false;
 
-#if defined(OS_WIN)
+  // Disable the thread that crashes the GPU process if it stops responding to
+  // messages.
+  bool disable_gpu_watchdog = false;
+
+  // Starts the GPU sandbox before creating a GL context.
+  bool gpu_sandbox_start_early = false;
+
   // Enables experimental hardware acceleration for VP8/VP9 video decoding.
-  // Bitmask - 0x1=Microsoft, 0x2=AMD, 0x03=Try all.
+  // Bitmask - 0x1=Microsoft, 0x2=AMD, 0x03=Try all. Windows only.
   VpxDecodeVendors enable_accelerated_vpx_decode = VPX_VENDOR_MICROSOFT;
 
-  // Enables using CODECAPI_AVLowLatencyMode.
+  // Enables using CODECAPI_AVLowLatencyMode. Windows only.
   bool enable_low_latency_dxva = true;
 
-  // Enables support for avoiding copying DXGI NV12 textures.
+  // Enables support for avoiding copying DXGI NV12 textures. Windows only.
   bool enable_zero_copy_dxgi_video = false;
 
-  // Enables support for outputting NV12 video frames.
+  // Enables support for outputting NV12 video frames. Windows only.
   bool enable_nv12_dxgi_video = false;
-#endif
+
+  // Enables MediaFoundationVideoEncoderAccelerator on Windows 7. Windows 7 does
+  // not support some of the attributes which may impact the performance or the
+  // quality of output. So this flag is disabled by default. Windows only.
+  bool enable_media_foundation_vea_on_windows7 = false;
+
+  // Disables the use of a 3D software rasterizer, for example, SwiftShader.
+  bool disable_software_rasterizer = false;
+
+  bool log_gpu_control_list_decisions = false;
 
   // ===================================
   // Settings from //gpu/command_buffer/service/gpu_switches.cc
@@ -86,9 +93,6 @@ struct GPU_EXPORT GpuPreferences {
 
   // Disable the GLSL translator.
   bool disable_glsl_translator = false;
-
-  // Disable workarounds for various GPU driver bugs.
-  bool disable_gpu_driver_bug_workarounds = false;
 
   // Turn off user-defined name hashing in shaders.
   bool disable_shader_name_hashing = false;
@@ -132,6 +136,9 @@ struct GPU_EXPORT GpuPreferences {
   // round intermediate values in ANGLE.
   bool emulate_shader_precision = false;
 
+  // Use a dedicated RasterDecoder instead of generic GLES2Decoder.
+  bool enable_raster_decoder = false;
+
   // ===================================
   // Settings from //ui/gl/gl_switches.h
 
@@ -141,12 +148,29 @@ struct GPU_EXPORT GpuPreferences {
   // Turns on calling TRACE for every GL call.
   bool enable_gpu_service_tracing = false;
 
-  // Enable OpenGL ES 3 APIs.
-  bool enable_es3_apis = true;
-
   // Use the Pass-through command decoder, skipping all validation and state
   // tracking.
   bool use_passthrough_cmd_decoder = false;
+
+  // Disable using a single multiplanar GpuMemoryBuffer to store biplanar
+  // VideoFrames (e.g. NV12), see https://crbug.com/791676.
+  bool disable_biplanar_gpu_memory_buffers_for_video_frames = false;
+
+  // List of texture usage & formats that require use of a platform specific
+  // texture target.
+  std::vector<gfx::BufferUsageAndFormat> texture_target_exception_list;
+
+  // ===================================
+  // Settings from //gpu/config/gpu_switches.h
+
+  // Disables workarounds for various GPU driver bugs.
+  bool disable_gpu_driver_bug_workarounds = false;
+
+  // Ignores GPU blacklist.
+  bool ignore_gpu_blacklist = false;
+
+  // Please update gpu_preferences_util_unittest.cc when making additions or
+  // changes to this struct.
 };
 
 }  // namespace gpu

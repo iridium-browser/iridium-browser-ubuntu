@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_manager_test_base.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -120,7 +121,7 @@ class PasswordGenerationInteractiveTest :
     content::NativeWebKeyboardEvent event(
         blink::WebKeyboardEvent::kRawKeyDown,
         blink::WebInputEvent::kNoModifiers,
-        blink::WebInputEvent::kTimeStampForTesting);
+        blink::WebInputEvent::GetStaticTimeStampForTests());
     event.windows_key_code = key;
     RenderViewHost()->GetWidget()->ForwardKeyboardEvent(event);
   }
@@ -195,8 +196,9 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   EXPECT_TRUE(GenerationPopupShowing());
 }
 
+// https://crbug.com/791389
 IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
-                       AutoSavingGeneratedPassword) {
+                       DISABLED_AutoSavingGeneratedPassword) {
   scoped_refptr<password_manager::TestPasswordStore> password_store =
       static_cast<password_manager::TestPasswordStore*>(
           PasswordStoreFactory::GetForProfile(
@@ -207,10 +209,19 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
   SendKeyToPopup(ui::VKEY_DOWN);
   SendKeyToPopup(ui::VKEY_RETURN);
 
-  // Change username and submit.
+  // Change username.
+  std::string focus("document.getElementById('username_field').focus();");
+  ASSERT_TRUE(content::ExecuteScript(WebContents(), focus));
+  content::SimulateKeyPress(WebContents(), ui::DomKey::FromCharacter('U'),
+                            ui::DomCode::US_U, ui::VKEY_U, false, false, false,
+                            false);
+  content::SimulateKeyPress(WebContents(), ui::DomKey::FromCharacter('N'),
+                            ui::DomCode::US_N, ui::VKEY_N, false, false, false,
+                            false);
+
+  // Submit form.
   NavigationObserver observer(WebContents());
   std::string submit_script =
-      "document.getElementById('username_field').value = 'something';"
       "document.getElementById('input_submit_button').click()";
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), submit_script));
   observer.Wait();
@@ -223,6 +234,6 @@ IN_PROC_BROWSER_TEST_F(PasswordGenerationInteractiveTest,
       password_store->stored_passwords();
   EXPECT_EQ(1u, stored_passwords.size());
   EXPECT_EQ(1u, stored_passwords.begin()->second.size());
-  EXPECT_EQ(base::UTF8ToUTF16("something"),
+  EXPECT_EQ(base::UTF8ToUTF16("UN"),
             (stored_passwords.begin()->second)[0].username_value);
 }

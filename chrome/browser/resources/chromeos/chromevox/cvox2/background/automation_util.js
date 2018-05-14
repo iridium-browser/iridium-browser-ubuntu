@@ -259,11 +259,10 @@ AutomationUtil.isDescendantOf = function(node, ancestor) {
  * with respect to their parents, the hit test considers all children before
  * their parents when looking for a matching node.
  * @param {AutomationNode} node Subtree to search.
- * @param {cvox.Point} point
+ * @param {constants.Point} point
  * @return {AutomationNode}
  */
 AutomationUtil.hitTest = function(node, point) {
-  var loc = node.location;
   var child = node.firstChild;
   while (child) {
     var hit = AutomationUtil.hitTest(child, point);
@@ -271,6 +270,12 @@ AutomationUtil.hitTest = function(node, point) {
       return hit;
     child = child.nextSibling;
   }
+
+  var loc = node.unclippedLocation;
+
+  // When |node| is partially or fully offscreen, try to find a better match.
+  if (loc.left < 0 || loc.top < 0)
+    return null;
 
   if (point.x <= (loc.left + loc.width) && point.x >= loc.left &&
       point.y <= (loc.top + loc.height) && point.y >= loc.top)
@@ -339,6 +344,51 @@ AutomationUtil.getEditableRoot = function(node) {
     testNode = testNode.parent;
   } while (testNode);
   return rootEditable;
+};
+
+/**
+ * Gets the last (DFS) ordered node matched by a predicate assuming a preference
+ * for ancestors.
+ *
+ * In detail:
+ * Given a DFS ordering on nodes a_1, ..., a_n, applying a predicate
+ * from 1 to n yields a different set of nodes from that when applying
+ * a predicate from n to 1 if we skip the remaining descendants of a
+ * successfully matched node when moving forward. To recover the same
+ * nodes when applying the predicate from n to 1, we make the
+ * observation that we want the shallowest node that matches the
+ * predicate in a successfully matched node's ancestry chain.
+ * @param {!AutomationNode} root Tree to search.
+ * @param {AutomationPredicate.Unary} pred A predicate to apply
+ * @return {AutomationNode}
+ */
+AutomationUtil.findLastNode = function(root, pred) {
+  var node = root;
+  while (node.lastChild)
+    node = node.lastChild;
+
+  do {
+    if (AutomationPredicate.shouldIgnoreNode(node))
+      continue;
+
+    // Get the shallowest node matching the predicate.
+    var walker = node;
+    var shallowest = null;
+    while (walker) {
+      if (walker == root)
+        break;
+
+      if (pred(walker) && !AutomationPredicate.shouldIgnoreNode(walker))
+        shallowest = walker;
+
+      walker = walker.parent;
+    }
+
+    if (shallowest)
+      return shallowest;
+  } while (node = AutomationUtil.findNextNode(node, Dir.BACKWARD, pred));
+
+  return null;
 };
 
 });  // goog.scope

@@ -24,10 +24,12 @@
  */
 
 #include "modules/webaudio/AudioNodeOutput.h"
+
 #include <memory>
+
+#include "base/memory/ptr_util.h"
 #include "modules/webaudio/AudioNodeInput.h"
 #include "modules/webaudio/BaseAudioContext.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Threading.h"
 
 namespace blink {
@@ -51,7 +53,7 @@ inline AudioNodeOutput::AudioNodeOutput(AudioHandler* handler,
 std::unique_ptr<AudioNodeOutput> AudioNodeOutput::Create(
     AudioHandler* handler,
     unsigned number_of_channels) {
-  return WTF::WrapUnique(new AudioNodeOutput(handler, number_of_channels));
+  return base::WrapUnique(new AudioNodeOutput(handler, number_of_channels));
 }
 
 void AudioNodeOutput::Dispose() {
@@ -135,7 +137,7 @@ AudioBus* AudioNodeOutput::Pull(AudioBus* in_place_bus,
       in_place_bus && in_place_bus->NumberOfChannels() == NumberOfChannels() &&
       (rendering_fan_out_count_ + rendering_param_fan_out_count_) == 1;
 
-  in_place_bus_ = is_in_place_ ? in_place_bus : 0;
+  in_place_bus_ = is_in_place_ ? in_place_bus : nullptr;
 
   Handler().ProcessIfNecessary(frames_to_process);
   return Bus();
@@ -143,7 +145,7 @@ AudioBus* AudioNodeOutput::Pull(AudioBus* in_place_bus,
 
 AudioBus* AudioNodeOutput::Bus() const {
   DCHECK(GetDeferredTaskHandler().IsAudioThread());
-  return is_in_place_ ? in_place_bus_.Get() : internal_bus_.Get();
+  return is_in_place_ ? in_place_bus_.get() : internal_bus_.get();
 }
 
 unsigned AudioNodeOutput::FanOutCount() {

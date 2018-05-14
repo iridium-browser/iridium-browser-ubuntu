@@ -44,7 +44,7 @@ const char kSwitchRequestParam[] = "test-request";
 // Disables pings. Pings are the requests sent to the update server that report
 // the success or the failure of component install or update attempts.
 #if 0
-extern const char kSwitchDisablePings[] = "disable-pings";
+const char kSwitchDisablePings[] = "disable-pings";
 #endif
 
 // Sets the URL for updates.
@@ -83,12 +83,9 @@ std::string GetSwitchArgument(const std::vector<std::string>& vec,
 
 }  // namespace
 
-ConfiguratorImpl::ConfiguratorImpl(
-    const base::CommandLine* cmdline,
-    net::URLRequestContextGetter* url_request_getter,
-    bool require_encryption)
-    : url_request_getter_(url_request_getter),
-      fast_update_(false),
+ConfiguratorImpl::ConfiguratorImpl(const base::CommandLine* cmdline,
+                                   bool require_encryption)
+    : fast_update_(false),
       pings_enabled_(false),
       deltas_enabled_(false),
       background_downloads_enabled_(false),
@@ -177,10 +174,6 @@ std::string ConfiguratorImpl::ExtraRequestParams() const {
 
 std::string ConfiguratorImpl::GetDownloadPreference() const {
   return std::string();
-}
-
-net::URLRequestContextGetter* ConfiguratorImpl::RequestContext() const {
-  return url_request_getter_;
 }
 
 bool ConfiguratorImpl::EnabledDeltas() const {

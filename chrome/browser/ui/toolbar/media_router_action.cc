@@ -39,7 +39,7 @@ media_router::MediaRouter* GetMediaRouter(Browser* browser) {
 
 MediaRouterAction::MediaRouterAction(Browser* browser,
                                      ToolbarActionsBar* toolbar_actions_bar)
-    : media_router::IssuesObserver(GetMediaRouter(browser)),
+    : media_router::IssuesObserver(GetMediaRouter(browser)->GetIssueManager()),
       media_router::MediaRoutesObserver(GetMediaRouter(browser)),
       current_icon_(&vector_icons::kMediaRouterIdleIcon),
       has_local_display_route_(false),
@@ -177,7 +177,7 @@ bool MediaRouterAction::DisabledClickOpensMenu() const {
 }
 
 void MediaRouterAction::OnIssue(const media_router::Issue& issue) {
-  current_issue_ = base::MakeUnique<media_router::IssueInfo>(issue.info());
+  current_issue_ = std::make_unique<media_router::IssueInfo>(issue.info());
   MaybeUpdateIcon();
 }
 

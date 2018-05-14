@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -60,6 +61,8 @@ void ConstructResponse(const char* request_data,
     response.mutable_policy_response()->add_response();
   } else if (request.has_auto_enrollment_request()) {
     response.mutable_auto_enrollment_response();
+  } else if (request.has_app_install_report_request()) {
+    response.mutable_app_install_report_response();
   } else {
     FAIL() << "Failed to parse request.";
   }
@@ -127,11 +130,11 @@ class DeviceManagementServiceIntegrationTest
 
   void PerformRegistration() {
     ExpectRequest();
+    base::RunLoop run_loop;
     EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
         .WillOnce(DoAll(
             Invoke(this, &DeviceManagementServiceIntegrationTest::RecordToken),
-            InvokeWithoutArgs(base::MessageLoop::current(),
-                              &base::MessageLoop::QuitWhenIdle)));
+            InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle)));
     std::unique_ptr<DeviceManagementRequestJob> job(
         service_->CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
                             g_browser_process->system_request_context()));
@@ -141,7 +144,7 @@ class DeviceManagementServiceIntegrationTest
     job->GetRequest()->mutable_register_request();
     job->Start(base::Bind(&DeviceManagementServiceIntegrationTest::OnJobDone,
                           base::Unretained(this)));
-    base::RunLoop().Run();
+    run_loop.Run();
   }
 
   void SetUpOnMainThread() override {
@@ -187,11 +190,11 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest,
   PerformRegistration();
 
   ExpectRequest();
+  base::RunLoop run_loop;
   EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
       .WillOnce(DoAll(
           Invoke(this, &DeviceManagementServiceIntegrationTest::RecordAuthCode),
-          InvokeWithoutArgs(base::MessageLoop::current(),
-                            &base::MessageLoop::QuitWhenIdle)));
+          InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle)));
   std::unique_ptr<DeviceManagementRequestJob> job(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_API_AUTH_CODE_FETCH,
                           g_browser_process->system_request_context()));
@@ -203,7 +206,7 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest,
   request->set_oauth2_client_id("oauth2ClientId4Test");
   job->Start(base::Bind(&DeviceManagementServiceIntegrationTest::OnJobDone,
                         base::Unretained(this)));
-  base::RunLoop().Run();
+  run_loop.Run();
   ASSERT_EQ("fake_auth_code", robot_auth_code_);
 }
 
@@ -211,9 +214,9 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, PolicyFetch) {
   PerformRegistration();
 
   ExpectRequest();
+  base::RunLoop run_loop;
   EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
-      .WillOnce(InvokeWithoutArgs(base::MessageLoop::current(),
-                                  &base::MessageLoop::QuitWhenIdle));
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle));
   std::unique_ptr<DeviceManagementRequestJob> job(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
                           g_browser_process->system_request_context()));
@@ -224,16 +227,16 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, PolicyFetch) {
   request->add_request()->set_policy_type(dm_protocol::kChromeUserPolicyType);
   job->Start(base::Bind(&DeviceManagementServiceIntegrationTest::OnJobDone,
                         base::Unretained(this)));
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, Unregistration) {
   PerformRegistration();
 
   ExpectRequest();
+  base::RunLoop run_loop;
   EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
-      .WillOnce(InvokeWithoutArgs(base::MessageLoop::current(),
-                                  &base::MessageLoop::QuitWhenIdle));
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle));
   std::unique_ptr<DeviceManagementRequestJob> job(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION,
                           g_browser_process->system_request_context()));
@@ -242,14 +245,14 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, Unregistration) {
   job->GetRequest()->mutable_unregister_request();
   job->Start(base::Bind(&DeviceManagementServiceIntegrationTest::OnJobDone,
                         base::Unretained(this)));
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, AutoEnrollment) {
   ExpectRequest();
+  base::RunLoop run_loop;
   EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
-      .WillOnce(InvokeWithoutArgs(base::MessageLoop::current(),
-                                  &base::MessageLoop::QuitWhenIdle));
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle));
   std::unique_ptr<DeviceManagementRequestJob> job(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_AUTO_ENROLLMENT,
                           g_browser_process->system_request_context()));
@@ -258,7 +261,27 @@ IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest, AutoEnrollment) {
   job->GetRequest()->mutable_auto_enrollment_request()->set_modulus(1);
   job->Start(base::Bind(&DeviceManagementServiceIntegrationTest::OnJobDone,
                         base::Unretained(this)));
-  base::RunLoop().Run();
+  run_loop.Run();
+}
+
+IN_PROC_BROWSER_TEST_P(DeviceManagementServiceIntegrationTest,
+                       AppInstallReport) {
+  PerformRegistration();
+
+  ExpectRequest();
+  base::RunLoop run_loop;
+  EXPECT_CALL(*this, OnJobDone(DM_STATUS_SUCCESS, _, _))
+      .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::QuitWhenIdle));
+  std::unique_ptr<DeviceManagementRequestJob> job(service_->CreateJob(
+      DeviceManagementRequestJob::TYPE_UPLOAD_APP_INSTALL_REPORT,
+      g_browser_process->system_request_context()));
+  job->SetDMToken(token_);
+  job->SetClientID("testid");
+  job->GetRequest()->mutable_app_install_report_request();
+  job->Start(base::AdaptCallbackForRepeating(
+      base::BindOnce(&DeviceManagementServiceIntegrationTest::OnJobDone,
+                     base::Unretained(this))));
+  run_loop.Run();
 }
 
 INSTANTIATE_TEST_CASE_P(

@@ -31,7 +31,7 @@
 
 namespace blink {
 
-NodeIterator::NodePointer::NodePointer() {}
+NodeIterator::NodePointer::NodePointer() = default;
 
 NodeIterator::NodePointer::NodePointer(Node* n, bool b)
     : node(n), is_pointer_before_node(b) {}
@@ -65,7 +65,7 @@ bool NodeIterator::NodePointer::MoveToPrevious(Node* root) {
 NodeIterator::NodeIterator(Node* root_node,
                            unsigned what_to_show,
                            V8NodeFilterCondition* filter)
-    : NodeIteratorBase(this, root_node, what_to_show, filter),
+    : NodeIteratorBase(root_node, what_to_show, filter),
       reference_node_(root(), true) {
   // If NodeIterator target is Attr node, don't subscribe for nodeWillBeRemoved,
   // as it would never have child nodes.
@@ -198,13 +198,15 @@ void NodeIterator::UpdateForNodeRemoval(Node& removed_node,
   }
 }
 
-DEFINE_TRACE(NodeIterator) {
+void NodeIterator::Trace(blink::Visitor* visitor) {
   visitor->Trace(reference_node_);
   visitor->Trace(candidate_node_);
+  ScriptWrappable::Trace(visitor);
   NodeIteratorBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(NodeIterator) {
+void NodeIterator::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
+  ScriptWrappable::TraceWrappers(visitor);
   NodeIteratorBase::TraceWrappers(visitor);
 }
 

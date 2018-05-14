@@ -31,11 +31,12 @@
 #include "core/dom/PresentationAttributeStyle.h"
 
 #include <algorithm>
-#include "core/css/StylePropertySet.h"
+
+#include "base/macros.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Element.h"
-#include "core/html/HTMLInputElement.h"
-#include "platform/Timer.h"
+#include "core/html/forms/HTMLInputElement.h"
 #include "platform/scheduler/child/web_scheduler.h"
 #include "platform/wtf/HashFunctions.h"
 #include "platform/wtf/HashMap.h"
@@ -63,10 +64,10 @@ static bool operator!=(const PresentationAttributeCacheKey& a,
 struct PresentationAttributeCacheEntry final
     : public GarbageCollectedFinalized<PresentationAttributeCacheEntry> {
  public:
-  DEFINE_INLINE_TRACE() { visitor->Trace(value); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(value); }
 
   PresentationAttributeCacheKey key;
-  Member<StylePropertySet> value;
+  Member<CSSPropertyValueSet> value;
 };
 
 using PresentationAttributeCache =
@@ -78,52 +79,6 @@ static PresentationAttributeCache& GetPresentationAttributeCache() {
                       (new PresentationAttributeCache));
   return cache;
 }
-
-// This is a singleton (held via DEFINE_STATIC_LOCAL).
-// Thus it is appropriate to use the main thread's timer task runner, rather
-// than one associated with a particular frame.
-class PresentationAttributeCacheCleaner {
-  WTF_MAKE_NONCOPYABLE(PresentationAttributeCacheCleaner);
-  USING_FAST_MALLOC(PresentationAttributeCacheCleaner);
-
- public:
-  PresentationAttributeCacheCleaner()
-      : hit_count_(0),
-        clean_timer_(
-            Platform::Current()->MainThread()->Scheduler()->TimerTaskRunner(),
-            this,
-            &PresentationAttributeCacheCleaner::CleanCache) {}
-
-  void DidHitPresentationAttributeCache() {
-    if (GetPresentationAttributeCache().size() <
-        kMinimumPresentationAttributeCacheSizeForCleaning)
-      return;
-
-    hit_count_++;
-
-    if (!clean_timer_.IsActive())
-      clean_timer_.StartOneShot(kPresentationAttributeCacheCleanTimeInSeconds,
-                                BLINK_FROM_HERE);
-  }
-
- private:
-  static const unsigned kPresentationAttributeCacheCleanTimeInSeconds = 60;
-  static const unsigned kMinimumPresentationAttributeCacheSizeForCleaning = 100;
-  static const unsigned kMinimumPresentationAttributeCacheHitCountPerMinute =
-      (100 * kPresentationAttributeCacheCleanTimeInSeconds) / 60;
-
-  void CleanCache(TimerBase* timer) {
-    DCHECK_EQ(timer, &clean_timer_);
-    unsigned hit_count = hit_count_;
-    hit_count_ = 0;
-    if (hit_count > kMinimumPresentationAttributeCacheHitCountPerMinute)
-      return;
-    GetPresentationAttributeCache().clear();
-  }
-
-  unsigned hit_count_;
-  TaskRunnerTimer<PresentationAttributeCacheCleaner> clean_timer_;
-};
 
 static bool AttributeNameSort(const std::pair<StringImpl*, AtomicString>& p1,
                               const std::pair<StringImpl*, AtomicString>& p2) {
@@ -140,7 +95,7 @@ static void MakePresentationAttributeCacheKey(
     return;
   // Interpretation of the size attributes on <input> depends on the type
   // attribute.
-  if (isHTMLInputElement(element))
+  if (IsHTMLInputElement(element))
     return;
   AttributeCollection attributes = element.AttributesWithoutUpdate();
   for (const Attribute& attr : attributes) {
@@ -175,9 +130,7 @@ static unsigned ComputePresentationAttributeCacheHash(
   return WTF::HashInts(key.tag_name->ExistingHash(), attribute_hash);
 }
 
-StylePropertySet* ComputePresentationAttributeStyle(Element& element) {
-  DEFINE_STATIC_LOCAL(PresentationAttributeCacheCleaner, cache_cleaner, ());
-
+CSSPropertyValueSet* ComputePresentationAttributeStyle(Element& element) {
   DCHECK(element.IsStyledElement());
 
   PresentationAttributeCacheKey cache_key;
@@ -186,6 +139,7 @@ StylePropertySet* ComputePresentationAttributeStyle(Element& element) {
   unsigned cache_hash = ComputePresentationAttributeCacheHash(cache_key);
 
   PresentationAttributeCache::ValueType* cache_value;
+
   if (cache_hash) {
     cache_value = GetPresentationAttributeCache()
                       .insert(cache_hash, nullptr)
@@ -196,20 +150,35 @@ StylePropertySet* ComputePresentationAttributeStyle(Element& element) {
     cache_value = nullptr;
   }
 
-  StylePropertySet* style = nullptr;
+  // Keep the entry value of |cache_value| here in order to assure that the
+  // value lives when it is used. Without this keeping, calling
+  // |GetPresentationAttributeCache().clear()| destroys |cache_value->value| and
+  // causes use-after-poison (crbug.com/810368).
+  PresentationAttributeCacheEntry* entry = nullptr;
+  if (cache_value)
+    entry = cache_value->value;
+
+  CSSPropertyValueSet* style = nullptr;
   if (cache_hash && cache_value->value) {
     style = cache_value->value->value;
-    cache_cleaner.DidHitPresentationAttributeCache();
+
+    static const unsigned kMinimumPresentationAttributeCacheSizeForCleaning =
+        100;
+    if (GetPresentationAttributeCache().size() >=
+        kMinimumPresentationAttributeCacheSizeForCleaning) {
+      GetPresentationAttributeCache().clear();
+    }
   } else {
-    style = MutableStylePropertySet::Create(
+    style = MutableCSSPropertyValueSet::Create(
         element.IsSVGElement() ? kSVGAttributeMode : kHTMLStandardMode);
     AttributeCollection attributes = element.AttributesWithoutUpdate();
-    for (const Attribute& attr : attributes)
+    for (const Attribute& attr : attributes) {
       element.CollectStyleForPresentationAttribute(
-          attr.GetName(), attr.Value(), ToMutableStylePropertySet(style));
+          attr.GetName(), attr.Value(), ToMutableCSSPropertyValueSet(style));
+    }
   }
 
-  if (!cache_hash || cache_value->value)
+  if (!cache_hash || entry)
     return style;
 
   PresentationAttributeCacheEntry* new_entry =

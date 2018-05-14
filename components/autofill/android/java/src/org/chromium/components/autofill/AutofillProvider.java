@@ -7,6 +7,7 @@ package org.chromium.components.autofill;
 import android.util.SparseArray;
 import android.view.ViewGroup;
 import android.view.ViewStructure;
+import android.view.autofill.AutofillValue;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
@@ -42,7 +43,7 @@ public abstract class AutofillProvider {
      * @param values the array of autofill values, the key is virtual id of form
      *            field.
      */
-    public abstract void autofill(final SparseArray<Object> values);
+    public abstract void autofill(final SparseArray<AutofillValue> values);
 
     /**
      * Invoked when autofill service needs the form structure.
@@ -55,13 +56,9 @@ public abstract class AutofillProvider {
     /**
      * @return whether query autofill suggestion.
      */
-    // TODO(michaelbai): Change it to abstract after DEP roll.
-    public boolean shouldQueryAutofillSuggestion() {
-        return false;
-    }
+    public abstract boolean shouldQueryAutofillSuggestion();
 
-    // TODO(michaelbai): Change it to abstract after DEP roll.
-    public void queryAutofillSuggestion() {}
+    public abstract void queryAutofillSuggestion();
 
     /**
      * Invoked when filling form is need. AutofillProvider shall ask autofill
@@ -79,7 +76,7 @@ public abstract class AutofillProvider {
             FormData formData, int focus, float x, float y, float width, float height);
 
     /**
-     * Invoked when text field is changed.
+     * Invoked when text field's value is changed.
      *
      * @param index index of field in current form.
      * @param x the boundary of focus field.
@@ -93,11 +90,26 @@ public abstract class AutofillProvider {
             int index, float x, float y, float width, float height);
 
     /**
-     * Invoked when current form will be submitted.
+     * Invoked when text field is scrolled.
+     *
+     * @param index index of field in current form.
+     * @param x the boundary of focus field.
+     * @param y the boundary of focus field.
+     * @param width the boundary of focus field.
+     * @param height the boundary of focus field.
      *
      */
     @CalledByNative
-    protected abstract void onWillSubmitForm();
+    protected abstract void onTextFieldDidScroll(
+            int index, float x, float y, float width, float height);
+
+    /**
+     * Invoked when current form will be submitted.
+     * @param submissionSource the submission source, could be any member defined in
+     * SubmissionSource.java
+     */
+    @CalledByNative
+    protected abstract void onFormSubmitted(int submissionSource);
 
     /**
      * Invoked when focus field changed.

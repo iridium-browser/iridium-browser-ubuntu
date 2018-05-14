@@ -6,9 +6,8 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/sequenced_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
 #include "components/policy/core/common/cloud/mock_user_cloud_policy_store.h"
 #include "components/policy/core/common/external_data_fetcher.h"
@@ -31,12 +30,12 @@ namespace {
 
 class UserCloudPolicyManagerTest : public testing::Test {
  protected:
-  UserCloudPolicyManagerTest() : store_(NULL) {}
+  UserCloudPolicyManagerTest() : store_(nullptr) {}
 
   void SetUp() override {
     // Set up a policy map for testing.
     policy_map_.Set("key", POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                    POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>("value"),
+                    POLICY_SOURCE_CLOUD, std::make_unique<base::Value>("value"),
                     nullptr);
     expected_bundle_.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .CopyFrom(policy_map_);
@@ -52,17 +51,17 @@ class UserCloudPolicyManagerTest : public testing::Test {
   void CreateManager() {
     store_ = new MockUserCloudPolicyStore();
     EXPECT_CALL(*store_, Load());
+    const auto task_runner = scoped_task_environment_.GetMainThreadTaskRunner();
     manager_.reset(new UserCloudPolicyManager(
         std::unique_ptr<UserCloudPolicyStore>(store_), base::FilePath(),
-        std::unique_ptr<CloudExternalDataManager>(), loop_.task_runner(),
-        loop_.task_runner(), loop_.task_runner()));
+        std::unique_ptr<CloudExternalDataManager>(), task_runner, task_runner));
     manager_->Init(&schema_registry_);
     manager_->AddObserver(&observer_);
     Mock::VerifyAndClearExpectations(store_);
   }
 
-  // Required by the refresh scheduler that's created by the manager.
-  base::MessageLoop loop_;
+  // Needs to be the first member.
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
   // Convenience policy objects.
   PolicyMap policy_map_;

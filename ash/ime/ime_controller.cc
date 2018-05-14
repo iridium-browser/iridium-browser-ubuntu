@@ -15,6 +15,14 @@ ImeController::ImeController() = default;
 
 ImeController::~ImeController() = default;
 
+void ImeController::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void ImeController::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
 void ImeController::BindRequest(mojom::ImeControllerRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
@@ -121,8 +129,35 @@ void ImeController::ShowImeMenuOnShelf(bool show) {
   Shell::Get()->system_tray_notifier()->NotifyRefreshIMEMenu(show);
 }
 
+void ImeController::SetCapsLockState(bool caps_enabled) {
+  is_caps_lock_enabled_ = caps_enabled;
+
+  for (ImeController::Observer& observer : observers_)
+    observer.OnCapsLockChanged(caps_enabled);
+}
+
+void ImeController::SetExtraInputOptionsEnabledState(
+    bool is_extra_input_options_enabled,
+    bool is_emoji_enabled,
+    bool is_handwriting_enabled,
+    bool is_voice_enabled) {
+  is_extra_input_options_enabled_ = is_extra_input_options_enabled;
+  is_emoji_enabled_ = is_emoji_enabled;
+  is_handwriting_enabled_ = is_handwriting_enabled;
+  is_voice_enabled_ = is_voice_enabled;
+}
+
+void ImeController::SetCapsLockFromTray(bool caps_enabled) {
+  if (client_)
+    client_->SetCapsLockFromTray(caps_enabled);
+}
+
 void ImeController::FlushMojoForTesting() {
   client_.FlushForTesting();
+}
+
+bool ImeController::IsCapsLockEnabled() const {
+  return is_caps_lock_enabled_;
 }
 
 std::vector<std::string> ImeController::GetCandidateImesForAccelerator(

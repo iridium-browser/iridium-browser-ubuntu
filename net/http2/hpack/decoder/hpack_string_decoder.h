@@ -32,11 +32,6 @@ namespace net {
 // Resume() when more input is available, repeating until kDecodeInProgress is
 // not returned. If kDecodeDone or kDecodeError is returned, then Resume() must
 // not be called until Start() has been called to start decoding a new string.
-//
-// There are 3 variants of Start in this class, participants in a performance
-// experiment. Perflab experiments show it is generally fastest to call
-// StartSpecialCaseShort rather than StartOnly (~9% slower) or
-// StartAndDecodeLength (~10% slower).
 class HTTP2_EXPORT_PRIVATE HpackStringDecoder {
  public:
   enum StringDecoderState {
@@ -45,31 +40,8 @@ class HTTP2_EXPORT_PRIVATE HpackStringDecoder {
     kResumeDecodingLength,
   };
 
-  // TODO(jamessynge): Get rid of all but one of the Start and Resume methods
-  // after all of the HPACK decoder is checked in and has been perf tested.
   template <class Listener>
   DecodeStatus Start(DecodeBuffer* db, Listener* cb) {
-    return StartSpecialCaseShort(db, cb);
-  }
-
-  template <class Listener>
-  DecodeStatus StartOnly(DecodeBuffer* db, Listener* cb) {
-    state_ = kStartDecodingLength;
-    return Resume(db, cb);
-  }
-
-  template <class Listener>
-  DecodeStatus StartAndDecodeLength(DecodeBuffer* db, Listener* cb) {
-    DecodeStatus status;
-    if (StartDecodingLength(db, cb, &status)) {
-      state_ = kDecodingString;
-      return DecodeString(db, cb);
-    }
-    return status;
-  }
-
-  template <class Listener>
-  DecodeStatus StartSpecialCaseShort(DecodeBuffer* db, Listener* cb) {
     // Fast decode path is used if the string is under 127 bytes and the
     // entire length of the string is in the decode buffer. More than 83% of
     // string lengths are encoded in just one byte.
@@ -113,17 +85,16 @@ class HTTP2_EXPORT_PRIVATE HpackStringDecoder {
             // The length is split across decode buffers.
             return status;
           }
-        // We've finished decoding the length, which spanned one or more
-        // bytes. Approximately 17% of strings have a length that is greater
-        // than 126 bytes, and thus the length is encoded in more than one
-        // byte, and so doesn't get the benefit of the optimization in
-        // Start() for single byte lengths. But, we still expect that most
-        // of such strings will be contained entirely in a single decode
-        // buffer, and hence this fall through skips another trip through the
-        // switch above and more importantly skips setting the state_ variable
-        // again in those cases where we don't need it.
-
-        // FALLTHROUGH_INTENDED
+          // We've finished decoding the length, which spanned one or more
+          // bytes. Approximately 17% of strings have a length that is greater
+          // than 126 bytes, and thus the length is encoded in more than one
+          // byte, and so doesn't get the benefit of the optimization in
+          // Start() for single byte lengths. But, we still expect that most
+          // of such strings will be contained entirely in a single decode
+          // buffer, and hence this fall through skips another trip through the
+          // switch above and more importantly skips setting the state_ variable
+          // again in those cases where we don't need it.
+          FALLTHROUGH;
 
         case kDecodingString:
           DVLOG(2) << "kDecodingString: db->Remaining=" << db->Remaining()
@@ -198,7 +169,6 @@ class HTTP2_EXPORT_PRIVATE HpackStringDecoder {
     remaining_ = length_decoder_.value();
     // Make callback so consumer knows what is coming.
     cb->OnStringStart(huffman_encoded_, remaining_);
-    return;
   }
 
   // Passes the available portion of the string to the listener, and signals

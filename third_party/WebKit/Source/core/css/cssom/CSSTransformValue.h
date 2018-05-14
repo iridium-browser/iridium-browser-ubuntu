@@ -5,6 +5,7 @@
 #ifndef CSSTransformValue_h
 #define CSSTransformValue_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/css/cssom/CSSStyleValue.h"
 #include "core/css/cssom/CSSTransformComponent.h"
@@ -16,45 +17,48 @@ namespace blink {
 class DOMMatrix;
 
 class CORE_EXPORT CSSTransformValue final : public CSSStyleValue {
-  WTF_MAKE_NONCOPYABLE(CSSTransformValue);
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static CSSTransformValue* Create() { return new CSSTransformValue(); }
-
   static CSSTransformValue* Create(
-      const HeapVector<Member<CSSTransformComponent>>& transform_components) {
-    return new CSSTransformValue(transform_components);
-  }
+      const HeapVector<Member<CSSTransformComponent>>& transform_components,
+      ExceptionState&);
+
+  // Blink-internal constructor
+  static CSSTransformValue* Create(
+      const HeapVector<Member<CSSTransformComponent>>& transform_components);
 
   static CSSTransformValue* FromCSSValue(const CSSValue&);
 
   bool is2D() const;
 
-  DOMMatrix* toMatrix() const;
+  DOMMatrix* toMatrix(ExceptionState&) const;
 
   const CSSValue* ToCSSValue() const override;
 
   StyleValueType GetType() const override { return kTransformType; }
 
-  CSSTransformComponent* componentAtIndex(uint32_t index) {
+  CSSTransformComponent* AnonymousIndexedGetter(uint32_t index) {
     return transform_components_.at(index);
   }
+  bool AnonymousIndexedSetter(unsigned,
+                              const Member<CSSTransformComponent>,
+                              ExceptionState&);
 
   size_t length() const { return transform_components_.size(); }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(transform_components_);
     CSSStyleValue::Trace(visitor);
   }
 
  private:
-  CSSTransformValue() {}
   CSSTransformValue(
       const HeapVector<Member<CSSTransformComponent>>& transform_components)
       : CSSStyleValue(), transform_components_(transform_components) {}
 
   HeapVector<Member<CSSTransformComponent>> transform_components_;
+  DISALLOW_COPY_AND_ASSIGN(CSSTransformValue);
 };
 
 }  // namespace blink

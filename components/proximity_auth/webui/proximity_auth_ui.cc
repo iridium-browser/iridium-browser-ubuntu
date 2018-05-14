@@ -4,7 +4,8 @@
 
 #include "components/proximity_auth/webui/proximity_auth_ui.h"
 
-#include "base/memory/ptr_util.h"
+#include <memory>
+
 #include "components/grit/components_resources.h"
 #include "components/proximity_auth/webui/proximity_auth_webui_handler.h"
 #include "components/proximity_auth/webui/url_constants.h"
@@ -12,7 +13,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "ui/resources/grit/webui_resources.h"
 
 namespace proximity_auth {
 
@@ -39,7 +39,7 @@ ProximityAuthUI::ProximityAuthUI(content::WebUI* web_ui,
       web_ui->GetWebContents()->GetBrowserContext();
   content::WebUIDataSource::Add(browser_context, source);
   web_ui->AddMessageHandler(
-      base::MakeUnique<ProximityAuthWebUIHandler>(delegate));
+      std::make_unique<ProximityAuthWebUIHandler>(delegate));
 }
 
 ProximityAuthUI::~ProximityAuthUI() {

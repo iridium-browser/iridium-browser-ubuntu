@@ -24,7 +24,7 @@ FakeBluetoothInputClient::Properties::Properties(
           bluetooth_input::kBluetoothInputInterface,
           callback) {}
 
-FakeBluetoothInputClient::Properties::~Properties() {}
+FakeBluetoothInputClient::Properties::~Properties() = default;
 
 void FakeBluetoothInputClient::Properties::Get(
     dbus::PropertyBase* property,
@@ -44,9 +44,9 @@ void FakeBluetoothInputClient::Properties::Set(
   callback.Run(false);
 }
 
-FakeBluetoothInputClient::FakeBluetoothInputClient() {}
+FakeBluetoothInputClient::FakeBluetoothInputClient() = default;
 
-FakeBluetoothInputClient::~FakeBluetoothInputClient() {}
+FakeBluetoothInputClient::~FakeBluetoothInputClient() = default;
 
 void FakeBluetoothInputClient::Init(dbus::Bus* bus) {}
 
@@ -71,7 +71,7 @@ void FakeBluetoothInputClient::AddInputDevice(
   if (properties_map_.find(object_path) != properties_map_.end())
     return;
 
-  std::unique_ptr<Properties> properties = base::MakeUnique<Properties>(
+  std::unique_ptr<Properties> properties = std::make_unique<Properties>(
       base::Bind(&FakeBluetoothInputClient::OnPropertyChanged,
                  base::Unretained(this), object_path));
 

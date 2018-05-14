@@ -8,10 +8,15 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
-#include "services/resource_coordinator/public/cpp/resource_coordinator_interface.h"
-#include "services/resource_coordinator/public/interfaces/service_callbacks.mojom.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "url/gurl.h"
+
+namespace resource_coordinator {
+class PageResourceCoordinator;
+}  // namespace resource_coordinator
 
 class ResourceCoordinatorWebContentsObserver
     : public content::WebContentsObserver,
@@ -21,33 +26,49 @@ class ResourceCoordinatorWebContentsObserver
   ~ResourceCoordinatorWebContentsObserver() override;
 
   static bool ukm_recorder_initialized;
+
   static bool IsEnabled();
 
-  resource_coordinator::ResourceCoordinatorInterface*
-  tab_resource_coordinator() {
-    return tab_resource_coordinator_.get();
+  resource_coordinator::PageResourceCoordinator* page_resource_coordinator() {
+    return page_resource_coordinator_.get();
   }
 
   // WebContentsObserver implementation.
-  void WasShown() override;
-  void WasHidden() override;
+  void DidStartLoading() override;
+  void DidStopLoading() override;
+  void OnVisibilityChanged(content::Visibility visibility) override;
+  void WebContentsDestroyed() override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
+  void TitleWasSet(content::NavigationEntry* entry) override;
+  void DidUpdateFaviconURL(
+      const std::vector<content::FaviconURL>& candidates) override;
 
-  void EnsureUkmRecorderInterface();
-  void MaybeSetUkmRecorderInterface(bool ukm_recorder_already_initialized);
+  void UpdateUkmRecorder(int64_t navigation_id);
+  ukm::SourceId ukm_source_id() const { return ukm_source_id_; }
+  void SetUkmSourceIdForTest(ukm::SourceId id) { ukm_source_id_ = id; }
 
  private:
   explicit ResourceCoordinatorWebContentsObserver(
       content::WebContents* web_contents);
+  // Favicon, title are set the first time a page is loaded, thus we want to
+  // ignore the very first update, and reset the flags when a non same-document
+  // navigation finished in main frame.
+  void ResetFlag();
 
   friend class content::WebContentsUserData<
       ResourceCoordinatorWebContentsObserver>;
 
-  std::unique_ptr<resource_coordinator::ResourceCoordinatorInterface>
-      tab_resource_coordinator_;
+  std::unique_ptr<resource_coordinator::PageResourceCoordinator>
+      page_resource_coordinator_;
+  ukm::SourceId ukm_source_id_ = ukm::kInvalidSourceId;
 
-  resource_coordinator::mojom::ServiceCallbacksPtr service_callbacks_;
+  // Favicon and title are set when a page is loaded, we only want to send
+  // signals to GRC about title and favicon update from the previous title and
+  // favicon, thus we want to ignore the very first update since it is always
+  // supposed to happen.
+  bool first_time_favicon_set_ = false;
+  bool first_time_title_set_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceCoordinatorWebContentsObserver);
 };

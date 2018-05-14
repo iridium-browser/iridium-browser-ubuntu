@@ -10,11 +10,10 @@
 
 Config::Config(const Settings* settings,
                const Label& label,
-               const InputFileSet& input_files)
-    : Item(settings, label, input_files), resolved_(false) {}
+               const std::set<SourceFile>& build_dependency_files)
+    : Item(settings, label, build_dependency_files), resolved_(false) {}
 
-Config::~Config() {
-}
+Config::~Config() = default;
 
 Config* Config::AsConfig() {
   return this;

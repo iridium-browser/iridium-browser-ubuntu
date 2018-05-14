@@ -95,8 +95,7 @@ class MockIDBBackingStore : public IndexedDBFakeBackingStore {
 // Base class for our test fixtures.
 class IndexedDBActiveBlobRegistryTest : public testing::Test {
  public:
-  typedef storage::ShareableFileReference::FinalReleaseCallback
-      ReleaseCallback;
+  typedef IndexedDBBlobInfo::ReleaseCallback ReleaseCallback;
 
   static const int64_t kDatabaseId0 = 7;
   static const int64_t kDatabaseId1 = 12;
@@ -108,7 +107,7 @@ class IndexedDBActiveBlobRegistryTest : public testing::Test {
         factory_(new RegistryTestMockFactory),
         backing_store_(
             new MockIDBBackingStore(factory_.get(), task_runner_.get())),
-        registry_(base::MakeUnique<IndexedDBActiveBlobRegistry>(
+        registry_(std::make_unique<IndexedDBActiveBlobRegistry>(
             backing_store_.get())) {}
 
   void RunUntilIdle() { task_runner_->RunUntilIdle(); }

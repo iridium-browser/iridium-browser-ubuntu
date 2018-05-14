@@ -8,20 +8,30 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/video_coding/include/video_codec_initializer.h"
+#include "modules/video_coding/include/video_codec_initializer.h"
 
-#include "webrtc/common_types.h"
-#include "webrtc/common_video/include/video_bitrate_allocator.h"
-#include "webrtc/modules/video_coding/codecs/vp8/screenshare_layers.h"
-#include "webrtc/modules/video_coding/codecs/vp8/simulcast_rate_allocator.h"
-#include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
-#include "webrtc/modules/video_coding/include/video_coding_defines.h"
-#include "webrtc/modules/video_coding/utility/default_video_bitrate_allocator.h"
-#include "webrtc/rtc_base/basictypes.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/system_wrappers/include/clock.h"
+#include "api/video_codecs/video_encoder.h"
+#include "common_types.h"  // NOLINT(build/include)
+#include "common_video/include/video_bitrate_allocator.h"
+#include "modules/video_coding/codecs/vp8/screenshare_layers.h"
+#include "modules/video_coding/codecs/vp8/simulcast_rate_allocator.h"
+#include "modules/video_coding/codecs/vp8/temporal_layers.h"
+#include "modules/video_coding/include/video_coding_defines.h"
+#include "modules/video_coding/utility/default_video_bitrate_allocator.h"
+#include "rtc_base/basictypes.h"
+#include "rtc_base/logging.h"
+#include "system_wrappers/include/clock.h"
 
 namespace webrtc {
+namespace {
+bool TemporalLayersConfigured(const std::vector<VideoStream>& streams) {
+  for (const VideoStream& stream : streams) {
+    if (stream.temporal_layer_thresholds_bps.size() > 0)
+      return true;
+  }
+  return false;
+}
+}  // namespace
 
 bool VideoCodecInitializer::SetupCodec(
     const VideoEncoderConfig& config,
@@ -30,6 +40,22 @@ bool VideoCodecInitializer::SetupCodec(
     bool nack_enabled,
     VideoCodec* codec,
     std::unique_ptr<VideoBitrateAllocator>* bitrate_allocator) {
+  if (PayloadStringToCodecType(settings.payload_name) == kVideoCodecMultiplex) {
+    VideoSendStream::Config::EncoderSettings associated_codec_settings =
+        settings;
+    associated_codec_settings.payload_name =
+        CodecTypeToPayloadString(kVideoCodecVP9);
+    if (!SetupCodec(config, associated_codec_settings, streams, nack_enabled,
+                    codec, bitrate_allocator)) {
+      RTC_LOG(LS_ERROR) << "Failed to create stereo encoder configuration.";
+      return false;
+    }
+    codec->codecType = kVideoCodecMultiplex;
+    strncpy(codec->plName, settings.payload_name.c_str(),
+            sizeof(codec->plName));
+    return true;
+  }
+
   *codec =
       VideoEncoderConfigToVideoCodec(config, streams, settings.payload_name,
                                      settings.payload_type, nack_enabled);
@@ -95,8 +121,7 @@ VideoCodec VideoCodecInitializer::VideoEncoderConfigToVideoCodec(
 
   VideoCodec video_codec;
   memset(&video_codec, 0, sizeof(video_codec));
-  video_codec.codecType = PayloadNameToCodecType(payload_name)
-                              .value_or(VideoCodecType::kVideoCodecGeneric);
+  video_codec.codecType = PayloadStringToCodecType(payload_name);
 
   switch (config.content_type) {
     case VideoEncoderConfig::ContentType::kRealtimeVideo:
@@ -121,13 +146,10 @@ VideoCodec VideoCodecInitializer::VideoEncoderConfigToVideoCodec(
         *video_codec.VP8() = VideoEncoder::GetDefaultVp8Settings();
       video_codec.VP8()->numberOfTemporalLayers = static_cast<unsigned char>(
           streams.back().temporal_layer_thresholds_bps.size() + 1);
-      bool temporal_layers_configured = false;
-      for (const VideoStream& stream : streams) {
-        if (stream.temporal_layer_thresholds_bps.size() > 0)
-          temporal_layers_configured = true;
-      }
-      if (nack_enabled && !temporal_layers_configured) {
-        LOG(LS_INFO) << "No temporal layers and nack enabled -> resilience off";
+
+      if (nack_enabled && !TemporalLayersConfigured(streams)) {
+        RTC_LOG(LS_INFO)
+            << "No temporal layers and nack enabled -> resilience off";
         video_codec.VP8()->resilience = kResilienceOff;
       }
       break;
@@ -144,6 +166,13 @@ VideoCodec VideoCodecInitializer::VideoEncoderConfigToVideoCodec(
       }
       video_codec.VP9()->numberOfTemporalLayers = static_cast<unsigned char>(
           streams.back().temporal_layer_thresholds_bps.size() + 1);
+
+      if (nack_enabled && !TemporalLayersConfigured(streams) &&
+          video_codec.VP9()->numberOfSpatialLayers == 1) {
+        RTC_LOG(LS_INFO) << "No temporal or spatial layers and nack enabled -> "
+                         << "resilience off";
+        video_codec.VP9()->resilienceOn = false;
+      }
       break;
     }
     case kVideoCodecH264: {
@@ -164,6 +193,15 @@ VideoCodec VideoCodecInitializer::VideoEncoderConfigToVideoCodec(
   video_codec.numberOfSimulcastStreams =
       static_cast<unsigned char>(streams.size());
   video_codec.minBitrate = streams[0].min_bitrate_bps / 1000;
+  bool codec_active = false;
+  for (const VideoStream& stream : streams) {
+    if (stream.active) {
+      codec_active = true;
+      break;
+    }
+  }
+  // Set active for the entire video codec for the non simulcast case.
+  video_codec.active = codec_active;
   if (video_codec.minBitrate < kEncoderMinBitrateKbps)
     video_codec.minBitrate = kEncoderMinBitrateKbps;
   video_codec.timing_frame_thresholds = {kDefaultTimingFramesDelayMs,
@@ -203,6 +241,7 @@ VideoCodec VideoCodecInitializer::VideoEncoderConfigToVideoCodec(
     sim_stream->qpMax = streams[i].max_qp;
     sim_stream->numberOfTemporalLayers = static_cast<unsigned char>(
         streams[i].temporal_layer_thresholds_bps.size() + 1);
+    sim_stream->active = streams[i].active;
 
     video_codec.width =
         std::max(video_codec.width, static_cast<uint16_t>(streams[i].width));

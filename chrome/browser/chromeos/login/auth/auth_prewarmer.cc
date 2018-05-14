@@ -21,9 +21,7 @@
 
 namespace chromeos {
 
-AuthPrewarmer::AuthPrewarmer()
-    : doing_prewarm_(false) {
-}
+AuthPrewarmer::AuthPrewarmer() : doing_prewarm_(false) {}
 
 AuthPrewarmer::~AuthPrewarmer() {
   if (registrar_.IsRegistered(
@@ -40,21 +38,21 @@ AuthPrewarmer::~AuthPrewarmer() {
 }
 
 void AuthPrewarmer::PrewarmAuthentication(
-    const base::Closure& completion_callback) {
+    base::OnceClosure completion_callback) {
   if (doing_prewarm_) {
     LOG(ERROR) << "PrewarmAuthentication called twice.";
     return;
   }
   doing_prewarm_ = true;
-  completion_callback_ = completion_callback;
+  completion_callback_ = std::move(completion_callback);
   if (GetRequestContext() && IsNetworkConnected()) {
     DoPrewarm();
     return;
   }
   if (!IsNetworkConnected()) {
     // DefaultNetworkChanged will get called when a network becomes connected.
-    NetworkHandler::Get()->network_state_handler()
-        ->AddObserver(this, FROM_HERE);
+    NetworkHandler::Get()->network_state_handler()->AddObserver(this,
+                                                                FROM_HERE);
   }
   if (!GetRequestContext()) {
     registrar_.Add(
@@ -68,8 +66,8 @@ void AuthPrewarmer::DefaultNetworkChanged(const NetworkState* network) {
   if (!network)
     return;  // Still no default (connected) network.
 
-  NetworkHandler::Get()->network_state_handler()
-      ->RemoveObserver(this, FROM_HERE);
+  NetworkHandler::Get()->network_state_handler()->RemoveObserver(this,
+                                                                 FROM_HERE);
   if (GetRequestContext())
     DoPrewarm();
 }
@@ -97,7 +95,7 @@ void AuthPrewarmer::DoPrewarm() {
                      net::HttpRequestInfo::EARLY_LOAD_MOTIVATED));
   if (!completion_callback_.is_null()) {
     content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     completion_callback_);
+                                     std::move(completion_callback_));
   }
 }
 

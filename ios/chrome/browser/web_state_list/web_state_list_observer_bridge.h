@@ -7,7 +7,6 @@
 
 #import <Foundation/Foundation.h>
 
-#import "base/ios/weak_nsobject.h"
 #include "base/macros.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
 
@@ -18,10 +17,12 @@
 @optional
 
 // Invoked after a new WebState has been added to the WebStateList at the
-// specified index.
+// specified index. |activating| will be YES if the WebState will become
+// the new active WebState after the insertion.
 - (void)webStateList:(WebStateList*)webStateList
     didInsertWebState:(web::WebState*)webState
-              atIndex:(int)index;
+              atIndex:(int)index
+           activating:(BOOL)activating;
 
 // Invoked after the WebState at the specified index is moved to another index.
 - (void)webStateList:(WebStateList*)webStateList
@@ -49,20 +50,23 @@
               atIndex:(int)atIndex;
 
 // Invoked before the specified WebState is destroyed via the WebStateList.
-// The WebState is still valid but is no longer in the WebStateList.
+// The WebState is still valid but is no longer in the WebStateList. If the
+// WebState is closed due to user action, |userAction| will be true.
 - (void)webStateList:(WebStateList*)webStateList
     willCloseWebState:(web::WebState*)webState
-              atIndex:(int)atIndex;
+              atIndex:(int)atIndex
+           userAction:(BOOL)userAction;
 
 // Invoked after |newWebState| was activated at the specified index. Both
 // WebState are either valid or null (if there was no selection or there is
-// no selection). If the change is due to an user action, |userAction| will
-// be true.
+// no selection). If |reason| has CHANGE_REASON_USER_ACTION set then the
+// change is due to an user action. If |reason| has CHANGE_REASON_REPLACED
+// set then the change is caused because the WebState was replaced.
 - (void)webStateList:(WebStateList*)webStateList
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                 userAction:(BOOL)userAction;
+                     reason:(int)reason;
 
 @end
 
@@ -77,7 +81,8 @@ class WebStateListObserverBridge : public WebStateListObserver {
   // WebStateListObserver implementation.
   void WebStateInsertedAt(WebStateList* web_state_list,
                           web::WebState* web_state,
-                          int index) override;
+                          int index,
+                          bool activating) override;
   void WebStateMoved(WebStateList* web_state_list,
                      web::WebState* web_state,
                      int from_index,
@@ -94,14 +99,15 @@ class WebStateListObserverBridge : public WebStateListObserver {
                           int index) override;
   void WillCloseWebStateAt(WebStateList* web_state_list,
                            web::WebState* web_state,
-                           int index) override;
+                           int index,
+                           bool user_action) override;
   void WebStateActivatedAt(WebStateList* web_state_list,
                            web::WebState* old_web_state,
                            web::WebState* new_web_state,
                            int active_index,
-                           bool user_action) override;
+                           int reason) override;
 
-  base::WeakNSProtocol<id<WebStateListObserving>> observer_;
+  __weak id<WebStateListObserving> observer_ = nil;
 
   DISALLOW_COPY_AND_ASSIGN(WebStateListObserverBridge);
 };

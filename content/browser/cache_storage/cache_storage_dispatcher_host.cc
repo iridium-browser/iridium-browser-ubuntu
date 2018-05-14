@@ -24,54 +24,30 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/origin_util.h"
 #include "storage/browser/blob/blob_data_handle.h"
-#include "third_party/WebKit/public/platform/modules/serviceworker/WebServiceWorkerCacheError.h"
+#include "third_party/WebKit/public/platform/modules/cache_storage/cache_storage.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+
+using blink::mojom::CacheStorageError;
 
 namespace content {
 
 namespace {
 
-const uint32_t kFilteredMessageClasses[] = {CacheStorageMsgStart};
+const uint32_t kCacheFilteredMessageClasses[] = {CacheStorageMsgStart};
 const int32_t kCachePreservationSeconds = 5;
-
-blink::WebServiceWorkerCacheError ToWebServiceWorkerCacheError(
-    CacheStorageError err) {
-  switch (err) {
-    case CACHE_STORAGE_OK:
-      NOTREACHED();
-      return blink::kWebServiceWorkerCacheErrorNotImplemented;
-    case CACHE_STORAGE_ERROR_EXISTS:
-      return blink::kWebServiceWorkerCacheErrorExists;
-    case CACHE_STORAGE_ERROR_STORAGE:
-      // TODO(nhiroki): Add WebServiceWorkerCacheError equivalent to
-      // CACHE_STORAGE_ERROR_STORAGE.
-      return blink::kWebServiceWorkerCacheErrorNotFound;
-    case CACHE_STORAGE_ERROR_NOT_FOUND:
-      return blink::kWebServiceWorkerCacheErrorNotFound;
-    case CACHE_STORAGE_ERROR_QUOTA_EXCEEDED:
-      return blink::kWebServiceWorkerCacheErrorQuotaExceeded;
-    case CACHE_STORAGE_ERROR_CACHE_NAME_NOT_FOUND:
-      return blink::kWebServiceWorkerCacheErrorCacheNameNotFound;
-    case CACHE_STORAGE_ERROR_QUERY_TOO_LARGE:
-      return blink::kWebServiceWorkerCacheErrorTooLarge;
-  }
-  NOTREACHED();
-  return blink::kWebServiceWorkerCacheErrorNotImplemented;
-}
 
 bool OriginCanAccessCacheStorage(const url::Origin& origin) {
   return !origin.unique() && IsOriginSecure(origin.GetURL());
 }
 
-void StopPreservingCache(
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle) {}
+void StopPreservingCache(CacheStorageCacheHandle cache_handle) {}
 
 }  // namespace
 
 CacheStorageDispatcherHost::CacheStorageDispatcherHost()
-    : BrowserMessageFilter(kFilteredMessageClasses,
-                           arraysize(kFilteredMessageClasses)) {}
+    : BrowserMessageFilter(kCacheFilteredMessageClasses,
+                           arraysize(kCacheFilteredMessageClasses)) {}
 
 CacheStorageDispatcherHost::~CacheStorageDispatcherHost() {
 }
@@ -132,7 +108,7 @@ void CacheStorageDispatcherHost::OnCacheStorageHas(
     return;
   }
   context_->cache_manager()->HasCache(
-      origin.GetURL(), base::UTF16ToUTF8(cache_name),
+      origin, base::UTF16ToUTF8(cache_name),
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageHasCallback,
                      this, thread_id, request_id));
 }
@@ -149,7 +125,7 @@ void CacheStorageDispatcherHost::OnCacheStorageOpen(
     return;
   }
   context_->cache_manager()->OpenCache(
-      origin.GetURL(), base::UTF16ToUTF8(cache_name),
+      origin, base::UTF16ToUTF8(cache_name),
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageOpenCallback,
                      this, thread_id, request_id));
 }
@@ -166,7 +142,7 @@ void CacheStorageDispatcherHost::OnCacheStorageDelete(
     return;
   }
   context_->cache_manager()->DeleteCache(
-      origin.GetURL(), base::UTF16ToUTF8(cache_name),
+      origin, base::UTF16ToUTF8(cache_name),
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageDeleteCallback,
                      this, thread_id, request_id));
 }
@@ -181,7 +157,7 @@ void CacheStorageDispatcherHost::OnCacheStorageKeys(int thread_id,
     return;
   }
   context_->cache_manager()->EnumerateCaches(
-      origin.GetURL(),
+      origin,
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageKeysCallback,
                      this, thread_id, request_id));
 }
@@ -205,13 +181,13 @@ void CacheStorageDispatcherHost::OnCacheStorageMatch(
 
   if (match_params.cache_name.is_null()) {
     context_->cache_manager()->MatchAllCaches(
-        origin.GetURL(), std::move(scoped_request), match_params,
+        origin, std::move(scoped_request), match_params,
         base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageMatchCallback,
                        this, thread_id, request_id));
     return;
   }
   context_->cache_manager()->MatchCache(
-      origin.GetURL(), base::UTF16ToUTF8(match_params.cache_name.string()),
+      origin, base::UTF16ToUTF8(match_params.cache_name.string()),
       std::move(scoped_request), match_params,
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheStorageMatchCallback,
                      this, thread_id, request_id));
@@ -224,21 +200,20 @@ void CacheStorageDispatcherHost::OnCacheMatch(
     const ServiceWorkerFetchRequest& request,
     const CacheStorageCacheQueryParams& match_params) {
   IDToCacheMap::iterator it = id_to_cache_map_.find(cache_id);
-  if (it == id_to_cache_map_.end() || !it->second->value()) {
+  if (it == id_to_cache_map_.end() || !it->second.value()) {
     Send(new CacheStorageMsg_CacheMatchError(
-        thread_id, request_id, blink::kWebServiceWorkerCacheErrorNotFound));
+        thread_id, request_id, CacheStorageError::kErrorNotFound));
     return;
   }
 
-  CacheStorageCache* cache = it->second->value();
+  CacheStorageCache* cache = it->second.value();
   std::unique_ptr<ServiceWorkerFetchRequest> scoped_request(
       new ServiceWorkerFetchRequest(request.url, request.method,
                                     request.headers, request.referrer,
                                     request.is_reload));
-  cache->Match(
-      std::move(scoped_request), match_params,
-      base::BindOnce(&CacheStorageDispatcherHost::OnCacheMatchCallback, this,
-                     thread_id, request_id, base::Passed(it->second->Clone())));
+  cache->Match(std::move(scoped_request), match_params,
+               base::BindOnce(&CacheStorageDispatcherHost::OnCacheMatchCallback,
+                              this, thread_id, request_id, it->second.Clone()));
 }
 
 void CacheStorageDispatcherHost::OnCacheMatchAll(
@@ -248,19 +223,18 @@ void CacheStorageDispatcherHost::OnCacheMatchAll(
     const ServiceWorkerFetchRequest& request,
     const CacheStorageCacheQueryParams& match_params) {
   IDToCacheMap::iterator it = id_to_cache_map_.find(cache_id);
-  if (it == id_to_cache_map_.end() || !it->second->value()) {
+  if (it == id_to_cache_map_.end() || !it->second.value()) {
     Send(new CacheStorageMsg_CacheMatchError(
-        thread_id, request_id, blink::kWebServiceWorkerCacheErrorNotFound));
+        thread_id, request_id, CacheStorageError::kErrorNotFound));
     return;
   }
 
-  CacheStorageCache* cache = it->second->value();
+  CacheStorageCache* cache = it->second.value();
   if (request.url.is_empty()) {
     cache->MatchAll(
         std::unique_ptr<ServiceWorkerFetchRequest>(), match_params,
         base::BindOnce(&CacheStorageDispatcherHost::OnCacheMatchAllCallback,
-                       this, thread_id, request_id,
-                       base::Passed(it->second->Clone())));
+                       this, thread_id, request_id, it->second.Clone()));
     return;
   }
 
@@ -272,15 +246,13 @@ void CacheStorageDispatcherHost::OnCacheMatchAll(
     cache->MatchAll(
         std::move(scoped_request), match_params,
         base::BindOnce(&CacheStorageDispatcherHost::OnCacheMatchAllCallback,
-                       this, thread_id, request_id,
-                       base::Passed(it->second->Clone())));
+                       this, thread_id, request_id, it->second.Clone()));
     return;
   }
-  cache->Match(
-      std::move(scoped_request), match_params,
-      base::BindOnce(
-          &CacheStorageDispatcherHost::OnCacheMatchAllCallbackAdapter, this,
-          thread_id, request_id, base::Passed(it->second->Clone())));
+  cache->Match(std::move(scoped_request), match_params,
+               base::BindOnce(
+                   &CacheStorageDispatcherHost::OnCacheMatchAllCallbackAdapter,
+                   this, thread_id, request_id, it->second.Clone()));
 }
 
 void CacheStorageDispatcherHost::OnCacheKeys(
@@ -290,21 +262,20 @@ void CacheStorageDispatcherHost::OnCacheKeys(
     const ServiceWorkerFetchRequest& request,
     const CacheStorageCacheQueryParams& match_params) {
   IDToCacheMap::iterator it = id_to_cache_map_.find(cache_id);
-  if (it == id_to_cache_map_.end() || !it->second->value()) {
-    Send(new CacheStorageMsg_CacheKeysError(
-        thread_id, request_id, blink::kWebServiceWorkerCacheErrorNotFound));
+  if (it == id_to_cache_map_.end() || !it->second.value()) {
+    Send(new CacheStorageMsg_CacheKeysError(thread_id, request_id,
+                                            CacheStorageError::kErrorNotFound));
     return;
   }
 
-  CacheStorageCache* cache = it->second->value();
+  CacheStorageCache* cache = it->second.value();
   std::unique_ptr<ServiceWorkerFetchRequest> request_ptr(
       new ServiceWorkerFetchRequest(request.url, request.method,
                                     request.headers, request.referrer,
                                     request.is_reload));
-  cache->Keys(
-      std::move(request_ptr), match_params,
-      base::BindOnce(&CacheStorageDispatcherHost::OnCacheKeysCallback, this,
-                     thread_id, request_id, base::Passed(it->second->Clone())));
+  cache->Keys(std::move(request_ptr), match_params,
+              base::BindOnce(&CacheStorageDispatcherHost::OnCacheKeysCallback,
+                             this, thread_id, request_id, it->second.Clone()));
 }
 
 void CacheStorageDispatcherHost::OnCacheBatch(
@@ -313,17 +284,18 @@ void CacheStorageDispatcherHost::OnCacheBatch(
     int cache_id,
     const std::vector<CacheStorageBatchOperation>& operations) {
   IDToCacheMap::iterator it = id_to_cache_map_.find(cache_id);
-  if (it == id_to_cache_map_.end() || !it->second->value()) {
+  if (it == id_to_cache_map_.end() || !it->second.value()) {
     Send(new CacheStorageMsg_CacheBatchError(
-        thread_id, request_id, blink::kWebServiceWorkerCacheErrorNotFound));
+        thread_id, request_id, CacheStorageError::kErrorNotFound));
     return;
   }
 
-  CacheStorageCache* cache = it->second->value();
+  CacheStorageCache* cache = it->second.value();
   cache->BatchOperation(
       operations,
       base::BindOnce(&CacheStorageDispatcherHost::OnCacheBatchCallback, this,
-                     thread_id, request_id, base::Passed(it->second->Clone())));
+                     thread_id, request_id, it->second.Clone()),
+      base::BindOnce(&CacheStorageDispatcherHost::OnBadMessage, this));
 }
 
 void CacheStorageDispatcherHost::OnCacheClosed(int cache_id) {
@@ -339,14 +311,14 @@ void CacheStorageDispatcherHost::OnCacheStorageHasCallback(
     int request_id,
     bool has_cache,
     CacheStorageError error) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheStorageHasError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(
+        new CacheStorageMsg_CacheStorageHasError(thread_id, request_id, error));
     return;
   }
   if (!has_cache) {
     Send(new CacheStorageMsg_CacheStorageHasError(
-        thread_id, request_id, blink::kWebServiceWorkerCacheErrorNotFound));
+        thread_id, request_id, CacheStorageError::kErrorNotFound));
     return;
   }
   Send(new CacheStorageMsg_CacheStorageHasSuccess(thread_id, request_id));
@@ -355,19 +327,18 @@ void CacheStorageDispatcherHost::OnCacheStorageHasCallback(
 void CacheStorageDispatcherHost::OnCacheStorageOpenCallback(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheStorageOpenError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheStorageOpenError(thread_id, request_id,
+                                                   error));
     return;
   }
 
   // Hang on to the cache for a few seconds. This way if the user quickly closes
   // and reopens it the cache backend won't have to be reinitialized.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(&StopPreservingCache, base::Passed(cache_handle->Clone())),
+      FROM_HERE, base::BindOnce(&StopPreservingCache, cache_handle.Clone()),
       base::TimeDelta::FromSeconds(kCachePreservationSeconds));
 
   CacheID cache_id = StoreCacheReference(std::move(cache_handle));
@@ -380,9 +351,9 @@ void CacheStorageDispatcherHost::OnCacheStorageDeleteCallback(
     int request_id,
     bool deleted,
     CacheStorageError error) {
-  if (!deleted || error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheStorageDeleteError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (!deleted || error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheStorageDeleteError(thread_id, request_id,
+                                                     error));
     return;
   }
   Send(new CacheStorageMsg_CacheStorageDeleteSuccess(thread_id, request_id));
@@ -405,9 +376,9 @@ void CacheStorageDispatcherHost::OnCacheStorageMatchCallback(
     CacheStorageError error,
     std::unique_ptr<ServiceWorkerResponse> response,
     std::unique_ptr<storage::BlobDataHandle> blob_data_handle) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheStorageMatchError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheStorageMatchError(thread_id, request_id,
+                                                    error));
     return;
   }
 
@@ -421,13 +392,12 @@ void CacheStorageDispatcherHost::OnCacheStorageMatchCallback(
 void CacheStorageDispatcherHost::OnCacheMatchCallback(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error,
     std::unique_ptr<ServiceWorkerResponse> response,
     std::unique_ptr<storage::BlobDataHandle> blob_data_handle) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheMatchError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheMatchError(thread_id, request_id, error));
     return;
   }
 
@@ -440,17 +410,16 @@ void CacheStorageDispatcherHost::OnCacheMatchCallback(
 void CacheStorageDispatcherHost::OnCacheMatchAllCallbackAdapter(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error,
     std::unique_ptr<ServiceWorkerResponse> response,
     std::unique_ptr<storage::BlobDataHandle> blob_data_handle) {
-  std::unique_ptr<CacheStorageCache::Responses> responses(
-      new CacheStorageCache::Responses);
+  std::vector<ServiceWorkerResponse> responses;
   std::unique_ptr<CacheStorageCache::BlobDataHandles> blob_data_handles(
       new CacheStorageCache::BlobDataHandles);
-  if (error == CACHE_STORAGE_OK) {
+  if (error == CacheStorageError::kSuccess) {
     DCHECK(response);
-    responses->push_back(*response);
+    responses.push_back(*response);
     if (blob_data_handle)
       blob_data_handles->push_back(std::move(blob_data_handle));
   }
@@ -461,13 +430,13 @@ void CacheStorageDispatcherHost::OnCacheMatchAllCallbackAdapter(
 void CacheStorageDispatcherHost::OnCacheMatchAllCallback(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error,
-    std::unique_ptr<CacheStorageCache::Responses> responses,
+    std::vector<ServiceWorkerResponse> responses,
     std::unique_ptr<CacheStorageCache::BlobDataHandles> blob_data_handles) {
-  if (error != CACHE_STORAGE_OK && error != CACHE_STORAGE_ERROR_NOT_FOUND) {
-    Send(new CacheStorageMsg_CacheMatchAllError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess &&
+      error != CacheStorageError::kErrorNotFound) {
+    Send(new CacheStorageMsg_CacheMatchAllError(thread_id, request_id, error));
     return;
   }
 
@@ -477,18 +446,17 @@ void CacheStorageDispatcherHost::OnCacheMatchAllCallback(
   }
 
   Send(new CacheStorageMsg_CacheMatchAllSuccess(thread_id, request_id,
-                                                *responses));
+                                                responses));
 }
 
 void CacheStorageDispatcherHost::OnCacheKeysCallback(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error,
     std::unique_ptr<CacheStorageCache::Requests> requests) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheKeysError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheKeysError(thread_id, request_id, error));
     return;
   }
 
@@ -498,20 +466,24 @@ void CacheStorageDispatcherHost::OnCacheKeysCallback(
 void CacheStorageDispatcherHost::OnCacheBatchCallback(
     int thread_id,
     int request_id,
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle,
+    CacheStorageCacheHandle cache_handle,
     CacheStorageError error) {
-  if (error != CACHE_STORAGE_OK) {
-    Send(new CacheStorageMsg_CacheBatchError(
-        thread_id, request_id, ToWebServiceWorkerCacheError(error)));
+  if (error != CacheStorageError::kSuccess) {
+    Send(new CacheStorageMsg_CacheBatchError(thread_id, request_id, error));
     return;
   }
 
   Send(new CacheStorageMsg_CacheBatchSuccess(thread_id, request_id));
 }
 
+void CacheStorageDispatcherHost::OnBadMessage(
+    bad_message::BadMessageReason reason) {
+  bad_message::ReceivedBadMessage(this, reason);
+}
+
 CacheStorageDispatcherHost::CacheID
 CacheStorageDispatcherHost::StoreCacheReference(
-    std::unique_ptr<CacheStorageCacheHandle> cache_handle) {
+    CacheStorageCacheHandle cache_handle) {
   int cache_id = next_cache_id_++;
   id_to_cache_map_[cache_id] = std::move(cache_handle);
   return cache_id;

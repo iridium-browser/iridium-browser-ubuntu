@@ -5,7 +5,6 @@
 #import "ios/web/public/web_state/ui/crw_generic_content_view.h"
 
 #include "base/logging.h"
-#import "base/mac/scoped_nsobject.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -15,9 +14,9 @@
   // The size of the view's bounds at the last call to |-layoutSubviews|.
   CGSize _lastLayoutSize;
   // Backing objectect for |self.scrollView|.
-  base::scoped_nsobject<UIScrollView> _scrollView;
+  UIScrollView* _scrollView;
   // Backing object for |self.view|.
-  base::scoped_nsobject<UIView> _view;
+  UIView* _view;
 }
 
 @end
@@ -29,8 +28,8 @@
   if (self) {
     DCHECK(view);
     _lastLayoutSize = CGSizeZero;
-    _view.reset(view);
-    _scrollView.reset([[UIScrollView alloc] initWithFrame:CGRectZero]);
+    _view = view;
+    _scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
     [self addSubview:_scrollView];
     [_scrollView addSubview:_view];
     [_scrollView setBackgroundColor:[_view backgroundColor]];
@@ -52,23 +51,21 @@
 
 - (UIScrollView*)scrollView {
   if (!_scrollView) {
-    _scrollView.reset([[UIScrollView alloc] initWithFrame:CGRectZero]);
+    _scrollView = [[UIScrollView alloc] initWithFrame:CGRectZero];
   }
-  return _scrollView.get();
+  return _scrollView;
 }
 
-- (CGFloat)topContentPadding {
-  return self.scrollView.contentInset.top;
+- (UIEdgeInsets)contentInset {
+  return self.scrollView.contentInset;
 }
 
-- (void)setTopContentPadding:(CGFloat)newTopInset {
-  UIEdgeInsets inset = self.scrollView.contentInset;
-  inset.top = newTopInset;
-  self.scrollView.contentInset = inset;
+- (void)setContentInset:(UIEdgeInsets)contentInset {
+  self.scrollView.contentInset = contentInset;
 }
 
 - (UIView*)view {
-  return _view.get();
+  return _view;
 }
 
 #pragma mark Layout
@@ -91,10 +88,10 @@
   self.view.frame = CGRectMake(0.0, 0.0, viewSize.width, viewSize.height);
 
   // UIScrollViews only scroll vertically if the content size's height is
-  // greater than that of its content rect.
-  if (viewSize.height <= CGRectGetHeight(contentRect)) {
+  // greater than that of its bounds.
+  if (viewSize.height <= _lastLayoutSize.height) {
     CGFloat singlePixel = 1.0f / [[UIScreen mainScreen] scale];
-    viewSize.height = CGRectGetHeight(contentRect) + singlePixel;
+    viewSize.height = _lastLayoutSize.height + singlePixel;
   }
   self.scrollView.contentSize = viewSize;
 }

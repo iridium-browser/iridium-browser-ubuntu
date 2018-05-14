@@ -32,6 +32,7 @@
 #define MixedContentChecker_h
 
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/ResourceRequest.h"
@@ -42,12 +43,15 @@
 
 namespace blink {
 
+class ExecutionContext;
 class Frame;
 class LocalFrame;
 class KURL;
 class ResourceResponse;
 class SecurityOrigin;
 class SourceLocation;
+class WorkerOrWorkletGlobalScope;
+class WebWorkerFetchContext;
 
 // Checks resource loads for mixed content. If PlzNavigate is enabled then this
 // class only checks for sub-resource loads while frame-level loads are
@@ -58,26 +62,24 @@ class SourceLocation;
 // Current mixed content W3C draft that drives this implementation:
 // https://w3c.github.io/webappsec-mixed-content/
 class CORE_EXPORT MixedContentChecker final {
-  WTF_MAKE_NONCOPYABLE(MixedContentChecker);
   DISALLOW_NEW();
 
  public:
   static bool ShouldBlockFetch(LocalFrame*,
                                WebURLRequest::RequestContext,
-                               WebURLRequest::FrameType,
+                               network::mojom::RequestContextFrameType,
                                ResourceRequest::RedirectStatus,
                                const KURL&,
                                SecurityViolationReportingPolicy =
                                    SecurityViolationReportingPolicy::kReport);
-  static bool ShouldBlockFetch(LocalFrame* frame,
-                               const ResourceRequest& request,
-                               const KURL& url,
-                               SecurityViolationReportingPolicy status =
-                                   SecurityViolationReportingPolicy::kReport) {
-    return ShouldBlockFetch(frame, request.GetRequestContext(),
-                            request.GetFrameType(), request.GetRedirectStatus(),
-                            url, status);
-  }
+
+  static bool ShouldBlockFetchOnWorker(WorkerOrWorkletGlobalScope*,
+                                       WebWorkerFetchContext*,
+                                       WebURLRequest::RequestContext,
+                                       network::mojom::RequestContextFrameType,
+                                       ResourceRequest::RedirectStatus,
+                                       const KURL&,
+                                       SecurityViolationReportingPolicy);
 
   static bool ShouldBlockWebSocket(
       LocalFrame*,
@@ -85,7 +87,7 @@ class CORE_EXPORT MixedContentChecker final {
       SecurityViolationReportingPolicy =
           SecurityViolationReportingPolicy::kReport);
 
-  static bool IsMixedContent(SecurityOrigin*, const KURL&);
+  static bool IsMixedContent(const SecurityOrigin*, const KURL&);
   static bool IsMixedFormAction(LocalFrame*,
                                 const KURL&,
                                 SecurityViolationReportingPolicy =
@@ -100,12 +102,13 @@ class CORE_EXPORT MixedContentChecker final {
 
   // Returns the frame that should be considered the effective frame
   // for a mixed content check for the given frame type.
-  static Frame* EffectiveFrameForFrameType(LocalFrame*,
-                                           WebURLRequest::FrameType);
+  static Frame* EffectiveFrameForFrameType(
+      LocalFrame*,
+      network::mojom::RequestContextFrameType);
 
   static void HandleCertificateError(LocalFrame*,
                                      const ResourceResponse&,
-                                     WebURLRequest::FrameType,
+                                     network::mojom::RequestContextFrameType,
                                      WebURLRequest::RequestContext);
 
   // Receive information about mixed content found externally.
@@ -120,12 +123,13 @@ class CORE_EXPORT MixedContentChecker final {
  private:
   FRIEND_TEST_ALL_PREFIXES(MixedContentCheckerTest, HandleCertificateError);
 
-  static Frame* InWhichFrameIsContentMixed(Frame*,
-                                           WebURLRequest::FrameType,
-                                           const KURL&,
-                                           const LocalFrame*);
+  static Frame* InWhichFrameIsContentMixed(
+      Frame*,
+      network::mojom::RequestContextFrameType,
+      const KURL&,
+      const LocalFrame*);
 
-  static void LogToConsoleAboutFetch(LocalFrame*,
+  static void LogToConsoleAboutFetch(ExecutionContext*,
                                      const KURL&,
                                      const KURL&,
                                      WebURLRequest::RequestContext,
@@ -136,6 +140,8 @@ class CORE_EXPORT MixedContentChecker final {
                                          const KURL&,
                                          bool allowed);
   static void Count(Frame*, WebURLRequest::RequestContext, const LocalFrame*);
+
+  DISALLOW_COPY_AND_ASSIGN(MixedContentChecker);
 };
 
 }  // namespace blink

@@ -11,12 +11,12 @@
 #include <algorithm>
 #include <vector>
 
-#include "webrtc/logging/rtc_event_log/mock/mock_rtc_event_log.h"
-#include "webrtc/modules/bitrate_controller/include/bitrate_controller.h"
-#include "webrtc/modules/pacing/mock/mock_paced_sender.h"
-#include "webrtc/modules/remote_bitrate_estimator/include/bwe_defines.h"
-#include "webrtc/test/field_trial.h"
-#include "webrtc/test/gtest.h"
+#include "logging/rtc_event_log/mock/mock_rtc_event_log.h"
+#include "modules/bitrate_controller/include/bitrate_controller.h"
+#include "modules/pacing/mock/mock_paced_sender.h"
+#include "modules/remote_bitrate_estimator/include/bwe_defines.h"
+#include "test/field_trial.h"
+#include "test/gtest.h"
 
 using ::testing::Exactly;
 using ::testing::Return;
@@ -73,7 +73,7 @@ class BitrateControllerTest : public ::testing::Test {
     EXPECT_EQ(kStartBitrateBps, bitrate_observer_.last_bitrate_);
     controller_->SetMinMaxBitrate(kMinBitrateBps, kMaxBitrateBps);
     EXPECT_EQ(kStartBitrateBps, bitrate_observer_.last_bitrate_);
-    bandwidth_observer_.reset(controller_->CreateRtcpBandwidthObserver());
+    bandwidth_observer_ = controller_.get();
   }
 
   virtual void TearDown() {
@@ -89,7 +89,7 @@ class BitrateControllerTest : public ::testing::Test {
   webrtc::SimulatedClock clock_;
   TestBitrateObserver bitrate_observer_;
   std::unique_ptr<BitrateController> controller_;
-  std::unique_ptr<RtcpBandwidthObserver> bandwidth_observer_;
+  RtcpBandwidthObserver* bandwidth_observer_;
   testing::NiceMock<webrtc::MockRtcEventLog> event_log_;
 };
 
@@ -195,8 +195,7 @@ TEST_F(BitrateControllerTest, OneBitrateObserverTwoRtcpObservers) {
   bandwidth_observer_->OnReceivedRtcpReceiverReport(report_blocks, 50, time_ms);
   time_ms += 500;
 
-  RtcpBandwidthObserver* second_bandwidth_observer =
-      controller_->CreateRtcpBandwidthObserver();
+  RtcpBandwidthObserver* second_bandwidth_observer = controller_.get();
   report_blocks = {CreateReportBlock(kSenderSsrc2, kMediaSsrc2, 0, 21)};
   second_bandwidth_observer->OnReceivedRtcpReceiverReport(
       report_blocks, 100, time_ms);
@@ -273,7 +272,6 @@ TEST_F(BitrateControllerTest, OneBitrateObserverTwoRtcpObservers) {
   // Min cap.
   bandwidth_observer_->OnReceivedEstimatedBitrate(1000);
   EXPECT_EQ(100000, bitrate_observer_.last_bitrate_);
-  delete second_bandwidth_observer;
 }
 
 TEST_F(BitrateControllerTest, OneBitrateObserverMultipleReportBlocks) {
@@ -342,11 +340,11 @@ TEST_F(BitrateControllerTest, OneBitrateObserverMultipleReportBlocks) {
   report_blocks.clear();
 
   // All packets lost on stream with few packets, no back-off.
-  report_blocks.push_back(CreateReportBlock(1, 2, 1, sequence_number[0]));
+  report_blocks.push_back(CreateReportBlock(1, 2, 0, sequence_number[0]));
   report_blocks.push_back(CreateReportBlock(1, 3, 255, sequence_number[1]));
   bandwidth_observer_->OnReceivedRtcpReceiverReport(report_blocks, 50, time_ms);
   EXPECT_EQ(bitrate_observer_.last_bitrate_, last_bitrate);
-  EXPECT_EQ(WeightedLoss(20, 1, 1, 255), bitrate_observer_.last_fraction_loss_);
+  EXPECT_EQ(WeightedLoss(20, 0, 1, 255), bitrate_observer_.last_fraction_loss_);
   EXPECT_EQ(50, bitrate_observer_.last_rtt_);
   last_bitrate = bitrate_observer_.last_bitrate_;
   sequence_number[0] += 20;

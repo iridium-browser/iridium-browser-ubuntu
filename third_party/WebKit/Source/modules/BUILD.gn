@@ -35,11 +35,8 @@ config("modules_implementation") {
 }
 
 make_names("module_names") {
-  in_files = [ "indexeddb/IndexedDBNames.json5" ]
-  outputs = [
-    "$blink_modules_output_dir/IndexedDBNames.cpp",
-    "$blink_modules_output_dir/IndexedDBNames.h",
-  ]
+  in_files = [ "indexeddb/indexed_db_names.json5" ]
+  output_dir = blink_modules_output_dir
   deps = []  # Don't use default deps (otherwise it will be circular).
 }
 
@@ -66,6 +63,10 @@ target("jumbo_" + modules_target_type, "modules") {
   sources += get_target_outputs(":module_names")
 
   sources += bindings_modules_v8_files
+  sources += rebase_path(
+          [ bindings_generated_v8_context_snapshot_external_references_file ],
+          ".",
+          "//")
 
   configs += [
     ":modules_implementation",
@@ -76,17 +77,18 @@ target("jumbo_" + modules_target_type, "modules") {
     "//third_party/WebKit/Source:non_test_config",
     "//third_party/WebKit/Source:inside_blink",
     "//third_party/WebKit/Source/core:blink_core_pch",
+    "//tools/v8_context_snapshot:use_v8_context_snapshot",
   ]
 
   deps = [
     ":make_modules_generated",
     ":module_names",
-    "//device/geolocation/public/interfaces:interfaces_blink",
     "//third_party/WebKit/Source/bindings/modules:generated",
-    "//third_party/WebKit/Source/bindings/modules/v8:bindings_modules_conditional_features",
     "//third_party/WebKit/Source/bindings/modules/v8:bindings_modules_impl",
+    "//third_party/WebKit/Source/bindings/modules/v8:bindings_modules_origin_trial_features",
     "//third_party/WebKit/Source/core",
     "//third_party/WebKit/Source/modules/accessibility",
+    "//third_party/WebKit/Source/modules/animationworklet",
     "//third_party/WebKit/Source/modules/app_banner",
     "//third_party/WebKit/Source/modules/audio_output_devices",
     "//third_party/WebKit/Source/modules/background_fetch",
@@ -98,8 +100,8 @@ target("jumbo_" + modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/budget",
     "//third_party/WebKit/Source/modules/cachestorage",
     "//third_party/WebKit/Source/modules/canvas",
-    "//third_party/WebKit/Source/modules/canvas2d",
-    "//third_party/WebKit/Source/modules/compositorworker",
+    "//third_party/WebKit/Source/modules/clipboard",
+    "//third_party/WebKit/Source/modules/cookie_store",
     "//third_party/WebKit/Source/modules/credentialmanager",
     "//third_party/WebKit/Source/modules/crypto",
     "//third_party/WebKit/Source/modules/csspaint",
@@ -110,16 +112,15 @@ target("jumbo_" + modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/encryptedmedia",
     "//third_party/WebKit/Source/modules/eventsource",
     "//third_party/WebKit/Source/modules/exported",
-    "//third_party/WebKit/Source/modules/fetch",
     "//third_party/WebKit/Source/modules/filesystem",
     "//third_party/WebKit/Source/modules/gamepad",
     "//third_party/WebKit/Source/modules/geolocation",
-    "//third_party/WebKit/Source/modules/imagebitmap",
     "//third_party/WebKit/Source/modules/imagecapture",
     "//third_party/WebKit/Source/modules/indexeddb",
     "//third_party/WebKit/Source/modules/installation",
     "//third_party/WebKit/Source/modules/installedapp",
     "//third_party/WebKit/Source/modules/keyboard_lock",
+    "//third_party/WebKit/Source/modules/locks",
     "//third_party/WebKit/Source/modules/media_capabilities",
     "//third_party/WebKit/Source/modules/media_controls",
     "//third_party/WebKit/Source/modules/mediacapturefromelement",
@@ -131,11 +132,10 @@ target("jumbo_" + modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/netinfo",
     "//third_party/WebKit/Source/modules/nfc",
     "//third_party/WebKit/Source/modules/notifications",
-    "//third_party/WebKit/Source/modules/offscreencanvas",
-    "//third_party/WebKit/Source/modules/offscreencanvas2d",
     "//third_party/WebKit/Source/modules/payments",
     "//third_party/WebKit/Source/modules/peerconnection",
     "//third_party/WebKit/Source/modules/permissions",
+    "//third_party/WebKit/Source/modules/picture_in_picture",
     "//third_party/WebKit/Source/modules/plugins",
     "//third_party/WebKit/Source/modules/presentation",
     "//third_party/WebKit/Source/modules/push_messaging",
@@ -153,15 +153,14 @@ target("jumbo_" + modules_target_type, "modules") {
     "//third_party/WebKit/Source/modules/vr",
     "//third_party/WebKit/Source/modules/wake_lock",
     "//third_party/WebKit/Source/modules/webaudio",
-    "//third_party/WebKit/Source/modules/webauth",
     "//third_party/WebKit/Source/modules/webdatabase",
     "//third_party/WebKit/Source/modules/webgl",
     "//third_party/WebKit/Source/modules/webmidi",
     "//third_party/WebKit/Source/modules/webshare",
     "//third_party/WebKit/Source/modules/websockets",
     "//third_party/WebKit/Source/modules/webusb",
+    "//third_party/WebKit/Source/modules/xr",
     "//third_party/icu",
-    "//third_party/sqlite",
     "//third_party/zlib",
   ]
 
@@ -169,24 +168,14 @@ target("jumbo_" + modules_target_type, "modules") {
     cflags = [ "/wd4334" ]  # Result of 32-bit shift implicitly converted to 64 bits.
   }
 
-  if (remove_webcore_debug_symbols) {
-    configs -= [ "//build/config/compiler:default_symbols" ]
-    configs += remove_webcore_symbols_config
-  }
+  configs -= [ "//build/config/compiler:default_symbols" ]
+  configs += blink_symbols_config
 }
 
-source_set("modules_testing") {
+jumbo_source_set("modules_testing") {
   sources = [
-    "$bindings_modules_v8_output_dir/V8InternalsPartial.cpp",
-    "$bindings_modules_v8_output_dir/V8InternalsPartial.h",
-    "$bindings_modules_v8_output_dir/V8WorkerInternalsPartial.cpp",
-    "$bindings_modules_v8_output_dir/V8WorkerInternalsPartial.h",
     "accessibility/testing/InternalsAccessibility.cpp",
     "accessibility/testing/InternalsAccessibility.h",
-    "fetch/testing/InternalsFetch.cpp",
-    "fetch/testing/InternalsFetch.h",
-    "fetch/testing/WorkerInternalsFetch.cpp",
-    "fetch/testing/WorkerInternalsFetch.h",
     "mediastream/testing/InternalsMediaStream.cpp",
     "mediastream/testing/InternalsMediaStream.h",
     "navigatorcontentutils/testing/InternalsNavigatorContentUtils.cpp",
@@ -195,6 +184,8 @@ source_set("modules_testing") {
     "navigatorcontentutils/testing/NavigatorContentUtilsClientMock.h",
     "peerconnection/testing/InternalsRTCCertificate.cpp",
     "peerconnection/testing/InternalsRTCCertificate.h",
+    "peerconnection/testing/InternalsRTCPeerConnection.cpp",
+    "peerconnection/testing/InternalsRTCPeerConnection.h",
     "serviceworkers/testing/InternalsServiceWorker.cpp",
     "serviceworkers/testing/InternalsServiceWorker.h",
     "speech/testing/InternalsSpeechSynthesis.cpp",
@@ -206,6 +197,17 @@ source_set("modules_testing") {
     "webaudio/testing/InternalsWebAudio.cpp",
     "webaudio/testing/InternalsWebAudio.h",
   ]
+  if (snake_case_source_files) {
+    sources += [
+      "$bindings_modules_v8_output_dir/v8_internals_partial.cc",
+      "$bindings_modules_v8_output_dir/v8_internals_partial.h",
+    ]
+  } else {
+    sources += [
+      "$bindings_modules_v8_output_dir/V8InternalsPartial.cpp",
+      "$bindings_modules_v8_output_dir/V8InternalsPartial.h",
+    ]
+  }
 
   configs += [
     "//third_party/WebKit/Source:config",
@@ -227,41 +229,31 @@ group("make_modules_generated") {
   ]
 }
 
-source_set("unit_tests") {
+jumbo_source_set("unit_tests") {
   testonly = true
 
   sources = [
+    "accessibility/AXObjectCacheTest.cpp",
     "accessibility/AXObjectTest.cpp",
+    "accessibility/AccessibilityObjectModelTest.cpp",
+    "accessibility/testing/AccessibilityTest.cpp",
+    "accessibility/testing/AccessibilityTest.h",
+    "animationworklet/AnimationWorkletGlobalScopeTest.cpp",
+    "animationworklet/AnimationWorkletThreadTest.cpp",
+    "animationworklet/WorkletAnimationTest.cpp",
+    "background_fetch/BackgroundFetchIconLoaderTest.cpp",
     "background_fetch/BackgroundFetchManagerTest.cpp",
     "cachestorage/CacheTest.cpp",
-    "canvas/HTMLCanvasElementModuleTest.cpp",
-    "canvas2d/CanvasRenderingContext2DAPITest.cpp",
-    "canvas2d/CanvasRenderingContext2DTest.cpp",
-    "compositorworker/AnimationWorkletGlobalScopeTest.cpp",
-    "compositorworker/AnimationWorkletThreadTest.cpp",
-    "compositorworker/CompositorWorkerThreadTest.cpp",
+    "canvas/canvas2d/CanvasRenderingContext2DAPITest.cpp",
+    "canvas/canvas2d/CanvasRenderingContext2DTest.cpp",
+    "canvas/htmlcanvas/HTMLCanvasElementModuleTest.cpp",
+    "canvas/offscreencanvas/OffscreenCanvasTest.cpp",
     "credentialmanager/CredentialsContainerTest.cpp",
     "credentialmanager/PasswordCredentialTest.cpp",
     "csspaint/PaintRenderingContext2DTest.cpp",
     "csspaint/PaintWorkletTest.cpp",
     "document_metadata/CopylessPasteExtractorTest.cpp",
     "eventsource/EventSourceParserTest.cpp",
-    "fetch/BlobBytesConsumerTest.cpp",
-    "fetch/BodyStreamBufferTest.cpp",
-    "fetch/BytesConsumerForDataConsumerHandleTest.cpp",
-    "fetch/BytesConsumerTest.cpp",
-    "fetch/BytesConsumerTestUtil.cpp",
-    "fetch/BytesConsumerTestUtil.h",
-    "fetch/DataConsumerHandleTestUtil.cpp",
-    "fetch/DataConsumerHandleTestUtil.h",
-    "fetch/FetchDataLoaderTest.cpp",
-    "fetch/FetchHeaderListTest.cpp",
-    "fetch/FetchResponseDataTest.cpp",
-    "fetch/FormDataBytesConsumerTest.cpp",
-    "fetch/MultipartParserTest.cpp",
-    "fetch/ReadableStreamBytesConsumerTest.cpp",
-    "fetch/RequestTest.cpp",
-    "fetch/ResponseTest.cpp",
     "filesystem/DOMFileSystemBaseTest.cpp",
     "indexeddb/IDBKeyPathTest.cpp",
     "indexeddb/IDBRequestTest.cpp",
@@ -274,11 +266,15 @@ source_set("unit_tests") {
     "media_controls/MediaControlsOrientationLockDelegateTest.cpp",
     "media_controls/MediaControlsRotateToFullscreenDelegateTest.cpp",
     "media_controls/elements/MediaControlInputElementTest.cpp",
+    "media_controls/elements/MediaControlLoadingPanelElementTest.cpp",
+    "media_controls/elements/MediaControlOverlayPlayButtonElementTest.cpp",
+    "media_controls/elements/MediaControlTimelineElementTest.cpp",
+    "media_controls/elements/MediaControlToggleClosedCaptionsButtonElementTest.cpp",
     "mediastream/MediaConstraintsTest.cpp",
+    "mediastream/MediaDevicesTest.cpp",
     "notifications/NotificationDataTest.cpp",
     "notifications/NotificationImageLoaderTest.cpp",
     "notifications/NotificationResourcesLoaderTest.cpp",
-    "offscreencanvas/OffscreenCanvasTest.cpp",
     "payments/AbortTest.cpp",
     "payments/CanMakePaymentTest.cpp",
     "payments/CompleteTest.cpp",
@@ -294,13 +290,17 @@ source_set("unit_tests") {
     "payments/PaymentsValidatorsTest.cpp",
     "peerconnection/RTCDataChannelTest.cpp",
     "peerconnection/RTCPeerConnectionTest.cpp",
+    "presentation/MockPresentationService.h",
     "presentation/MockWebPresentationClient.h",
+    "presentation/PresentationAvailabilityStateTest.cpp",
     "presentation/PresentationAvailabilityTest.cpp",
     "presentation/PresentationReceiverTest.cpp",
     "presentation/PresentationRequestTest.cpp",
     "push_messaging/PushManagerTest.cpp",
     "push_messaging/PushMessageDataTest.cpp",
+    "push_messaging/PushSubscriptionTest.cpp",
     "remoteplayback/RemotePlaybackTest.cpp",
+    "screen_orientation/ScreenOrientationControllerImplTest.cpp",
     "serviceworkers/ServiceWorkerContainerTest.cpp",
     "serviceworkers/WebEmbeddedWorkerImplTest.cpp",
     "wake_lock/ScreenWakeLockTest.cpp",
@@ -331,7 +331,9 @@ source_set("unit_tests") {
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/WebKit/Source/core",
+    "//third_party/WebKit/Source/platform",
     "//third_party/WebKit/Source/platform/wtf",
+    "//third_party/WebKit/public:media_devices_mojo_bindings_blink",
     "//v8",
   ]
 }

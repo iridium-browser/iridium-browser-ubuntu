@@ -15,7 +15,6 @@
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/task_scheduler/post_task.h"
 #include "chrome/browser/image_decoder.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
@@ -148,8 +147,8 @@ gfx::ImageSkiaRep ArcAppIcon::Source::GetImageForScale(float scale) {
   if (it != default_icons_cache_.Get().end())
     return it->second.GetRepresentation(scale);
 
-  const gfx::ImageSkia* default_image = ResourceBundle::GetSharedInstance().
-      GetImageSkiaNamed(resource_id);
+  const gfx::ImageSkia* default_image =
+      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   CHECK(default_image);
   gfx::ImageSkia resized_image = gfx::ImageSkiaOperations::CreateResizedImage(
       *default_image, skia::ImageOperations::RESIZE_BEST,
@@ -251,9 +250,10 @@ ArcAppIcon::ArcAppIcon(content::BrowserContext* context,
       observer_(observer),
       weak_ptr_factory_(this) {
   CHECK(observer_ != nullptr);
-  source_ = new Source(weak_ptr_factory_.GetWeakPtr(), resource_size_in_dip);
+  auto source = std::make_unique<Source>(weak_ptr_factory_.GetWeakPtr(),
+                                         resource_size_in_dip);
   gfx::Size resource_size(resource_size_in_dip, resource_size_in_dip);
-  image_skia_ = gfx::ImageSkia(source_, resource_size);
+  image_skia_ = gfx::ImageSkia(std::move(source), resource_size);
 }
 
 ArcAppIcon::~ArcAppIcon() {
@@ -302,7 +302,7 @@ std::unique_ptr<ArcAppIcon::ReadResult> ArcAppIcon::ReadOnFileThread(
     path_to_read = path;
   } else {
     if (default_app_path.empty() || !base::PathExists(default_app_path)) {
-      return base::MakeUnique<ArcAppIcon::ReadResult>(false, true, scale_factor,
+      return std::make_unique<ArcAppIcon::ReadResult>(false, true, scale_factor,
                                                       std::string());
     }
     path_to_read = default_app_path;
@@ -319,11 +319,11 @@ std::unique_ptr<ArcAppIcon::ReadResult> ArcAppIcon::ReadOnFileThread(
     // If |unsafe_icon_data| is empty typically means we have a file corruption
     // on cached icon file. Send request to re install the icon.
     request_to_install |= unsafe_icon_data.empty();
-    return base::MakeUnique<ArcAppIcon::ReadResult>(
+    return std::make_unique<ArcAppIcon::ReadResult>(
         true, request_to_install, scale_factor, std::string());
   }
 
-  return base::MakeUnique<ArcAppIcon::ReadResult>(
+  return std::make_unique<ArcAppIcon::ReadResult>(
       false, request_to_install, scale_factor, unsafe_icon_data);
 }
 
@@ -335,7 +335,7 @@ void ArcAppIcon::OnIconRead(
     MaybeRequestIcon(read_result->scale_factor);
 
   if (!read_result->unsafe_icon_data.empty()) {
-    decode_requests_.push_back(base::MakeUnique<DecodeRequest>(
+    decode_requests_.push_back(std::make_unique<DecodeRequest>(
         weak_ptr_factory_.GetWeakPtr(), resource_size_in_dip_,
         read_result->scale_factor));
     if (disable_safe_decoding_for_testing) {

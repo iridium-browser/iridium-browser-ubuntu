@@ -542,11 +542,15 @@ function VolumeItem(modelItem, tree) {
 
   item.setupIcon_(item.querySelector('.icon'), item.volumeInfo_);
 
-  // Attach the "eject" icon if the volume is ejectable.
+  // Attach a placeholder for rename input text box and the eject icon if the
+  // volume is ejectable
   if ((modelItem.volumeInfo_.source === VolumeManagerCommon.Source.DEVICE &&
        modelItem.volumeInfo_.volumeType !==
            VolumeManagerCommon.VolumeType.MTP) ||
       modelItem.volumeInfo_.source === VolumeManagerCommon.Source.FILE) {
+    // This placeholder is added to allow to put textbox before eject button
+    // while executing renaming action on external drive.
+    item.setupRenamePlaceholder_(item.rowElement);
     item.setupEjectButton_(item.rowElement);
   }
 
@@ -628,12 +632,9 @@ VolumeItem.prototype.activate = function() {
  */
 VolumeItem.prototype.setupIcon_ = function(icon, volumeInfo) {
   icon.classList.add('item-icon');
-  if (volumeInfo.volumeType === VolumeManagerCommon.VolumeType.PROVIDED) {
-    var backgroundImage = '-webkit-image-set(' +
-        'url(chrome://extension-icon/' + volumeInfo.extensionId +
-            '/16/1) 1x, ' +
-        'url(chrome://extension-icon/' + volumeInfo.extensionId +
-            '/32/1) 2x);';
+  var backgroundImage =
+      util.iconSetToCSSBackgroundImageValue(volumeInfo.iconSet);
+  if (backgroundImage !== 'none') {
     // The icon div is not yet added to DOM, therefore it is impossible to
     // use style.backgroundImage.
     icon.setAttribute(
@@ -658,10 +659,12 @@ VolumeItem.prototype.setupIcon_ = function(icon, volumeInfo) {
 VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
   var ejectButton = cr.doc.createElement('button');
   // Block other mouse handlers.
-  ejectButton.addEventListener(
-      'mouseup', function(event) { event.stopPropagation() });
-  ejectButton.addEventListener(
-      'mousedown', function(event) { event.stopPropagation() });
+  ejectButton.addEventListener('mouseup', function(event) {
+    event.stopPropagation();
+  });
+  ejectButton.addEventListener('mousedown', function(event) {
+    event.stopPropagation();
+  });
   ejectButton.className = 'root-eject';
   ejectButton.setAttribute('aria-label', str('UNMOUNT_DEVICE_BUTTON_LABEL'));
   ejectButton.setAttribute('tabindex', '0');
@@ -682,6 +685,16 @@ VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
   ejectButton.appendChild(ripple);
 };
 
+/**
+ * Set up rename input textbox placeholder if needed.
+ * @param {HTMLElement} rowElement The parent element for placeholder.
+ * @private
+ */
+VolumeItem.prototype.setupRenamePlaceholder_ = function(rowElement) {
+  var placeholder = cr.doc.createElement('span');
+  placeholder.className = 'rename-placeholder';
+  rowElement.appendChild(placeholder);
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // DriveVolumeItem

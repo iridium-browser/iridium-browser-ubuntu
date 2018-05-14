@@ -11,9 +11,6 @@
 #include "cc/test/layer_tree_pixel_test.h"
 #include "cc/test/pixel_comparator.h"
 #include "cc/test/solid_color_content_layer_client.h"
-#include "third_party/skia/include/effects/SkColorFilterImageFilter.h"
-#include "third_party/skia/include/effects/SkColorMatrixFilter.h"
-#include "third_party/skia/include/effects/SkOffsetImageFilter.h"
 
 #if !defined(OS_ANDROID)
 
@@ -174,7 +171,7 @@ class LayerTreeHostFiltersScaledPixelTest
   }
 
   void SetupTree() override {
-    layer_tree_host()->SetDeviceScaleFactor(device_scale_factor_);
+    SetInitialDeviceScaleFactor(device_scale_factor_);
     LayerTreePixelTest::SetupTree();
   }
 
@@ -195,11 +192,11 @@ class LayerTreeHostFiltersScaledPixelTest
     // Add an alpha threshold filter to the blue layer which will filter out
     // everything except the lower right corner.
     FilterOperations filters;
-    SkRegion alpha_region;
-    alpha_region.setRect(
-        half_content, half_content, content_size, content_size);
+    FilterOperation::ShapeRects alpha_shape;
+    alpha_shape.emplace_back(half_content, half_content, content_size,
+                             content_size);
     filters.Append(
-        FilterOperation::CreateAlphaThresholdFilter(alpha_region, 1.f, 0.f));
+        FilterOperation::CreateAlphaThresholdFilter(alpha_shape, 1.f, 0.f));
     foreground->SetFilters(filters);
 
     device_scale_factor_ = device_scale_factor;
@@ -266,8 +263,8 @@ class LayerTreeHostCroppedFilterPixelTest
     // result completely.
     FilterOperations filters;
     SkImageFilter::CropRect cropRect(SkRect::MakeXYWH(0, 0, 100, 0));
-    sk_sp<SkImageFilter> offset(
-        SkOffsetImageFilter::Make(0, 0, nullptr, &cropRect));
+    sk_sp<PaintFilter> offset(
+        sk_make_sp<OffsetPaintFilter>(0, 0, nullptr, &cropRect));
     filters.Append(FilterOperation::CreateReferenceFilter(offset));
     foreground->SetFilters(filters);
 
@@ -301,8 +298,8 @@ class ImageFilterClippedPixelTest : public LayerTreeHostFiltersPixelTest {
     // We filter only the bottom 200x100 pixels of the foreground.
     SkImageFilter::CropRect crop_rect(SkRect::MakeXYWH(0, 100, 200, 100));
     FilterOperations filters;
-    filters.Append(
-        FilterOperation::CreateReferenceFilter(SkColorFilterImageFilter::Make(
+    filters.Append(FilterOperation::CreateReferenceFilter(
+        sk_make_sp<ColorFilterPaintFilter>(
             SkColorFilter::MakeMatrixFilterRowMajor255(matrix), nullptr,
             &crop_rect)));
 
@@ -350,8 +347,8 @@ class ImageFilterNonZeroOriginPixelTest : public LayerTreeHostFiltersPixelTest {
     // Set up a crop rec to filter the bottom 200x100 pixels of the foreground.
     SkImageFilter::CropRect crop_rect(SkRect::MakeXYWH(0, 100, 200, 100));
     FilterOperations filters;
-    filters.Append(
-        FilterOperation::CreateReferenceFilter(SkColorFilterImageFilter::Make(
+    filters.Append(FilterOperation::CreateReferenceFilter(
+        sk_make_sp<ColorFilterPaintFilter>(
             SkColorFilter::MakeMatrixFilterRowMajor255(matrix), nullptr,
             &crop_rect)));
 
@@ -838,12 +835,10 @@ class EnlargedTextureWithAlphaThresholdFilter
 
     rect1.Inset(-5, -5);
     rect2.Inset(-5, -5);
-    SkRegion alpha_region;
-    SkIRect rects[2] = {gfx::RectToSkIRect(rect1), gfx::RectToSkIRect(rect2)};
-    alpha_region.setRects(rects, 2);
+    FilterOperation::ShapeRects alpha_shape = {rect1, rect2};
     FilterOperations filters;
     filters.Append(
-        FilterOperation::CreateAlphaThresholdFilter(alpha_region, 0.f, 0.f));
+        FilterOperation::CreateAlphaThresholdFilter(alpha_shape, 0.f, 0.f));
     filter_layer->SetFilters(filters);
 
     background->AddChild(filter_layer);
@@ -895,7 +890,7 @@ class EnlargedTextureWithCropOffsetFilter
     FilterOperations filters;
     SkImageFilter::CropRect cropRect(SkRect::MakeXYWH(10, 10, 80, 80));
     filters.Append(FilterOperation::CreateReferenceFilter(
-        SkOffsetImageFilter::Make(0, 0, nullptr, &cropRect)));
+        sk_make_sp<OffsetPaintFilter>(0, 0, nullptr, &cropRect)));
     filter_layer->SetFilters(filters);
 
     background->AddChild(filter_layer);
@@ -996,10 +991,10 @@ class FilterWithGiantCropRectPixelTest : public LayerTreeHostFiltersPixelTest {
     FilterOperations filters;
     SkImageFilter::CropRect cropRect(
         SkRect::MakeXYWH(-40000, -40000, 80000, 80000));
-    filters.Append(
-        FilterOperation::CreateReferenceFilter((SkColorFilterImageFilter::Make(
+    filters.Append(FilterOperation::CreateReferenceFilter(
+        sk_make_sp<ColorFilterPaintFilter>(
             SkColorFilter::MakeMatrixFilterRowMajor255(matrix), nullptr,
-            &cropRect))));
+            &cropRect)));
     filter_layer->SetFilters(filters);
     background->SetMasksToBounds(masks_to_bounds);
     background->AddChild(filter_layer);
@@ -1055,7 +1050,7 @@ class BackgroundFilterWithDeviceScaleFactorTest
         gfx::Rect(0, 100, 200, 100), SkColorSetA(SK_ColorGREEN, 127));
     FilterOperations filters;
     filters.Append(FilterOperation::CreateReferenceFilter(
-        SkOffsetImageFilter::Make(0, 80, nullptr)));
+        sk_make_sp<OffsetPaintFilter>(0, 80, nullptr)));
     filtered->SetBackgroundFilters(filters);
     root->AddChild(filtered);
 
@@ -1075,7 +1070,7 @@ class BackgroundFilterWithDeviceScaleFactorTest
   }
 
   void SetupTree() override {
-    layer_tree_host()->SetDeviceScaleFactor(device_scale_factor_);
+    SetInitialDeviceScaleFactor(device_scale_factor_);
     LayerTreeHostFiltersPixelTest::SetupTree();
   }
 

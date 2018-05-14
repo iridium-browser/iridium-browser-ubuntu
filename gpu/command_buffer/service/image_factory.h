@@ -37,7 +37,9 @@ class GPU_EXPORT ImageFactory {
   virtual scoped_refptr<gl::GLImage> CreateAnonymousImage(
       const gfx::Size& size,
       gfx::BufferFormat format,
-      unsigned internalformat);
+      gfx::BufferUsage usage,
+      unsigned internalformat,
+      bool* is_cleared);
 
   // An image can only be bound to a texture with the appropriate type.
   virtual unsigned RequiredTextureType();

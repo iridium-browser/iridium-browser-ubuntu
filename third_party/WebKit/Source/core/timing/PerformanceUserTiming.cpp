@@ -27,7 +27,7 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/timing/PerformanceBase.h"
+#include "core/timing/Performance.h"
 #include "core/timing/PerformanceMark.h"
 #include "core/timing/PerformanceMeasure.h"
 #include "platform/Histogram.h"
@@ -74,8 +74,7 @@ const RestrictedKeyMap& GetRestrictedKeyMap() {
 
 }  // namespace
 
-UserTiming::UserTiming(PerformanceBase& performance)
-    : performance_(&performance) {}
+UserTiming::UserTiming(Performance& performance) : performance_(&performance) {}
 
 static void InsertPerformanceEntry(PerformanceEntryMap& performance_entry_map,
                                    PerformanceEntry& entry) {
@@ -100,7 +99,10 @@ static void ClearPeformanceEntries(PerformanceEntryMap& performance_entry_map,
     performance_entry_map.erase(name);
 }
 
-PerformanceEntry* UserTiming::Mark(const String& mark_name,
+PerformanceEntry* UserTiming::Mark(ScriptState* script_state,
+                                   const String& mark_name,
+                                   const DOMHighResTimeStamp& start_time,
+                                   const ScriptValue& detail,
                                    ExceptionState& exception_state) {
   if (GetRestrictedKeyMap().Contains(mark_name)) {
     exception_state.ThrowDOMException(
@@ -111,8 +113,8 @@ PerformanceEntry* UserTiming::Mark(const String& mark_name,
   }
 
   TRACE_EVENT_COPY_MARK("blink.user_timing", mark_name.Utf8().data());
-  double start_time = performance_->now();
-  PerformanceEntry* entry = PerformanceMark::Create(mark_name, start_time);
+  PerformanceEntry* entry =
+      PerformanceMark::Create(script_state, mark_name, start_time, detail);
   InsertPerformanceEntry(marks_map_, *entry);
   DEFINE_THREAD_SAFE_STATIC_LOCAL(CustomCountHistogram,
                                   user_timing_mark_histogram,
@@ -176,8 +178,8 @@ PerformanceEntry* UserTiming::Measure(const String& measure_name,
   // navigation, whereas trace events accept double seconds based off of
   // CurrentTime::monotonicallyIncreasingTime().
   double start_time_monotonic =
-      performance_->TimeOrigin() + start_time / 1000.0;
-  double end_time_monotonic = performance_->TimeOrigin() + end_time / 1000.0;
+      performance_->GetTimeOrigin() + start_time / 1000.0;
+  double end_time_monotonic = performance_->GetTimeOrigin() + end_time / 1000.0;
 
   TRACE_EVENT_COPY_NESTABLE_ASYNC_BEGIN_WITH_TIMESTAMP0(
       "blink.user_timing", measure_name.Utf8().data(),
@@ -242,7 +244,7 @@ PerformanceEntryVector UserTiming::GetMeasures(const String& name) const {
   return GetEntrySequenceByName(measures_map_, name);
 }
 
-DEFINE_TRACE(UserTiming) {
+void UserTiming::Trace(blink::Visitor* visitor) {
   visitor->Trace(performance_);
   visitor->Trace(marks_map_);
   visitor->Trace(measures_map_);

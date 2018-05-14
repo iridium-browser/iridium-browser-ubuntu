@@ -5,14 +5,17 @@
 #include "platform/scroll/ScrollbarThemeOverlay.h"
 
 #include "platform/scroll/ScrollbarTestSuite.h"
-#include "platform/testing/TestingPlatformSupport.h"
+#include "platform/testing/TestingPlatformSupportWithMockScheduler.h"
 
 namespace blink {
 
 using ::testing::NiceMock;
 using ::testing::Return;
 
-using ScrollbarThemeOverlayTest = ::testing::Test;
+class ScrollbarThemeOverlayTest : public ::testing::Test {
+ private:
+  base::MessageLoop message_loop_;
+};
 
 TEST_F(ScrollbarThemeOverlayTest, PaintInvalidation) {
   ScopedTestingPlatformSupport<TestingPlatformSupportWithMockScheduler>

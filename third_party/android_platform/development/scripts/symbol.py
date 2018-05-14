@@ -104,56 +104,6 @@ def ToolPath(tool, toolchain_info=None):
                       toolchain_subdir,
                       toolchain_prefix + "-" + tool)
 
-def FindToolchain():
-  """Look for the latest available toolchain
-
-  Args:
-    None
-
-  Returns:
-    A pair of strings containing toolchain label and target prefix.
-  """
-  global TOOLCHAIN_INFO
-  if TOOLCHAIN_INFO is not None:
-    return TOOLCHAIN_INFO
-
-  ## Known toolchains, newer ones in the front.
-  gcc_version = "4.9"
-  if ARCH == "arm64":
-    known_toolchains = [
-      ("aarch64-linux-android-" + gcc_version, "aarch64", "aarch64-linux-android")
-    ]
-  elif ARCH == "arm":
-    known_toolchains = [
-      ("arm-linux-androideabi-" + gcc_version, "arm", "arm-linux-androideabi")
-    ]
-  elif ARCH =="x86":
-    known_toolchains = [
-      ("x86-" + gcc_version, "x86", "i686-linux-android")
-    ]
-  elif ARCH =="x86_64" or ARCH =="x64":
-    known_toolchains = [
-      ("x86_64-" + gcc_version, "x86_64", "x86_64-linux-android")
-    ]
-  elif ARCH == "mips":
-    known_toolchains = [
-      ("mipsel-linux-android-" + gcc_version, "mips", "mipsel-linux-android")
-    ]
-  else:
-    known_toolchains = []
-
-  logging.debug('FindToolcahin: known_toolchains=%s' % known_toolchains)
-  # Look for addr2line to check for valid toolchain path.
-  for (label, platform, target) in known_toolchains:
-    toolchain_info = (label, platform, target);
-    if os.path.exists(ToolPath("addr2line", toolchain_info)):
-      TOOLCHAIN_INFO = toolchain_info
-      print ("Using toolchain from: "
-             + os.path.normpath(ToolPath("", TOOLCHAIN_INFO)))
-      return toolchain_info
-
-  raise Exception("Could not find tool chain")
-
 def GetAapt():
   """Returns the path to aapt.
 
@@ -364,30 +314,81 @@ def TranslateLibPath(lib):
 
   library_path = os.path.relpath(candidate_libraries[0], SYMBOLS_DIR)
   logging.debug('TranslateLibPath: library_path=%s' % library_path)
-  return '/' + library_path
+  return library_path
 
-def SymbolInformation(lib, addr, get_detailed_info):
-  """Look up symbol information about an address.
+def CallCppFilt(mangled_symbol):
+  cmd = [ToolPath("c++filt")]
+  process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+  process.stdin.write(mangled_symbol)
+  process.stdin.write("\n")
+  process.stdin.close()
+  demangled_symbol = process.stdout.readline().strip()
+  process.stdout.close()
+  return demangled_symbol
+
+def FormatSymbolWithOffset(symbol, offset):
+  if offset == 0:
+    return symbol
+  return "%s+%d" % (symbol, offset)
+
+def SetSecondaryAbiOutputPath(path):
+   global SECONDARY_ABI_OUTPUT_PATH
+   if SECONDARY_ABI_OUTPUT_PATH and SECONDARY_ABI_OUTPUT_PATH != path:
+     raise Exception ("Assign SECONDARY_ABI_OUTPUT_PATH to different value " +
+                      " origin: %s new: %s" % ("", path))
+   else:
+     SECONDARY_ABI_OUTPUT_PATH = path
+
+
+def FindToolchain():
+  """Look for the latest available toolchain
 
   Args:
-    lib: library (or executable) pathname containing symbols
-    addr: string hexidecimal address
+    None
 
   Returns:
-    A list of the form [(source_symbol, source_location,
-    object_symbol_with_offset)].
-
-    If the function has been inlined then the list may contain
-    more than one element with the symbols for the most deeply
-    nested inlined location appearing first.  The list is
-    always non-empty, even if no information is available.
-
-    Usually you want to display the source_location and
-    object_symbol_with_offset from the last element in the list.
+    A pair of strings containing toolchain label and target prefix.
   """
-  lib = TranslateLibPath(lib)
-  info = SymbolInformationForSet(lib, set([addr]), get_detailed_info)
-  return (info and info.get(addr)) or [(None, None, None)]
+  global TOOLCHAIN_INFO
+  if TOOLCHAIN_INFO is not None:
+    return TOOLCHAIN_INFO
+
+  ## Known toolchains, newer ones in the front.
+  gcc_version = "4.9"
+  if ARCH == "arm64":
+    known_toolchains = [
+      ("aarch64-linux-android-" + gcc_version, "aarch64", "aarch64-linux-android")
+    ]
+  elif ARCH == "arm":
+    known_toolchains = [
+      ("arm-linux-androideabi-" + gcc_version, "arm", "arm-linux-androideabi")
+    ]
+  elif ARCH =="x86":
+    known_toolchains = [
+      ("x86-" + gcc_version, "x86", "i686-linux-android")
+    ]
+  elif ARCH =="x86_64" or ARCH =="x64":
+    known_toolchains = [
+      ("x86_64-" + gcc_version, "x86_64", "x86_64-linux-android")
+    ]
+  elif ARCH == "mips":
+    known_toolchains = [
+      ("mipsel-linux-android-" + gcc_version, "mips", "mipsel-linux-android")
+    ]
+  else:
+    known_toolchains = []
+
+  logging.debug('FindToolcahin: known_toolchains=%s' % known_toolchains)
+  # Look for addr2line to check for valid toolchain path.
+  for (label, platform, target) in known_toolchains:
+    toolchain_info = (label, platform, target);
+    if os.path.exists(ToolPath("addr2line", toolchain_info)):
+      TOOLCHAIN_INFO = toolchain_info
+      print ("Using toolchain from: "
+             + os.path.normpath(ToolPath("", TOOLCHAIN_INFO)))
+      return toolchain_info
+
+  raise Exception("Could not find tool chain")
 
 
 def SymbolInformationForSet(lib, unique_addrs, get_detailed_info):
@@ -439,7 +440,6 @@ def SymbolInformationForSet(lib, unique_addrs, get_detailed_info):
         for (source_symbol, source_location) in source_info]
 
   return result
-
 
 class MemoizedForSet(object):
   def __init__(self, fn):
@@ -512,21 +512,6 @@ def CallAddr2LineForSet(lib, unique_addrs):
   symbolizer.Join()
   return result
 
-
-def StripPC(addr):
-  """Strips the Thumb bit a program counter address when appropriate.
-
-  Args:
-    addr: the program counter address
-
-  Returns:
-    The stripped program counter address.
-  """
-  global ARCH
-
-  if ARCH == "arm":
-    return addr & ~1
-  return addr
 
 @MemoizedForSet
 def CallObjdumpForSet(lib, unique_addrs):
@@ -607,27 +592,3 @@ def CallObjdumpForSet(lib, unique_addrs):
     stream.close()
 
   return result
-
-
-def CallCppFilt(mangled_symbol):
-  cmd = [ToolPath("c++filt")]
-  process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-  process.stdin.write(mangled_symbol)
-  process.stdin.write("\n")
-  process.stdin.close()
-  demangled_symbol = process.stdout.readline().strip()
-  process.stdout.close()
-  return demangled_symbol
-
-def FormatSymbolWithOffset(symbol, offset):
-  if offset == 0:
-    return symbol
-  return "%s+%d" % (symbol, offset)
-
-def SetSecondaryAbiOutputPath(path):
-   global SECONDARY_ABI_OUTPUT_PATH
-   if SECONDARY_ABI_OUTPUT_PATH and SECONDARY_ABI_OUTPUT_PATH != path:
-     raise Exception ("Assign SECONDARY_ABI_OUTPUT_PATH to different value " +
-                      " origin: %s new: %s" % ("", path))
-   else:
-     SECONDARY_ABI_OUTPUT_PATH = path

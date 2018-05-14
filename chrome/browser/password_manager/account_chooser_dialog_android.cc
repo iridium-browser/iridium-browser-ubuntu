@@ -23,6 +23,7 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
+#include "content/public/browser/storage_partition.h"
 #include "jni/AccountChooserDialog_jni.h"
 #include "ui/android/window_android.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -36,7 +37,7 @@ using base::android::ScopedJavaLocalRef;
 
 namespace {
 
-void AddElementsToJavaCredentialArray(
+void JNI_AccountChooserDialog_AddElementsToJavaCredentialArray(
     JNIEnv* env,
     ScopedJavaLocalRef<jobjectArray> java_credentials_array,
     const std::vector<std::unique_ptr<autofill::PasswordForm>>& forms) {
@@ -91,13 +92,13 @@ void AvatarFetcherAndroid::OnFetchComplete(const GURL& url,
 void FetchAvatar(const base::android::ScopedJavaGlobalRef<jobject>& java_dialog,
                  const autofill::PasswordForm* password_form,
                  int index,
-                 net::URLRequestContextGetter* request_context) {
+                 network::mojom::URLLoaderFactory* loader_factory) {
   if (!password_form->icon_url.is_valid())
     return;
   // Fetcher deletes itself once fetching is finished.
   auto* fetcher =
       new AvatarFetcherAndroid(password_form->icon_url, index, java_dialog);
-  fetcher->Start(request_context);
+  fetcher->Start(loader_factory);
 }
 
 };  // namespace
@@ -132,7 +133,7 @@ void AccountChooserDialogAndroid::ShowDialog() {
   gfx::NativeWindow native_window = web_contents_->GetTopLevelNativeWindow();
   ScopedJavaLocalRef<jobjectArray> java_credentials_array =
       CreateNativeCredentialArray(env, local_credentials_forms().size());
-  AddElementsToJavaCredentialArray(
+  JNI_AccountChooserDialog_AddElementsToJavaCredentialArray(
       env, java_credentials_array, local_credentials_forms());
   base::android::ScopedJavaGlobalRef<jobject> java_dialog_global;
   const std::string origin = password_manager::GetShownOrigin(origin_);
@@ -148,12 +149,14 @@ void AccountChooserDialogAndroid::ShowDialog() {
       title_link_range.start(), title_link_range.end(),
       base::android::ConvertUTF8ToJavaString(env, origin),
       base::android::ConvertUTF16ToJavaString(env, signin_button)));
-  net::URLRequestContextGetter* request_context =
-      Profile::FromBrowserContext(web_contents_->GetBrowserContext())
-          ->GetRequestContext();
+  network::mojom::URLLoaderFactory* loader_factory =
+      content::BrowserContext::GetDefaultStoragePartition(
+          Profile::FromBrowserContext(web_contents_->GetBrowserContext()))
+          ->GetURLLoaderFactoryForBrowserProcess()
+          .get();
   int avatar_index = 0;
   for (const auto& form : local_credentials_forms())
-    FetchAvatar(dialog_jobject_, form.get(), avatar_index++, request_context);
+    FetchAvatar(dialog_jobject_, form.get(), avatar_index++, loader_factory);
 }
 
 void AccountChooserDialogAndroid::OnCredentialClicked(
@@ -192,12 +195,15 @@ void AccountChooserDialogAndroid::WebContentsDestroyed() {
   Java_AccountChooserDialog_dismissDialog(env, dialog_jobject_);
 }
 
-void AccountChooserDialogAndroid::WasHidden() {
-  // TODO(https://crbug.com/610700): once bug is fixed, this code should be
-  // gone.
-  OnDialogCancel();
-  JNIEnv* env = AttachCurrentThread();
-  Java_AccountChooserDialog_dismissDialog(env, dialog_jobject_);
+void AccountChooserDialogAndroid::OnVisibilityChanged(
+    content::Visibility visibility) {
+  if (visibility == content::Visibility::HIDDEN) {
+    // TODO(https://crbug.com/610700): once bug is fixed, this code should be
+    // gone.
+    OnDialogCancel();
+    JNIEnv* env = AttachCurrentThread();
+    Java_AccountChooserDialog_dismissDialog(env, dialog_jobject_);
+  }
 }
 
 void AccountChooserDialogAndroid::OnDialogCancel() {

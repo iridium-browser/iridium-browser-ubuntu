@@ -11,15 +11,9 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
-#include "base/run_loop.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
-#include "components/signin/core/browser/account_tracker_service.h"
-#include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
-#include "components/signin/core/browser/fake_signin_manager.h"
-#include "components/signin/core/browser/test_signin_client.h"
+#include "base/test/test_mock_time_task_runner.h"
 #include "components/suggestions/blacklist_store.h"
 #include "components/suggestions/features.h"
 #include "components/suggestions/image_manager.h"
@@ -27,23 +21,22 @@
 #include "components/suggestions/suggestions_store.h"
 #include "components/sync/driver/fake_sync_service.h"
 #include "components/sync/driver/sync_service.h"
-#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/identity/public/cpp/identity_test_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/image/image.h"
 
-using sync_preferences::TestingPrefServiceSyncable;
 using syncer::SyncServiceObserver;
 using testing::_;
 using testing::AnyNumber;
 using testing::DoAll;
-using testing::Eq;
 using testing::Mock;
 using testing::Return;
 using testing::SetArgPointee;
@@ -51,7 +44,7 @@ using testing::StrictMock;
 
 namespace {
 
-const char kAccountId[] = "account";
+const char kEmail[] = "foo_email";
 const char kSuggestionsUrlPath[] = "/chromesuggestions";
 const char kBlacklistUrlPath[] = "/chromesuggestions/blacklist";
 const char kBlacklistClearUrlPath[] = "/chromesuggestions/blacklist/clear";
@@ -141,19 +134,15 @@ class MockBlacklistStore : public suggestions::BlacklistStore {
 class SuggestionsServiceTest : public testing::Test {
  protected:
   SuggestionsServiceTest()
-      : signin_client_(&pref_service_),
-        signin_manager_(&signin_client_, &account_tracker_),
-        request_context_(new net::TestURLRequestContextGetter(
-            io_message_loop_.task_runner())),
+      : task_runner_(new base::TestMockTimeTaskRunner(
+            base::TestMockTimeTaskRunner::Type::kBoundToThread)),
+        request_context_(
+            new net::TestURLRequestContextGetter(task_runner_.get())),
         mock_thumbnail_manager_(nullptr),
         mock_blacklist_store_(nullptr),
         test_suggestions_store_(nullptr) {
-    SigninManagerBase::RegisterProfilePrefs(pref_service_.registry());
-    SigninManagerBase::RegisterPrefs(pref_service_.registry());
-
-    signin_manager_.SignIn(kAccountId);
-    token_service_.UpdateCredentials(kAccountId, "refresh_token");
-    token_service_.set_auto_post_fetch_response_on_message_loop(true);
+    identity_test_env_.MakePrimaryAccountAvailable(kEmail);
+    identity_test_env_.SetAutomaticIssueOfAccessTokens(true);
   }
 
   ~SuggestionsServiceTest() override {}
@@ -177,11 +166,12 @@ class SuggestionsServiceTest : public testing::Test {
     test_suggestions_store_ = new TestSuggestionsStore();
     mock_thumbnail_manager_ = new StrictMock<MockImageManager>();
     mock_blacklist_store_ = new StrictMock<MockBlacklistStore>();
-    suggestions_service_ = base::MakeUnique<SuggestionsServiceImpl>(
-        &signin_manager_, &token_service_, &mock_sync_service_,
+    suggestions_service_ = std::make_unique<SuggestionsServiceImpl>(
+        identity_test_env_.identity_manager(), &mock_sync_service_,
         request_context_.get(), base::WrapUnique(test_suggestions_store_),
         base::WrapUnique(mock_thumbnail_manager_),
-        base::WrapUnique(mock_blacklist_store_));
+        base::WrapUnique(mock_blacklist_store_),
+        task_runner_->GetMockTickClock());
   }
 
   GURL GetCurrentlyQueriedUrl() {
@@ -209,7 +199,7 @@ class SuggestionsServiceTest : public testing::Test {
         net::URLRequestStatus(net::URLRequestStatus::SUCCESS, net::OK));
   }
 
-  FakeProfileOAuth2TokenService* token_service() { return &token_service_; }
+  base::TestMockTimeTaskRunner* task_runner() { return task_runner_.get(); }
 
   MockSyncService* sync_service() { return &mock_sync_service_; }
 
@@ -223,14 +213,14 @@ class SuggestionsServiceTest : public testing::Test {
     return suggestions_service_.get();
   }
 
+  identity::IdentityTestEnvironment* identity_test_env() {
+    return &identity_test_env_;
+  }
+
  private:
-  base::MessageLoopForIO io_message_loop_;
-  TestingPrefServiceSyncable pref_service_;
-  AccountTrackerService account_tracker_;
-  TestSigninClient signin_client_;
-  FakeSigninManagerBase signin_manager_;
+  scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
   net::TestURLFetcherFactory factory_;
-  FakeProfileOAuth2TokenService token_service_;
+  identity::IdentityTestEnvironment identity_test_env_;
   MockSyncService mock_sync_service_;
   scoped_refptr<net::TestURLRequestContextGetter> request_context_;
   // Owned by the SuggestionsService.
@@ -258,7 +248,7 @@ TEST_F(SuggestionsServiceTest, FetchSuggestionsData) {
   EXPECT_CALL(callback, Run(_));
 
   // Wait for the eventual network request.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   ASSERT_TRUE(GetCurrentlyQueriedUrl().is_valid());
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kSuggestionsUrlPath);
   RespondToFetchWithProfile(CreateSuggestionsProfile());
@@ -281,8 +271,8 @@ TEST_F(SuggestionsServiceTest, IgnoresNoopSyncChange) {
       ->OnStateChanged(sync_service());
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 }
 
 TEST_F(SuggestionsServiceTest, IgnoresUninterestingSyncChange) {
@@ -300,8 +290,8 @@ TEST_F(SuggestionsServiceTest, IgnoresUninterestingSyncChange) {
       ->OnStateChanged(sync_service());
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 }
 
 // During startup, the state changes from NOT_INITIALIZED_ENABLED to
@@ -313,8 +303,8 @@ TEST_F(SuggestionsServiceTest, DoesNotFetchOnStartup) {
   static_cast<SyncServiceObserver*>(suggestions_service())
       ->OnStateChanged(sync_service());
 
-  base::RunLoop().RunUntilIdle();
-  ASSERT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  ASSERT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 
   // Sync getting enabled should not result in a fetch.
   EXPECT_CALL(*sync_service(), IsSyncActive()).WillRepeatedly(Return(true));
@@ -322,8 +312,8 @@ TEST_F(SuggestionsServiceTest, DoesNotFetchOnStartup) {
       ->OnStateChanged(sync_service());
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 }
 
 TEST_F(SuggestionsServiceTest, BuildUrlWithDefaultMinZeroParamForFewFeature) {
@@ -339,7 +329,7 @@ TEST_F(SuggestionsServiceTest, BuildUrlWithDefaultMinZeroParamForFewFeature) {
   suggestions_service()->FetchSuggestionsData();
 
   // Wait for the eventual network request.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   ASSERT_TRUE(GetCurrentlyQueriedUrl().is_valid());
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kSuggestionsUrlPath);
   std::string min_suggestions;
@@ -363,8 +353,8 @@ TEST_F(SuggestionsServiceTest, FetchSuggestionsDataSyncNotInitializedEnabled) {
   suggestions_service()->FetchSuggestionsData();
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 
   // |suggestions_store()| should still contain the default values.
   SuggestionsProfile suggestions;
@@ -389,12 +379,12 @@ TEST_F(SuggestionsServiceTest, FetchSuggestionsDataSyncDisabled) {
   suggestions_service()->FetchSuggestionsData();
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 }
 
 TEST_F(SuggestionsServiceTest, FetchSuggestionsDataNoAccessToken) {
-  token_service()->set_auto_post_fetch_response_on_message_loop(false);
+  identity_test_env()->SetAutomaticIssueOfAccessTokens(false);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   EXPECT_CALL(callback, Run(_)).Times(0);
@@ -405,12 +395,13 @@ TEST_F(SuggestionsServiceTest, FetchSuggestionsDataNoAccessToken) {
 
   suggestions_service()->FetchSuggestionsData();
 
-  token_service()->IssueErrorForAllPendingRequests(GoogleServiceAuthError(
-      GoogleServiceAuthError::State::INVALID_GAIA_CREDENTIALS));
+  identity_test_env()->WaitForAccessTokenRequestAndRespondWithError(
+      GoogleServiceAuthError(
+          GoogleServiceAuthError::State::INVALID_GAIA_CREDENTIALS));
 
   // Wait for eventual (but unexpected) network requests.
-  base::RunLoop().RunUntilIdle();
-  EXPECT_FALSE(suggestions_service()->has_pending_request_for_testing());
+  task_runner()->RunUntilIdle();
+  EXPECT_FALSE(suggestions_service()->HasPendingRequestForTesting());
 }
 
 TEST_F(SuggestionsServiceTest, FetchingSuggestionsIgnoresRequestFailure) {
@@ -420,7 +411,7 @@ TEST_F(SuggestionsServiceTest, FetchingSuggestionsIgnoresRequestFailure) {
   suggestions_service()->FetchSuggestionsData();
 
   // Wait for the eventual network request.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   RespondToFetch("irrelevant", net::HTTP_OK,
                  net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                        net::ERR_INVALID_RESPONSE));
@@ -437,7 +428,7 @@ TEST_F(SuggestionsServiceTest, FetchingSuggestionsClearsStoreIfResponseNotOK) {
   suggestions_service()->FetchSuggestionsData();
 
   // Wait for the eventual network request.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   RespondToFetch(
       "irrelevant", net::HTTP_BAD_REQUEST,
       net::URLRequestStatus(net::URLRequestStatus::SUCCESS, net::OK));
@@ -447,16 +438,13 @@ TEST_F(SuggestionsServiceTest, FetchingSuggestionsClearsStoreIfResponseNotOK) {
 }
 
 TEST_F(SuggestionsServiceTest, BlacklistURL) {
-  // Calling RunUntilIdle on the RunLoop only works when the task is not posted
-  // for the future.
   const base::TimeDelta no_delay = base::TimeDelta::FromSeconds(0);
-  suggestions_service()->set_blacklist_delay_for_testing(no_delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   EXPECT_CALL(*thumbnail_manager(), Initialize(_)).Times(2);
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
   EXPECT_CALL(*blacklist_store(), FilterSuggestions(_)).Times(2);
   EXPECT_CALL(*blacklist_store(), GetTimeUntilReadyForUpload(_))
@@ -464,7 +452,7 @@ TEST_F(SuggestionsServiceTest, BlacklistURL) {
       .WillOnce(Return(false));
   EXPECT_CALL(*blacklist_store(), GetCandidateForUpload(_))
       .WillOnce(DoAll(SetArgPointee<0>(GURL(kBlacklistedUrl)), Return(true)));
-  EXPECT_CALL(*blacklist_store(), RemoveUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), RemoveUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
 
   EXPECT_CALL(callback, Run(_)).Times(2);
@@ -472,10 +460,8 @@ TEST_F(SuggestionsServiceTest, BlacklistURL) {
   EXPECT_TRUE(suggestions_service()->BlacklistURL(GURL(kBlacklistedUrl)));
 
   // Wait on the upload task, the blacklist request and the next blacklist
-  // scheduling task. This only works when the scheduling task is not for future
-  // execution (note how both the SuggestionsService's scheduling delay and the
-  // BlacklistStore's candidacy delay are zero).
-  base::RunLoop().RunUntilIdle();
+  // scheduling task.
+  task_runner()->FastForwardUntilNoTasksRemain();
 
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kBlacklistUrlPath);
   RespondToFetchWithProfile(CreateSuggestionsProfile());
@@ -493,29 +479,26 @@ TEST_F(SuggestionsServiceTest, BlacklistURLFails) {
   EXPECT_CALL(callback, Run(_)).Times(0);
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(false));
 
   EXPECT_FALSE(suggestions_service()->BlacklistURL(GURL(kBlacklistedUrl)));
 }
 
 TEST_F(SuggestionsServiceTest, RetryBlacklistURLRequestAfterFailure) {
-  // Calling RunUntilIdle on the RunLoop only works when the task is not
-  // posted for the future.
   const base::TimeDelta no_delay = base::TimeDelta::FromSeconds(0);
-  suggestions_service()->set_blacklist_delay_for_testing(no_delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   // Set expectations for first, failing request.
   EXPECT_CALL(*thumbnail_manager(), Initialize(_));
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
-      .WillOnce(Return(true));
-  EXPECT_CALL(*blacklist_store(), FilterSuggestions(_));
   EXPECT_CALL(*blacklist_store(), GetTimeUntilReadyForUpload(_))
-      .WillOnce(DoAll(SetArgPointee<0>(no_delay), Return(true)))
-      .WillOnce(DoAll(SetArgPointee<0>(no_delay), Return(true)));
+      .Times(AnyNumber())
+      .WillRepeatedly(DoAll(SetArgPointee<0>(no_delay), Return(true)));
+  EXPECT_CALL(*blacklist_store(), FilterSuggestions(_));
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
+      .WillOnce(Return(true));
   EXPECT_CALL(*blacklist_store(), GetCandidateForUpload(_))
       .WillOnce(DoAll(SetArgPointee<0>(GURL(kBlacklistedUrl)), Return(true)));
 
@@ -525,7 +508,7 @@ TEST_F(SuggestionsServiceTest, RetryBlacklistURLRequestAfterFailure) {
   EXPECT_TRUE(suggestions_service()->BlacklistURL(GURL(kBlacklistedUrl)));
 
   // Wait for the first scheduling receiving a failing response.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->FastForwardUntilNoTasksRemain();
   ASSERT_TRUE(GetCurrentlyQueriedUrl().is_valid());
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kBlacklistUrlPath);
   RespondToFetch("irrelevant", net::HTTP_OK,
@@ -538,16 +521,18 @@ TEST_F(SuggestionsServiceTest, RetryBlacklistURLRequestAfterFailure) {
 
   // Now expect the retried request to succeed.
   EXPECT_CALL(*thumbnail_manager(), Initialize(_));
-  EXPECT_CALL(*blacklist_store(), FilterSuggestions(_));
   EXPECT_CALL(*blacklist_store(), GetTimeUntilReadyForUpload(_))
-      .WillOnce(Return(false));
+      .Times(AnyNumber())
+      .WillRepeatedly(DoAll(SetArgPointee<0>(no_delay), Return(true)));
+  EXPECT_CALL(*blacklist_store(), FilterSuggestions(_));
   EXPECT_CALL(*blacklist_store(), GetCandidateForUpload(_))
       .WillOnce(DoAll(SetArgPointee<0>(GURL(kBlacklistedUrl)), Return(true)));
-  EXPECT_CALL(*blacklist_store(), RemoveUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), RemoveUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
 
   // Wait for the second scheduling followed by a successful response.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->FastForwardUntilNoTasksRemain();
+  ASSERT_TRUE(suggestions_service()->HasPendingRequestForTesting());
   ASSERT_TRUE(GetCurrentlyQueriedUrl().is_valid());
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kBlacklistUrlPath);
   RespondToFetchWithProfile(CreateSuggestionsProfile());
@@ -563,13 +548,12 @@ TEST_F(SuggestionsServiceTest, RetryBlacklistURLRequestAfterFailure) {
 TEST_F(SuggestionsServiceTest, UndoBlacklistURL) {
   // Ensure scheduling the request doesn't happen before undo.
   const base::TimeDelta delay = base::TimeDelta::FromHours(1);
-  suggestions_service()->set_blacklist_delay_for_testing(delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   // Blacklist expectations.
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
   EXPECT_CALL(*thumbnail_manager(),
               Initialize(EqualsProto(CreateSuggestionsProfile())))
@@ -579,9 +563,9 @@ TEST_F(SuggestionsServiceTest, UndoBlacklistURL) {
       .WillOnce(DoAll(SetArgPointee<0>(delay), Return(true)));
   // Undo expectations.
   EXPECT_CALL(*blacklist_store(),
-              GetTimeUntilURLReadyForUpload(Eq(GURL(kBlacklistedUrl)), _))
+              GetTimeUntilURLReadyForUpload(GURL(kBlacklistedUrl), _))
       .WillOnce(DoAll(SetArgPointee<1>(delay), Return(true)));
-  EXPECT_CALL(*blacklist_store(), RemoveUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), RemoveUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
 
   EXPECT_CALL(callback, Run(_)).Times(2);
@@ -591,13 +575,12 @@ TEST_F(SuggestionsServiceTest, UndoBlacklistURL) {
 
 TEST_F(SuggestionsServiceTest, ClearBlacklist) {
   const base::TimeDelta delay = base::TimeDelta::FromHours(1);
-  suggestions_service()->set_blacklist_delay_for_testing(delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   // Blacklist expectations.
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
   EXPECT_CALL(*thumbnail_manager(),
               Initialize(EqualsProto(CreateSuggestionsProfile())))
@@ -612,20 +595,20 @@ TEST_F(SuggestionsServiceTest, ClearBlacklist) {
   suggestions_service()->ClearBlacklist();
 
   // Wait for the eventual network request.
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
+  ASSERT_TRUE(suggestions_service()->HasPendingRequestForTesting());
   EXPECT_EQ(GetCurrentlyQueriedUrl().path(), kBlacklistClearUrlPath);
 }
 
 TEST_F(SuggestionsServiceTest, UndoBlacklistURLFailsIfNotInBlacklist) {
   // Ensure scheduling the request doesn't happen before undo.
   const base::TimeDelta delay = base::TimeDelta::FromHours(1);
-  suggestions_service()->set_blacklist_delay_for_testing(delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   // Blacklist expectations.
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
   EXPECT_CALL(*thumbnail_manager(),
               Initialize(EqualsProto(CreateSuggestionsProfile())));
@@ -635,7 +618,7 @@ TEST_F(SuggestionsServiceTest, UndoBlacklistURLFailsIfNotInBlacklist) {
   // Undo expectations.
   // URL is not in local blacklist.
   EXPECT_CALL(*blacklist_store(),
-              GetTimeUntilURLReadyForUpload(Eq(GURL(kBlacklistedUrl)), _))
+              GetTimeUntilURLReadyForUpload(GURL(kBlacklistedUrl), _))
       .WillOnce(Return(false));
 
   EXPECT_CALL(callback, Run(_));
@@ -647,13 +630,12 @@ TEST_F(SuggestionsServiceTest, UndoBlacklistURLFailsIfNotInBlacklist) {
 TEST_F(SuggestionsServiceTest, UndoBlacklistURLFailsIfAlreadyCandidate) {
   // Ensure scheduling the request doesn't happen before undo.
   const base::TimeDelta delay = base::TimeDelta::FromHours(1);
-  suggestions_service()->set_blacklist_delay_for_testing(delay);
 
   base::MockCallback<SuggestionsService::ResponseCallback> callback;
   auto subscription = suggestions_service()->AddCallback(callback.Get());
 
   // Blacklist expectations.
-  EXPECT_CALL(*blacklist_store(), BlacklistUrl(Eq(GURL(kBlacklistedUrl))))
+  EXPECT_CALL(*blacklist_store(), BlacklistUrl(GURL(kBlacklistedUrl)))
       .WillOnce(Return(true));
   EXPECT_CALL(*thumbnail_manager(),
               Initialize(EqualsProto(CreateSuggestionsProfile())));
@@ -664,7 +646,7 @@ TEST_F(SuggestionsServiceTest, UndoBlacklistURLFailsIfAlreadyCandidate) {
   // URL is not yet candidate for upload.
   const base::TimeDelta negative_delay = base::TimeDelta::FromHours(-1);
   EXPECT_CALL(*blacklist_store(),
-              GetTimeUntilURLReadyForUpload(Eq(GURL(kBlacklistedUrl)), _))
+              GetTimeUntilURLReadyForUpload(GURL(kBlacklistedUrl), _))
       .WillOnce(DoAll(SetArgPointee<1>(negative_delay), Return(true)));
 
   EXPECT_CALL(callback, Run(_));
@@ -680,30 +662,38 @@ TEST_F(SuggestionsServiceTest, TemporarilyIncreasesBlacklistDelayOnFailure) {
       .Times(AnyNumber())
       .WillRepeatedly(Return(false));
   const base::TimeDelta initial_delay =
-      suggestions_service()->blacklist_delay_for_testing();
+      suggestions_service()->BlacklistDelayForTesting();
 
   // Delay unchanged on success.
   suggestions_service()->FetchSuggestionsData();
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   RespondToFetchWithProfile(CreateSuggestionsProfile());
-  EXPECT_EQ(initial_delay,
-            suggestions_service()->blacklist_delay_for_testing());
+  EXPECT_EQ(initial_delay, suggestions_service()->BlacklistDelayForTesting());
 
   // Delay increases on failure.
   suggestions_service()->FetchSuggestionsData();
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   RespondToFetch(
       "irrelevant", net::HTTP_BAD_REQUEST,
       net::URLRequestStatus(net::URLRequestStatus::SUCCESS, net::OK));
-  EXPECT_GT(suggestions_service()->blacklist_delay_for_testing(),
-            initial_delay);
+  base::TimeDelta delay_after_fail =
+      suggestions_service()->BlacklistDelayForTesting();
+  EXPECT_GT(delay_after_fail, initial_delay);
 
-  // Delay resets on success.
+  // Success resets future delays, but the current horizon remains. Since no
+  // time has passed, the actual current delay stays the same.
   suggestions_service()->FetchSuggestionsData();
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   RespondToFetchWithProfile(CreateSuggestionsProfile());
-  EXPECT_EQ(initial_delay,
-            suggestions_service()->blacklist_delay_for_testing());
+  EXPECT_EQ(delay_after_fail,
+            suggestions_service()->BlacklistDelayForTesting());
+
+  // After the current horizon has passed, we're back at the initial delay.
+  task_runner()->FastForwardBy(delay_after_fail);
+  suggestions_service()->FetchSuggestionsData();
+  task_runner()->RunUntilIdle();
+  RespondToFetchWithProfile(CreateSuggestionsProfile());
+  EXPECT_EQ(initial_delay, suggestions_service()->BlacklistDelayForTesting());
 }
 
 TEST_F(SuggestionsServiceTest, DoesNotOverrideDefaultExpiryTime) {
@@ -714,7 +704,7 @@ TEST_F(SuggestionsServiceTest, DoesNotOverrideDefaultExpiryTime) {
 
   suggestions_service()->FetchSuggestionsData();
 
-  base::RunLoop().RunUntilIdle();
+  task_runner()->RunUntilIdle();
   // Creates one suggestion without timestamp and adds a second with timestamp.
   SuggestionsProfile profile = CreateSuggestionsProfile();
   ChromeSuggestion* suggestion = profile.add_suggestions();

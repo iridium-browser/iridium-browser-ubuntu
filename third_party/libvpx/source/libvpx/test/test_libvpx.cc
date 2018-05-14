@@ -53,12 +53,14 @@ int main(int argc, char **argv) {
   }
   if (!(simd_caps & HAS_AVX)) append_negative_gtest_filter(":AVX.*:AVX/*");
   if (!(simd_caps & HAS_AVX2)) append_negative_gtest_filter(":AVX2.*:AVX2/*");
+  if (!(simd_caps & HAS_AVX512)) {
+    append_negative_gtest_filter(":AVX512.*:AVX512/*");
+  }
 #endif  // ARCH_X86 || ARCH_X86_64
 
 #if !CONFIG_SHARED
 // Shared library builds don't support whitebox tests
 // that exercise internal symbols.
-
 #if CONFIG_VP8
   vp8_rtcd();
 #endif  // CONFIG_VP8

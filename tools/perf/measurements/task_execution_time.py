@@ -53,7 +53,7 @@ class TaskExecutionTime(legacy_page_test.LegacyPageTest):
 
   def ValidateAndMeasurePage(self, page, tab, results):
     del page  # unused
-    trace_data = tab.browser.platform.tracing_controller.StopTracing()
+    trace_data = tab.browser.platform.tracing_controller.StopTracing()[0]
     timeline_model = TimelineModel(trace_data)
 
     self._renderer_process = timeline_model.GetRendererProcessFromTabId(tab.id)

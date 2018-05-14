@@ -10,7 +10,6 @@
 #include "base/callback_helpers.h"
 #include "base/i18n/message_formatter.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "remoting/base/string_resources.h"
 #include "remoting/host/chromeos/message_box.h"
@@ -38,16 +37,16 @@ class It2MeConfirmationDialogChromeOS : public It2MeConfirmationDialog {
   DISALLOW_COPY_AND_ASSIGN(It2MeConfirmationDialogChromeOS);
 };
 
-It2MeConfirmationDialogChromeOS::It2MeConfirmationDialogChromeOS() {}
+It2MeConfirmationDialogChromeOS::It2MeConfirmationDialogChromeOS() = default;
 
-It2MeConfirmationDialogChromeOS::~It2MeConfirmationDialogChromeOS() {}
+It2MeConfirmationDialogChromeOS::~It2MeConfirmationDialogChromeOS() = default;
 
 void It2MeConfirmationDialogChromeOS::Show(const std::string& remote_user_email,
                                            const ResultCallback& callback) {
   DCHECK(!remote_user_email.empty());
   callback_ = callback;
 
-  message_box_ = base::MakeUnique<MessageBox>(
+  message_box_ = std::make_unique<MessageBox>(
       l10n_util::GetStringUTF16(IDS_MODE_IT2ME),
       base::i18n::MessageFormatter::FormatWithNumberedArgs(
           l10n_util::GetStringUTF16(
@@ -67,7 +66,7 @@ void It2MeConfirmationDialogChromeOS::OnMessageBoxResult(
 
 std::unique_ptr<It2MeConfirmationDialog>
 It2MeConfirmationDialogFactory::Create() {
-  return base::MakeUnique<It2MeConfirmationDialogChromeOS>();
+  return std::make_unique<It2MeConfirmationDialogChromeOS>();
 }
 
 }  // namespace remoting

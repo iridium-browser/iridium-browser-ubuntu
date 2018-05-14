@@ -30,8 +30,8 @@
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/NodeComputedStyle.h"
 #include "core/frame/LocalFrameView.h"
-#include "core/html/HTMLOptionElement.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/html/forms/HTMLOptionElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTheme.h"
 #include "platform/text/PlatformLocale.h"
@@ -47,10 +47,10 @@ LayoutMenuList::LayoutMenuList(Element* element)
       inner_block_height_(LayoutUnit()),
       options_width_(0),
       last_active_index_(-1) {
-  DCHECK(isHTMLSelectElement(element));
+  DCHECK(IsHTMLSelectElement(element));
 }
 
-LayoutMenuList::~LayoutMenuList() {}
+LayoutMenuList::~LayoutMenuList() = default;
 
 // FIXME: Instead of this hack we should add a ShadowRoot to <select> with no
 // insertion point to prevent children from rendering.
@@ -91,10 +91,10 @@ void LayoutMenuList::AdjustInnerStyle() {
   // when the content overflows, treat it the same as align-items: flex-start.
   // But we only do that for the cases where html.css would otherwise use
   // center.
-  if (Style()->AlignItemsPosition() == kItemPositionCenter) {
+  if (Style()->AlignItemsPosition() == ItemPosition::kCenter) {
     inner_style.SetMarginTop(Length());
     inner_style.SetMarginBottom(Length());
-    inner_style.SetAlignSelfPosition(kItemPositionFlexStart);
+    inner_style.SetAlignSelfPosition(ItemPosition::kFlexStart);
   }
 
   Length padding_start = Length(
@@ -131,7 +131,7 @@ void LayoutMenuList::AdjustInnerStyle() {
 }
 
 HTMLSelectElement* LayoutMenuList::SelectElement() const {
-  return toHTMLSelectElement(GetNode());
+  return ToHTMLSelectElement(GetNode());
 }
 
 void LayoutMenuList::AddChild(LayoutObject* new_child,
@@ -177,7 +177,7 @@ void LayoutMenuList::UpdateInnerBlockHeight() {
 void LayoutMenuList::UpdateOptionsWidth() const {
   float max_option_width = 0;
 
-  for (const auto& option : SelectElement()->GetOptionList()) {
+  for (auto* const option : SelectElement()->GetOptionList()) {
     String text = option->TextIndentedToRespectGroupLabel();
     const ComputedStyle* item_style =
         option->GetComputedStyle() ? option->GetComputedStyle() : Style();
@@ -195,12 +195,12 @@ void LayoutMenuList::UpdateFromElement() {
   HTMLSelectElement* select = SelectElement();
   HTMLOptionElement* option = select->OptionToBeShown();
   String text = g_empty_string;
-  option_style_.Clear();
+  option_style_ = nullptr;
 
   if (select->IsMultiple()) {
     unsigned selected_count = 0;
     HTMLOptionElement* selected_option_element = nullptr;
-    for (const auto& option : select->GetOptionList()) {
+    for (auto* const option : select->GetOptionList()) {
       if (option->Selected()) {
         if (++selected_count == 1)
           selected_option_element = option;
@@ -209,7 +209,7 @@ void LayoutMenuList::UpdateFromElement() {
 
     if (selected_count == 1) {
       text = selected_option_element->TextIndentedToRespectGroupLabel();
-      option_style_ = selected_option_element->MutableComputedStyle();
+      option_style_ = selected_option_element->GetComputedStyle();
     } else {
       Locale& locale = select->GetLocale();
       String localized_number_string =
@@ -221,7 +221,7 @@ void LayoutMenuList::UpdateFromElement() {
   } else {
     if (option) {
       text = option->TextIndentedToRespectGroupLabel();
-      option_style_ = option->MutableComputedStyle();
+      option_style_ = option->GetComputedStyle();
     }
   }
 

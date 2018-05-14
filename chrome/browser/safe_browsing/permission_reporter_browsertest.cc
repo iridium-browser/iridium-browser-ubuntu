@@ -4,6 +4,8 @@
 
 #include "chrome/browser/safe_browsing/permission_reporter.h"
 
+#include <memory>
+
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
@@ -48,7 +50,7 @@ class PermissionReporterBrowserTest : public SyncTest {
         base::BindOnce(
             &PermissionReporterBrowserTest::AttachMockReportSenderOnIOThread,
             base::Unretained(this),
-            make_scoped_refptr(g_browser_process->safe_browsing_service())),
+            base::WrapRefCounted(g_browser_process->safe_browsing_service())),
         run_loop.QuitClosure());
     run_loop.Run();
   }
@@ -60,8 +62,7 @@ class PermissionReporterBrowserTest : public SyncTest {
     mock_report_sender_ = new MockPermissionReportSender;
 
     safe_browsing_service->ping_manager()->permission_reporter_.reset(
-        new PermissionReporter(base::WrapUnique(mock_report_sender_),
-                               base::WrapUnique(new base::SimpleTestClock)));
+        new PermissionReporter(base::WrapUnique(mock_report_sender_), &clock_));
   }
 
   PermissionRequestManager* GetPermissionRequestManager(Browser* browser) {
@@ -76,6 +77,8 @@ class PermissionReporterBrowserTest : public SyncTest {
   }
 
  private:
+  base::SimpleTestClock clock_;
+
   // Owned by permission reporter.
   MockPermissionReportSender* mock_report_sender_;
 
@@ -93,8 +96,7 @@ IN_PROC_BROWSER_TEST_F(PermissionReporterBrowserTest,
   // Set up mock permission manager and prompt factory.
   PermissionRequestManager* manager = GetPermissionRequestManager(browser);
   std::unique_ptr<MockPermissionPromptFactory> mock_permission_prompt_factory =
-      base::MakeUnique<MockPermissionPromptFactory>(manager);
-  manager->DisplayPendingRequests();
+      std::make_unique<MockPermissionPromptFactory>(manager);
 
   ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
@@ -137,8 +139,7 @@ IN_PROC_BROWSER_TEST_F(PermissionReporterBrowserTest,
   // Set up mock permission manager and prompt factory.
   PermissionRequestManager* manager = GetPermissionRequestManager(browser);
   std::unique_ptr<MockPermissionPromptFactory> mock_permission_prompt_factory =
-      base::MakeUnique<MockPermissionPromptFactory>(manager);
-  manager->DisplayPendingRequests();
+      std::make_unique<MockPermissionPromptFactory>(manager);
 
   ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(

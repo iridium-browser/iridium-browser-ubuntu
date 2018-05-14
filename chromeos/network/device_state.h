@@ -26,11 +26,9 @@ class CHROMEOS_EXPORT DeviceState : public ManagedState {
   // ManagedState overrides
   bool PropertyChanged(const std::string& key,
                        const base::Value& value) override;
-  bool InitialPropertiesReceived(
-      const base::DictionaryValue& properties) override;
 
   void IPConfigPropertiesChanged(const std::string& ip_config_path,
-                                 const base::DictionaryValue& properties);
+                                 const base::Value& properties);
 
   // Accessors
   const std::string& mac_address() const { return mac_address_; }
@@ -38,14 +36,16 @@ class CHROMEOS_EXPORT DeviceState : public ManagedState {
   void set_scanning(bool scanning) { scanning_ = scanning; }
 
   // Cellular specific accessors
-  const std::string& home_provider_id() const { return home_provider_id_; }
+  const std::string& operator_name() const { return operator_name_; }
+  const std::string& country_code() const { return country_code_; }
   bool allow_roaming() const { return allow_roaming_; }
   bool provider_requires_roaming() const { return provider_requires_roaming_; }
   bool support_network_scan() const { return support_network_scan_; }
   const std::string& technology_family() const { return technology_family_; }
   const std::string& carrier() const { return carrier_; }
   const std::string& sim_lock_type() const { return sim_lock_type_; }
-  uint32_t sim_retries_left() const { return sim_retries_left_; }
+  int sim_retries_left() const { return sim_retries_left_; }
+  bool sim_lock_enabled() const { return sim_lock_enabled_; }
   const std::string& meid() const { return meid_; }
   const std::string& imei() const { return imei_; }
   const std::string& iccid() const { return iccid_; }
@@ -64,18 +64,23 @@ class CHROMEOS_EXPORT DeviceState : public ManagedState {
     return eap_authentication_completed_;
   }
 
+  // Returns a human readable string for the device.
+  std::string GetName() const;
+
   // Returns the IP Address for |type| if it exists or an empty string.
   std::string GetIpAddressByType(const std::string& type) const;
 
-  // Returns true if the technology family is GSM and sim_present_ is false.
+  // The following return false if the technology does not require a SIM.
   bool IsSimAbsent() const;
+  bool IsSimLocked() const;
 
  private:
   // Common Device Properties
   std::string mac_address_;
 
   // Cellular specific properties
-  std::string home_provider_id_;
+  std::string operator_name_;
+  std::string country_code_;
   bool allow_roaming_;
   bool provider_requires_roaming_;
   bool support_network_scan_;
@@ -83,7 +88,8 @@ class CHROMEOS_EXPORT DeviceState : public ManagedState {
   std::string technology_family_;
   std::string carrier_;
   std::string sim_lock_type_;
-  uint32_t sim_retries_left_;
+  int sim_retries_left_;
+  bool sim_lock_enabled_;
   bool sim_present_;
   std::string meid_;
   std::string imei_;

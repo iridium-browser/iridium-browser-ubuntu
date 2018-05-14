@@ -4,9 +4,6 @@
 
 #include "components/storage_monitor/test_media_transfer_protocol_manager_chromeos.h"
 
-#include "device/media_transfer_protocol/mtp_file_entry.pb.h"
-#include "device/media_transfer_protocol/mtp_storage_info.pb.h"
-
 namespace storage_monitor {
 
 TestMediaTransferProtocolManagerChromeOS::
@@ -15,25 +12,30 @@ TestMediaTransferProtocolManagerChromeOS::
 TestMediaTransferProtocolManagerChromeOS::
     ~TestMediaTransferProtocolManagerChromeOS() {}
 
-void TestMediaTransferProtocolManagerChromeOS::AddObserver(Observer* observer) {
+void TestMediaTransferProtocolManagerChromeOS::AddObserverAndEnumerateStorages(
+    Observer* observer,
+    EnumerateStoragesCallback callback) {
+  std::move(callback).Run(std::vector<const device::mojom::MtpStorageInfo*>());
 }
 
 void TestMediaTransferProtocolManagerChromeOS::RemoveObserver(
     Observer* observer) {}
 
-const std::vector<std::string>
-TestMediaTransferProtocolManagerChromeOS::GetStorages() const {
-  return std::vector<std::string>();
+void TestMediaTransferProtocolManagerChromeOS::GetStorages(
+    GetStoragesCallback callback) const {
+  std::move(callback).Run(std::vector<std::string>());
 }
-const MtpStorageInfo* TestMediaTransferProtocolManagerChromeOS::GetStorageInfo(
-    const std::string& storage_name) const {
-  return NULL;
+
+void TestMediaTransferProtocolManagerChromeOS::GetStorageInfo(
+    const std::string& storage_name,
+    GetStorageInfoCallback callback) const {
+  std::move(callback).Run(nullptr);
 }
 
 void TestMediaTransferProtocolManagerChromeOS::GetStorageInfoFromDevice(
     const std::string& storage_name,
     const GetStorageInfoFromDeviceCallback& callback) {
-  MtpStorageInfo mtp_storage_info;
+  device::mojom::MtpStorageInfo mtp_storage_info;
   callback.Run(mtp_storage_info, true /* error */);
 }
 
@@ -63,7 +65,8 @@ void TestMediaTransferProtocolManagerChromeOS::ReadDirectory(
     const uint32_t file_id,
     const size_t max_size,
     const ReadDirectoryCallback& callback) {
-  callback.Run(std::vector<MtpFileEntry>(), false /* no more entries*/,
+  callback.Run(std::vector<device::mojom::MtpFileEntry>(),
+               false /* no more entries*/,
                true /* error */);
 }
 
@@ -80,7 +83,7 @@ void TestMediaTransferProtocolManagerChromeOS::GetFileInfo(
     const std::string& storage_handle,
     uint32_t file_id,
     const GetFileInfoCallback& callback) {
-  callback.Run(MtpFileEntry(), true);
+  callback.Run(device::mojom::MtpFileEntry(), true);
 }
 
 void TestMediaTransferProtocolManagerChromeOS::RenameObject(

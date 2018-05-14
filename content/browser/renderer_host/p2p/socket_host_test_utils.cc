@@ -12,6 +12,7 @@
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_address.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 
 const int kStunHeaderSize = 20;
 const uint16_t kStunBindingRequest = 0x0001;
@@ -75,16 +76,19 @@ int FakeSocket::Read(net::IOBuffer* buf, int buf_len,
   }
 }
 
-int FakeSocket::Write(net::IOBuffer* buf, int buf_len,
-                      const net::CompletionCallback& callback) {
+int FakeSocket::Write(
+    net::IOBuffer* buf,
+    int buf_len,
+    const net::CompletionCallback& callback,
+    const net::NetworkTrafficAnnotationTag& /*traffic_annotation*/) {
   DCHECK(buf);
   DCHECK(!write_pending_);
 
   if (async_write_) {
-
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, base::Bind(
-        &FakeSocket::DoAsyncWrite, base::Unretained(this),
-        scoped_refptr<net::IOBuffer>(buf), buf_len, callback));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&FakeSocket::DoAsyncWrite, base::Unretained(this),
+                       scoped_refptr<net::IOBuffer>(buf), buf_len, callback));
     write_pending_ = true;
     return net::ERR_IO_PENDING;
   }

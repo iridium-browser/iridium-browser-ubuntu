@@ -21,14 +21,15 @@ class NavigatorMediaSession final
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorMediaSession);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorMediaSession& From(Navigator&);
   static MediaSession* mediaSession(ScriptState*, Navigator&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit NavigatorMediaSession(Navigator&);
-  static const char* SupplementName();
 
   // The MediaSession instance of this Navigator.
   Member<MediaSession> session_;

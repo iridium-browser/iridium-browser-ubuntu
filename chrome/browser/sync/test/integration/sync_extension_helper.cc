@@ -12,7 +12,6 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
@@ -85,7 +84,7 @@ void SyncExtensionHelper::SetupIfNecessary(SyncTest* test) {
 
 std::string SyncExtensionHelper::InstallExtension(
     Profile* profile, const std::string& name, Manifest::Type type) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   scoped_refptr<Extension> extension = GetExtension(profile, name, type);
   if (!extension.get()) {
     NOTREACHED() << "Could not install extension " << name;
@@ -101,10 +100,11 @@ std::string SyncExtensionHelper::InstallExtension(
 
 void SyncExtensionHelper::UninstallExtension(
     Profile* profile, const std::string& name) {
-  ExtensionService::UninstallExtensionHelper(
-      extensions::ExtensionSystem::Get(profile)->extension_service(),
-      crx_file::id_util::GenerateId(name),
-      extensions::UNINSTALL_REASON_SYNC);
+  extensions::ExtensionSystem::Get(profile)
+      ->extension_service()
+      ->UninstallExtension(crx_file::id_util::GenerateId(name),
+                           extensions::UNINSTALL_REASON_SYNC,
+                           nullptr /* error */);
 }
 
 std::vector<std::string> SyncExtensionHelper::GetInstalledExtensionNames(
@@ -134,7 +134,7 @@ void SyncExtensionHelper::DisableExtension(Profile* profile,
   extensions::ExtensionSystem::Get(profile)
       ->extension_service()
       ->DisableExtension(crx_file::id_util::GenerateId(name),
-                         Extension::DISABLE_USER_ACTION);
+                         extensions::disable_reason::DISABLE_USER_ACTION);
 }
 
 bool SyncExtensionHelper::IsExtensionEnabled(
@@ -312,7 +312,8 @@ bool SyncExtensionHelper::ExtensionNameToIndex(const std::string& name,
 }
 
 void SyncExtensionHelper::SetupProfile(Profile* profile) {
-  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(true);
+  extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
+      true /* extensions_enabled */);
   profile_extensions_.insert(make_pair(profile, ExtensionNameMap()));
 }
 
@@ -343,21 +344,21 @@ scoped_refptr<Extension> CreateExtension(const base::FilePath& base_dir,
       break;
     case Manifest::TYPE_THEME:
       source.Set(extensions::manifest_keys::kTheme,
-                 base::MakeUnique<base::DictionaryValue>());
+                 std::make_unique<base::DictionaryValue>());
       break;
     case Manifest::TYPE_HOSTED_APP:
     case Manifest::TYPE_LEGACY_PACKAGED_APP:
       source.Set(extensions::manifest_keys::kApp,
-                 base::MakeUnique<base::DictionaryValue>());
+                 std::make_unique<base::DictionaryValue>());
       source.SetString(extensions::manifest_keys::kLaunchWebURL,
                        "http://www.example.com");
       break;
     case Manifest::TYPE_PLATFORM_APP: {
       source.Set(extensions::manifest_keys::kApp,
-                 base::MakeUnique<base::DictionaryValue>());
+                 std::make_unique<base::DictionaryValue>());
       source.Set(extensions::manifest_keys::kPlatformAppBackground,
-                 base::MakeUnique<base::DictionaryValue>());
-      auto scripts = base::MakeUnique<base::ListValue>();
+                 std::make_unique<base::DictionaryValue>());
+      auto scripts = std::make_unique<base::ListValue>();
       scripts->AppendString("main.js");
       source.Set(extensions::manifest_keys::kPlatformAppBackgroundScripts,
                  std::move(scripts));

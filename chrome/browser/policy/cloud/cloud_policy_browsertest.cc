@@ -9,7 +9,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -20,6 +19,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
+#include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/cloud/cloud_policy_test_utils.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -88,7 +88,7 @@ namespace {
 
 std::unique_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
     content::BrowserContext* context) {
-  return base::MakeUnique<invalidation::ProfileInvalidationProvider>(
+  return std::make_unique<invalidation::ProfileInvalidationProvider>(
       std::unique_ptr<invalidation::InvalidationService>(
           new invalidation::FakeInvalidationService));
 }
@@ -155,11 +155,11 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
   GetExpectedDefaultPolicy(expected);
 
   expected->Set(key::kShowHomeButton, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
-                POLICY_SOURCE_CLOUD, base::MakeUnique<base::Value>(true),
+                POLICY_SOURCE_CLOUD, std::make_unique<base::Value>(true),
                 nullptr);
   expected->Set(key::kRestoreOnStartup, POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::Value>(4), nullptr);
+                std::make_unique<base::Value>(4), nullptr);
   base::ListValue list;
   list.AppendString("dev.chromium.org");
   list.AppendString("youtube.com");
@@ -167,10 +167,10 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
                 POLICY_SOURCE_CLOUD, list.CreateDeepCopy(), nullptr);
   expected->Set(key::kMaxInvalidationFetchDelay, POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::Value>(1000), nullptr);
+                std::make_unique<base::Value>(1000), nullptr);
   expected->Set(key::kHomepageLocation, POLICY_LEVEL_RECOMMENDED,
                 POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                base::MakeUnique<base::Value>(homepage), nullptr);
+                std::make_unique<base::Value>(homepage), nullptr);
 }
 
 }  // namespace
@@ -248,6 +248,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
 #endif
     policy_manager->core()->client()->Register(
         registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+        em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
         em::LicenseType::UNDEFINED, "bogus", std::string(), std::string(),
         std::string());
     run_loop.Run();
@@ -284,7 +285,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
   }
 
   void SetServerPolicy(const std::string& policy) {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     int result = base::WriteFile(policy_file_path(), policy.data(),
                                  policy.size());
     ASSERT_EQ(base::checked_cast<int>(policy.size()), result);

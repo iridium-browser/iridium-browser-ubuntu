@@ -13,7 +13,8 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/reporter_runner_win.h"
-#include "components/component_updater/default_component_installer.h"
+#include "components/component_updater/component_installer.h"
+#include "components/component_updater/component_updater_service.h"
 
 class PrefRegistrySimple;
 
@@ -31,28 +32,33 @@ namespace component_updater {
 
 class ComponentUpdateService;
 
+// Expose the feature name so it can be referenced in tests.
+// TODO(crbug.com/786964): This feature will continue to exist as part of a
+// permanent variations study to control which version of the reporter gets
+// downloaded. Rename it to something that makes sense long-term.
+constexpr char kComponentTagFeatureName[] = "ExperimentalSwReporterEngine";
+
 constexpr char kSwReporterComponentId[] = "gkmgaooipdjhmangpemjhigmamcehddo";
 
-// These MUST match the values for SwReporterExperimentError in histograms.xml.
-// Exposed for testing.
-enum SwReporterExperimentError {
+// These MUST match the values for SoftwareReporterExperimentError in
+// histograms.xml. Exposed for testing.
+enum SoftwareReporterExperimentError {
   SW_REPORTER_EXPERIMENT_ERROR_BAD_TAG = 0,
   SW_REPORTER_EXPERIMENT_ERROR_BAD_PARAMS = 1,
+  SW_REPORTER_EXPERIMENT_ERROR_MISSING_PARAMS = 2,
   SW_REPORTER_EXPERIMENT_ERROR_MAX,
 };
 
 // Callback for running the software reporter after it is downloaded.
-using SwReporterRunner =
-    base::Callback<void(const safe_browsing::SwReporterQueue& invocations,
-                        const base::Version& version)>;
+using OnComponentReadyCallback = base::Callback<void(
+    safe_browsing::SwReporterInvocationSequence&& invocations)>;
 
-class SwReporterInstallerTraits : public ComponentInstallerTraits {
+class SwReporterInstallerPolicy : public ComponentInstallerPolicy {
  public:
-  SwReporterInstallerTraits(const SwReporterRunner& reporter_runner,
-                            bool is_experimental_engine_supported);
-  ~SwReporterInstallerTraits() override;
+  explicit SwReporterInstallerPolicy(const OnComponentReadyCallback& callback);
+  ~SwReporterInstallerPolicy() override;
 
-  // ComponentInstallerTraits implementation.
+  // ComponentInstallerPolicy implementation.
   bool VerifyInstallation(const base::DictionaryValue& manifest,
                           const base::FilePath& dir) const override;
   bool SupportsGroupPolicyEnabledComponentUpdates() const override;
@@ -60,6 +66,7 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
   update_client::CrxInstaller::Result OnCustomInstall(
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) override;
+  void OnCustomUninstall() override;
   void ComponentReady(const base::Version& version,
                       const base::FilePath& install_dir,
                       std::unique_ptr<base::DictionaryValue> manifest) override;
@@ -72,18 +79,36 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
  private:
   friend class SwReporterInstallerTest;
 
-  // Returns true if the experimental engine is supported and the Feature is
-  // enabled.
-  bool IsExperimentalEngineEnabled() const;
+  OnComponentReadyCallback on_component_ready_callback_;
 
-  SwReporterRunner reporter_runner_;
-  const bool is_experimental_engine_supported_;
+  DISALLOW_COPY_AND_ASSIGN(SwReporterInstallerPolicy);
+};
 
-  DISALLOW_COPY_AND_ASSIGN(SwReporterInstallerTraits);
+// Forces an update of the reporter component.
+// Note: this can have adverse effects on the component updater subsystem and
+// should only be created as a result of direct user action.
+// For example, if this is created repeatedly, it might result in too many
+// unexpected requests to the component updater service and cause system
+// instability.
+class SwReporterOnDemandFetcher : public ServiceObserver {
+ public:
+  SwReporterOnDemandFetcher(ComponentUpdateService* cus,
+                            base::OnceClosure on_error_callback);
+  ~SwReporterOnDemandFetcher() override;
+
+  // ServiceObserver implementation.
+  void OnEvent(Events event, const std::string& id) override;
+
+ private:
+  // Will outlive this object.
+  ComponentUpdateService* cus_;
+  base::OnceClosure on_error_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(SwReporterOnDemandFetcher);
 };
 
 // Call once during startup to make the component update service aware of the
-// SwReporter.
+// SwReporter. Once ready, this may trigger a periodic run of the reporter.
 void RegisterSwReporterComponent(ComponentUpdateService* cus);
 
 // Register local state preferences related to the SwReporter.

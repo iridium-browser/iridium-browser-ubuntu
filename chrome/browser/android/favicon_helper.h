@@ -31,7 +31,6 @@ class FaviconHelper {
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& j_profile,
       const base::android::JavaParamRef<jstring>& j_page_url,
-      jint j_icon_types,
       jint j_desired_size_in_pixel,
       const base::android::JavaParamRef<jobject>& j_favicon_image_callback);
   base::android::ScopedJavaLocalRef<jobject> GetSyncedFaviconImageForURL(
@@ -39,6 +38,7 @@ class FaviconHelper {
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& jprofile,
       const base::android::JavaParamRef<jstring>& j_page_url);
+
   void EnsureIconIsAvailable(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -47,8 +47,12 @@ class FaviconHelper {
       const base::android::JavaParamRef<jstring>& j_page_url,
       const base::android::JavaParamRef<jstring>& j_icon_url,
       jboolean j_is_large_icon,
-      jboolean j_is_temporary,
       const base::android::JavaParamRef<jobject>& j_availability_callback);
+  void TouchOnDemandFavicon(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_profile,
+      const base::android::JavaParamRef<jstring>& j_icon_url);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(FaviconHelperTest, GetLargestSizeIndex);
@@ -61,7 +65,6 @@ class FaviconHelper {
       const GURL& page_url,
       const GURL& icon_url,
       favicon_base::IconType icon_type,
-      bool is_temporary,
       const favicon_base::FaviconImageResult& result);
 
   static void OnFaviconDownloaded(
@@ -70,7 +73,6 @@ class FaviconHelper {
       Profile* profile,
       const GURL& page_url,
       favicon_base::IconType icon_type,
-      bool is_temporary,
       int download_request_id,
       int http_status_code,
       const GURL& image_url,

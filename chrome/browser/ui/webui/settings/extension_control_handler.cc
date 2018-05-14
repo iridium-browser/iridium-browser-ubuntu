@@ -10,8 +10,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/common/extension.h"
 
 namespace settings {
 
@@ -32,7 +32,7 @@ void ExtensionControlHandler::HandleDisableExtension(
       Profile::FromWebUI(web_ui()))->extension_service();
   DCHECK(extension_service);
   extension_service->DisableExtension(
-      extension_id, extensions::Extension::DISABLE_USER_ACTION);
+      extension_id, extensions::disable_reason::DISABLE_USER_ACTION);
 }
 
 }  // namespace settings

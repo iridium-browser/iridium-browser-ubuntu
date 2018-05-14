@@ -20,10 +20,9 @@ class BrowserDevToolsAgentHost : public DevToolsAgentHostImpl {
 
   // DevToolsAgentHostImpl implementation.
   void AttachSession(DevToolsSession* session) override;
-  void DetachSession(int session_id) override;
-  bool DispatchProtocolMessage(
-      DevToolsSession* session,
-      const std::string& message) override;
+  void DetachSession(DevToolsSession* session) override;
+  void DispatchProtocolMessage(DevToolsSession* session,
+                               const std::string& message) override;
 
   // DevToolsAgentHost implementation.
   std::string GetType() override;

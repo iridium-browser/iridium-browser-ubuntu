@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 
+#include <memory>
+
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
@@ -17,6 +19,7 @@
 #include "ui/views/animation/flood_fill_ink_drop_ripple.h"
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_impl.h"
+#include "ui/views/animation/ink_drop_mask.h"
 #include "ui/views/animation/ink_drop_ripple.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
@@ -81,19 +84,23 @@ void IconLabelBubbleView::SeparatorView::UpdateOpacity() {
     SetPaintToLayer();
   layer()->SetFillsBoundsOpaquely(false);
 
-  ui::ScopedLayerAnimationSettings animation(layer()->GetAnimator());
-  animation.SetTransitionDuration(base::TimeDelta::FromMilliseconds(duration));
-  animation.SetTweenType(gfx::Tween::Type::EASE_IN);
-  animation.AddObserver(this);
-  layer()->SetOpacity(opacity);
+  if (disable_animation_for_test_) {
+    layer()->SetOpacity(opacity);
+  } else {
+    ui::ScopedLayerAnimationSettings animation(layer()->GetAnimator());
+    animation.SetTransitionDuration(
+        base::TimeDelta::FromMilliseconds(duration));
+    animation.SetTweenType(gfx::Tween::Type::EASE_IN);
+    animation.AddObserver(this);
+    layer()->SetOpacity(opacity);
+  }
 }
 
 //////////////////////////////////////////////////////////////////
 // IconLabelBubbleView class
 
-IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list,
-                                         bool elide_in_middle)
-    : CustomButton(nullptr),
+IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list)
+    : Button(nullptr),
       image_(new views::ImageView()),
       label_(new views::Label(base::string16(), {font_list})),
       ink_drop_container_(new views::InkDropContainerView()),
@@ -103,13 +110,11 @@ IconLabelBubbleView::IconLabelBubbleView(const gfx::FontList& font_list,
   // |image_| as a separate mouse hover region from |this|.
   image_->set_can_process_events_within_subtree(false);
   image_->SetBorder(views::CreateEmptyBorder(
-      gfx::Insets(LocationBarView::kIconInteriorPadding)));
+      gfx::Insets(GetLayoutConstant(LOCATION_BAR_ICON_INTERIOR_PADDING))));
   AddChildView(image_);
 
   label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-  if (elide_in_middle)
-    label_->SetElideBehavior(gfx::ELIDE_MIDDLE);
   AddChildView(label_);
 
   separator_view_->SetVisible(ShouldShowLabel());
@@ -137,6 +142,9 @@ IconLabelBubbleView::~IconLabelBubbleView() {
 void IconLabelBubbleView::InkDropAnimationStarted() {
   separator_view_->UpdateOpacity();
 }
+
+void IconLabelBubbleView::InkDropRippleAnimationEnded(
+    views::InkDropState state) {}
 
 void IconLabelBubbleView::SetLabel(const base::string16& label) {
   label_->SetText(label);
@@ -218,11 +226,18 @@ void IconLabelBubbleView::Layout() {
 
 bool IconLabelBubbleView::OnMousePressed(const ui::MouseEvent& event) {
   suppress_button_release_ = IsBubbleShowing();
-  return CustomButton::OnMousePressed(event);
+  return Button::OnMousePressed(event);
 }
 
 void IconLabelBubbleView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   label_->GetAccessibleNodeData(node_data);
+  if (node_data->GetStringAttribute(ax::mojom::StringAttribute::kName)
+          .empty()) {
+    // Fallback name when there is no accessible name from the label.
+    base::string16 tooltip_text;
+    GetTooltipText(gfx::Point(), &tooltip_text);
+    node_data->SetName(tooltip_text);
+  }
 }
 
 void IconLabelBubbleView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
@@ -230,7 +245,7 @@ void IconLabelBubbleView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
     GetInkDrop()->AnimateToState(views::InkDropState::HIDDEN);
     GetInkDrop()->SetHovered(false);
   }
-  CustomButton::OnBoundsChanged(previous_bounds);
+  Button::OnBoundsChanged(previous_bounds);
 }
 
 void IconLabelBubbleView::OnNativeThemeChanged(
@@ -241,11 +256,15 @@ void IconLabelBubbleView::OnNativeThemeChanged(
 }
 
 void IconLabelBubbleView::AddInkDropLayer(ui::Layer* ink_drop_layer) {
+  ink_drop_layer->SetBounds(ink_drop_container_->bounds());
   ink_drop_container_->AddInkDropLayer(ink_drop_layer);
+  InstallInkDropMask(ink_drop_layer);
 }
 
 void IconLabelBubbleView::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
   ink_drop_container_->RemoveInkDropLayer(ink_drop_layer);
+  ResetInkDropMask();
+  separator_view_->UpdateOpacity();
 }
 
 std::unique_ptr<views::InkDrop> IconLabelBubbleView::CreateInkDrop() {
@@ -256,13 +275,6 @@ std::unique_ptr<views::InkDrop> IconLabelBubbleView::CreateInkDrop() {
   return std::move(ink_drop);
 }
 
-std::unique_ptr<views::InkDropHighlight>
-IconLabelBubbleView::CreateInkDropHighlight() const {
-  return InkDropHostView::CreateDefaultInkDropHighlight(
-      gfx::RectF(ink_drop_container_->bounds()).CenterPoint(),
-      ink_drop_container_->size());
-}
-
 std::unique_ptr<views::InkDropRipple> IconLabelBubbleView::CreateInkDropRipple()
     const {
   gfx::Point center_point = GetInkDropCenterBasedOnLastEvent();
@@ -270,14 +282,30 @@ std::unique_ptr<views::InkDropRipple> IconLabelBubbleView::CreateInkDropRipple()
   center_point.SetToMax(ink_drop_container_->origin());
   center_point.SetToMin(ink_drop_container_->bounds().bottom_right());
 
-  return base::MakeUnique<views::FloodFillInkDropRipple>(
+  return std::make_unique<views::FloodFillInkDropRipple>(
       ink_drop_container_->size(), center_point, GetInkDropBaseColor(),
       ink_drop_visible_opacity());
+}
+
+std::unique_ptr<views::InkDropHighlight>
+IconLabelBubbleView::CreateInkDropHighlight() const {
+  return InkDropHostView::CreateDefaultInkDropHighlight(
+      gfx::RectF(ink_drop_container_->bounds()).CenterPoint(),
+      ink_drop_container_->size());
 }
 
 SkColor IconLabelBubbleView::GetInkDropBaseColor() const {
   return color_utils::DeriveDefaultIconColor(GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldDefaultColor));
+}
+
+std::unique_ptr<views::InkDropMask> IconLabelBubbleView::CreateInkDropMask()
+    const {
+  if (!BackgroundWith1PxBorder::IsRounded())
+    return nullptr;
+  return std::make_unique<views::RoundRectInkDropMask>(
+      ink_drop_container_->size(), gfx::Insets(),
+      ink_drop_container_->height() / 2.f);
 }
 
 bool IconLabelBubbleView::IsTriggerableEvent(const ui::Event& event) {
@@ -289,12 +317,12 @@ bool IconLabelBubbleView::IsTriggerableEvent(const ui::Event& event) {
 
 bool IconLabelBubbleView::ShouldUpdateInkDropOnClickCanceled() const {
   // The click might be cancelled because the bubble is still opened. In this
-  // case, the ink drop state should not be hidden by CustomButton.
+  // case, the ink drop state should not be hidden by Button.
   return false;
 }
 
 void IconLabelBubbleView::NotifyClick(const ui::Event& event) {
-  CustomButton::NotifyClick(event);
+  Button::NotifyClick(event);
   OnActivate(event);
 }
 

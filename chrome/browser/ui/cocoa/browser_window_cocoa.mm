@@ -28,8 +28,9 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window_state.h"
-#import "chrome/browser/ui/cocoa/autofill/save_card_bubble_view_bridge.h"
+#include "chrome/browser/ui/cocoa/autofill/save_card_bubble_view_views.h"
 #import "chrome/browser/ui/cocoa/browser/exclusive_access_controller_views.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
@@ -41,7 +42,6 @@
 #include "chrome/browser/ui/cocoa/key_equivalent_constants.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/ui/cocoa/nsmenuitem_additions.h"
-#import "chrome/browser/ui/cocoa/page_info/page_info_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
 #include "chrome/browser/ui/cocoa/restart_browser.h"
 #include "chrome/browser/ui/cocoa/status_bubble_mac.h"
@@ -50,8 +50,8 @@
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/profile_chooser_constants.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
@@ -68,7 +68,6 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -400,15 +399,6 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
   return false;  // Currently only called from toolkit-views page_info.
 }
 
-void BrowserWindowCocoa::MaybeShowNewBackShortcutBubble(bool forward) {
-  [controller_ exclusiveAccessController]->MaybeShowNewBackShortcutBubble(
-      forward);
-}
-
-void BrowserWindowCocoa::HideNewBackShortcutBubble() {
-  [controller_ exclusiveAccessController]->HideNewBackShortcutBubble();
-}
-
 LocationBar* BrowserWindowCocoa::GetLocationBar() const {
   return [controller_ locationBarBridge];
 }
@@ -456,7 +446,7 @@ void BrowserWindowCocoa::FocusBookmarksToolbar() {
   // Not needed on the Mac.
 }
 
-void BrowserWindowCocoa::FocusInfobars() {
+void BrowserWindowCocoa::FocusInactivePopupForAccessibility() {
   // Not needed on the Mac.
 }
 
@@ -489,7 +479,7 @@ void BrowserWindowCocoa::UpdateAlertState(TabAlertState alert_state) {
 }
 
 void BrowserWindowCocoa::ShowUpdateChromeDialog() {
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (chrome::ShowPilotDialogsWithViewsToolkit()) {
     chrome::ShowUpdateChromeDialogViews(GetNativeWindow());
   } else {
     restart_browser::RequestRestart(window());
@@ -506,7 +496,8 @@ autofill::SaveCardBubbleView* BrowserWindowCocoa::ShowSaveCreditCardBubble(
     content::WebContents* web_contents,
     autofill::SaveCardBubbleController* controller,
     bool user_gesture) {
-  return new autofill::SaveCardBubbleViewBridge(controller, controller_);
+  return autofill::CreateSaveCardBubbleView(web_contents, controller,
+                                            controller_, user_gesture);
 }
 
 ShowTranslateBubbleResult BrowserWindowCocoa::ShowTranslateBubble(
@@ -564,15 +555,6 @@ void BrowserWindowCocoa::UserChangedTheme() {
   if (locationBar) {
     locationBar->OnThemeChanged();
   }
-}
-
-void BrowserWindowCocoa::ShowPageInfo(
-    Profile* profile,
-    content::WebContents* web_contents,
-    const GURL& virtual_url,
-    const security_state::SecurityInfo& security_info) {
-  PageInfoUIBridge::Show(window(), profile, web_contents, virtual_url,
-                         security_info);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -693,9 +675,9 @@ void BrowserWindowCocoa::ShowAvatarBubbleFromAvatarButton(
   profiles::BubbleViewMode bubble_view_mode;
   profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode);
 
-  if (SigninViewController::ShouldShowModalSigninForMode(bubble_view_mode)) {
-    browser_->signin_view_controller()->ShowModalSignin(bubble_view_mode,
-                                                        browser_, access_point);
+  if (SigninViewController::ShouldShowSigninForMode(bubble_view_mode)) {
+    browser_->signin_view_controller()->ShowSignin(bubble_view_mode, browser_,
+                                                   access_point);
   } else {
     AvatarBaseController* controller = [controller_ avatarButtonController];
     NSView* anchor = [controller buttonView];

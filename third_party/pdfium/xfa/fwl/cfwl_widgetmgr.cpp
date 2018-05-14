@@ -12,8 +12,8 @@
 #include "xfa/fwl/cfwl_app.h"
 #include "xfa/fwl/cfwl_form.h"
 #include "xfa/fwl/cfwl_notedriver.h"
-#include "xfa/fxfa/app/cxfa_fwladapterwidgetmgr.h"
 #include "xfa/fxfa/cxfa_ffapp.h"
+#include "xfa/fxfa/cxfa_fwladapterwidgetmgr.h"
 
 namespace {
 
@@ -29,12 +29,13 @@ struct FWL_NEEDREPAINTHITDATA {
 }  // namespace
 
 CFWL_WidgetMgr::CFWL_WidgetMgr(CXFA_FFApp* pAdapterNative)
-    : m_dwCapability(0), m_pAdapter(pAdapterNative->GetWidgetMgr(this)) {
+    : m_dwCapability(FWL_WGTMGR_DisableForm),
+      m_pAdapter(pAdapterNative->GetFWLAdapterWidgetMgr()) {
   ASSERT(m_pAdapter);
   m_mapWidgetItem[nullptr] = pdfium::MakeUnique<Item>();
-#if (_FX_OS_ == _FX_WIN32_DESKTOP_) || (_FX_OS_ == _FX_WIN64_)
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
   m_rtScreen.Reset();
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 }
 
 CFWL_WidgetMgr::~CFWL_WidgetMgr() {}
@@ -385,10 +386,6 @@ void CFWL_WidgetMgr::GetAdapterPopupPos(CFWL_Widget* pWidget,
   m_pAdapter->GetPopupPos(pWidget, fMinHeight, fMaxHeight, rtAnchor, rtPopup);
 }
 
-void CFWL_WidgetMgr::OnSetCapability(uint32_t dwCapability) {
-  m_dwCapability = dwCapability;
-}
-
 void CFWL_WidgetMgr::OnProcessMessageToForm(CFWL_Message* pMessage) {
   if (!pMessage)
     return;
@@ -410,7 +407,7 @@ void CFWL_WidgetMgr::OnProcessMessageToForm(CFWL_Message* pMessage) {
   else
     pNoteDriver->QueueMessage(pMessage->Clone());
 
-#if (_FX_OS_ == _FX_MACOSX_)
+#if (_FX_OS_ == _FX_OS_MACOSX_)
   CFWL_NoteLoop* pTopLoop = pNoteDriver->GetTopLoop();
   if (pTopLoop)
     pNoteDriver->UnqueueMessageAndProcess(pTopLoop);
@@ -419,33 +416,35 @@ void CFWL_WidgetMgr::OnProcessMessageToForm(CFWL_Message* pMessage) {
 
 void CFWL_WidgetMgr::OnDrawWidget(CFWL_Widget* pWidget,
                                   CXFA_Graphics* pGraphics,
-                                  const CFX_Matrix* pMatrix) {
+                                  const CFX_Matrix& matrix) {
   if (!pWidget || !pGraphics)
     return;
 
   CFX_RectF clipCopy(0, 0, pWidget->GetWidgetRect().Size());
   CFX_RectF clipBounds;
 
-#if _FX_OS_ == _FX_MACOSX_
+#if _FX_OS_ == _FX_OS_MACOSX_
   if (IsFormDisabled()) {
-#endif  // _FX_OS_ == _FX_MACOSX_
+#endif  // _FX_OS_ == _FX_OS_MACOSX_
 
-    pWidget->GetDelegate()->OnDrawWidget(pGraphics, pMatrix);
+    pWidget->GetDelegate()->OnDrawWidget(pGraphics, matrix);
     clipBounds = pGraphics->GetClipRect();
     clipCopy = clipBounds;
 
-#if _FX_OS_ == _FX_MACOSX_
+#if _FX_OS_ == _FX_OS_MACOSX_
   } else {
-    clipBounds = CFX_RectF(pMatrix->a, pMatrix->b, pMatrix->c, pMatrix->d);
-    const_cast<CFX_Matrix*>(pMatrix)->SetIdentity();  // FIXME: const cast.
-    pWidget->GetDelegate()->OnDrawWidget(pGraphics, pMatrix);
+    clipBounds = CFX_RectF(matrix.a, matrix.b, matrix.c, matrix.d);
+    // FIXME: const cast
+    CFX_Matrix* pMatrixHack = const_cast<CFX_Matrix*>(&matrix);
+    pMatrixHack->SetIdentity();
+    pWidget->GetDelegate()->OnDrawWidget(pGraphics, *pMatrixHack);
   }
-#endif  // _FX_OS_ == _FX_MACOSX_
+#endif  // _FX_OS_ == _FX_OS_MACOSX_
 
   if (!IsFormDisabled())
     clipBounds.Intersect(pWidget->GetClientRect());
   if (!clipBounds.IsEmpty())
-    DrawChild(pWidget, clipBounds, pGraphics, pMatrix);
+    DrawChild(pWidget, clipBounds, pGraphics, &matrix);
 
   GetWidgetMgrItem(pWidget)->iRedrawCounter = 0;
   ResetRedrawCounts(pWidget);
@@ -492,7 +491,7 @@ void CFWL_WidgetMgr::DrawChild(CFWL_Widget* parent,
 
     if (IFWL_WidgetDelegate* pDelegate = child->GetDelegate()) {
       if (IsFormDisabled() || IsNeedRepaint(child, &widgetMatrix, rtClip))
-        pDelegate->OnDrawWidget(pGraphics, &widgetMatrix);
+        pDelegate->OnDrawWidget(pGraphics, widgetMatrix);
     }
     if (!bFormDisable)
       pGraphics->RestoreGraphState();
@@ -512,8 +511,8 @@ bool CFWL_WidgetMgr::IsNeedRepaint(CFWL_Widget* pWidget,
     return true;
   }
 
-  CFX_RectF rtWidget(0, 0, pWidget->GetWidgetRect().Size());
-  pMatrix->TransformRect(rtWidget);
+  CFX_RectF rtWidget =
+      pMatrix->TransformRect(CFX_RectF(0, 0, pWidget->GetWidgetRect().Size()));
   if (!rtWidget.IntersectWith(rtDirty))
     return false;
 
@@ -526,10 +525,10 @@ bool CFWL_WidgetMgr::IsNeedRepaint(CFWL_Widget* pWidget,
   bool bChildIntersectWithDirty = false;
   bool bOrginPtIntersectWidthChild = false;
   bool bOrginPtIntersectWidthDirty = rtDirty.Contains(rtWidget.TopLeft());
-  static FWL_NEEDREPAINTHITDATA hitPoint[kNeedRepaintHitPoints];
-  memset(hitPoint, 0, sizeof(hitPoint));
   float fxPiece = rtWidget.width / kNeedRepaintHitPiece;
   float fyPiece = rtWidget.height / kNeedRepaintHitPiece;
+  FWL_NEEDREPAINTHITDATA hitPoint[kNeedRepaintHitPoints];
+  memset(hitPoint, 0, sizeof(hitPoint));
   hitPoint[2].hitPoint.x = hitPoint[6].hitPoint.x = rtWidget.left;
   hitPoint[0].hitPoint.x = hitPoint[3].hitPoint.x = hitPoint[7].hitPoint.x =
       hitPoint[10].hitPoint.x = fxPiece + rtWidget.left;
@@ -591,7 +590,7 @@ bool CFWL_WidgetMgr::IsNeedRepaint(CFWL_Widget* pWidget,
   if (repaintPoint > 0)
     return true;
 
-  pMatrix->TransformRect(rtChilds);
+  rtChilds = pMatrix->TransformRect(rtChilds);
   if (rtChilds.Contains(rtDirty) || rtChilds.Contains(rtWidget))
     return false;
   return true;
@@ -607,10 +606,10 @@ CFWL_WidgetMgr::Item::Item(CFWL_Widget* widget)
       pNext(nullptr),
       pWidget(widget),
       iRedrawCounter(0)
-#if (_FX_OS_ == _FX_WIN32_DESKTOP_) || (_FX_OS_ == _FX_WIN64_)
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
       ,
       bOutsideChanged(false)
-#endif
+#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 {
 }
 

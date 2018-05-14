@@ -8,7 +8,6 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -126,16 +125,17 @@ bool SimpleConfirmInfoBarDelegate::Cancel() {
 
 // Native JNI methods ---------------------------------------------------------
 
-void Create(JNIEnv* env,
-            const JavaParamRef<jclass>& j_caller,
-            const JavaParamRef<jobject>& j_tab,
-            jint j_identifier,
-            const JavaParamRef<jobject>& j_icon,
-            const JavaParamRef<jstring>& j_message,
-            const JavaParamRef<jstring>& j_primary,
-            const JavaParamRef<jstring>& j_secondary,
-            jboolean auto_expire,
-            const JavaParamRef<jobject>& j_listener) {
+void JNI_SimpleConfirmInfoBarBuilder_Create(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& j_caller,
+    const JavaParamRef<jobject>& j_tab,
+    jint j_identifier,
+    const JavaParamRef<jobject>& j_icon,
+    const JavaParamRef<jstring>& j_message,
+    const JavaParamRef<jstring>& j_primary,
+    const JavaParamRef<jstring>& j_secondary,
+    jboolean auto_expire,
+    const JavaParamRef<jobject>& j_listener) {
   infobars::InfoBarDelegate::InfoBarIdentifier infobar_identifier =
       static_cast<infobars::InfoBarDelegate::InfoBarIdentifier>(j_identifier);
 
@@ -158,7 +158,7 @@ void Create(JNIEnv* env,
   InfoBarService* service = InfoBarService::FromWebContents(
       TabAndroid::GetNativeTab(env, j_tab)->web_contents());
   service->AddInfoBar(service->CreateConfirmInfoBar(
-      base::MakeUnique<SimpleConfirmInfoBarDelegate>(
+      std::make_unique<SimpleConfirmInfoBarDelegate>(
           j_listener, infobar_identifier, icon_bitmap, message_str, primary_str,
           secondary_str, auto_expire)));
 }

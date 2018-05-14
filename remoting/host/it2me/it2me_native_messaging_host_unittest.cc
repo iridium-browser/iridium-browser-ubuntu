@@ -88,7 +88,7 @@ void VerifyCommonProperties(std::unique_ptr<base::DictionaryValue> response,
 
 class MockIt2MeHost : public It2MeHost {
  public:
-  MockIt2MeHost() {}
+  MockIt2MeHost() = default;
 
   // It2MeHost overrides
   void Connect(std::unique_ptr<ChromotingHostContext> context,
@@ -102,7 +102,7 @@ class MockIt2MeHost : public It2MeHost {
   void Disconnect() override;
 
  private:
-  ~MockIt2MeHost() override {}
+  ~MockIt2MeHost() override = default;
 
   void RunSetState(It2MeHostState state);
 
@@ -171,8 +171,8 @@ void MockIt2MeHost::RunSetState(It2MeHostState state) {
 
 class MockIt2MeHostFactory : public It2MeHostFactory {
  public:
-  MockIt2MeHostFactory() {}
-  ~MockIt2MeHostFactory() override {}
+  MockIt2MeHostFactory() = default;
+  ~MockIt2MeHostFactory() override = default;
 
   scoped_refptr<It2MeHost> CreateIt2MeHost() override {
     return new MockIt2MeHost();
@@ -184,8 +184,8 @@ class MockIt2MeHostFactory : public It2MeHostFactory {
 
 class It2MeNativeMessagingHostTest : public testing::Test {
  public:
-  It2MeNativeMessagingHostTest() {}
-  ~It2MeNativeMessagingHostTest() override {}
+  It2MeNativeMessagingHostTest() = default;
+  ~It2MeNativeMessagingHostTest() override = default;
 
   void SetUp() override;
   void TearDown() override;
@@ -330,7 +330,7 @@ It2MeNativeMessagingHostTest::ReadMessageFromOutputPipe() {
     }
 
     std::unique_ptr<base::Value> message = base::JSONReader::Read(message_json);
-    if (!message || !message->IsType(base::Value::Type::DICTIONARY)) {
+    if (!message || !message->is_dict()) {
       LOG(ERROR) << "Malformed message:" << message_json;
       return nullptr;
     }
@@ -517,7 +517,7 @@ void It2MeNativeMessagingHostTest::StartHost() {
   std::unique_ptr<ChromotingHostContext> context =
       ChromotingHostContext::Create(host_task_runner_);
   auto policy_loader =
-      base::MakeUnique<policy::FakeAsyncPolicyLoader>(host_task_runner_);
+      std::make_unique<policy::FakeAsyncPolicyLoader>(host_task_runner_);
   policy_loader_ = policy_loader.get();
   std::unique_ptr<PolicyWatcher> policy_watcher =
       PolicyWatcher::CreateFromPolicyLoaderForTesting(std::move(policy_loader));

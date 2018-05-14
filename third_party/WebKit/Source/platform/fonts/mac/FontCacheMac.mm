@@ -31,20 +31,17 @@
 
 #import <AppKit/AppKit.h>
 #include <memory>
-#include "platform/FontFamilyNames.h"
+#include "base/location.h"
 #include "platform/LayoutTestSupport.h"
-#include "platform/RuntimeEnabledFeatures.h"
-#include "platform/WebTaskRunner.h"
+#include "platform/font_family_names.h"
 #include "platform/fonts/FontDescription.h"
 #include "platform/fonts/FontFaceCreationParams.h"
 #include "platform/fonts/FontPlatformData.h"
 #include "platform/fonts/SimpleFontData.h"
 #include "platform/fonts/mac/FontFamilyMatcherMac.h"
 #include "platform/wtf/Functional.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebTraceLocation.h"
 
 // Forward declare Mac SPIs.
 // Request for public API: rdar://13803570
@@ -69,8 +66,8 @@ const AtomicString& FontCache::LegacySystemFontFamily() {
 
 static void InvalidateFontCache() {
   if (!IsMainThread()) {
-    Platform::Current()->MainThread()->GetWebTaskRunner()->PostTask(
-        BLINK_FROM_HERE, WTF::Bind(&InvalidateFontCache));
+    Platform::Current()->MainThread()->GetTaskRunner()->PostTask(
+        FROM_HERE, WTF::Bind(&InvalidateFontCache));
     return;
   }
   FontCache::GetFontCache()->Invalidate();
@@ -107,13 +104,13 @@ static inline bool IsAppKitFontWeightBold(NSInteger app_kit_font_weight) {
   return app_kit_font_weight >= 7;
 }
 
-PassRefPtr<SimpleFontData> FontCache::FallbackFontForCharacter(
+scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
     const FontDescription& font_description,
     UChar32 character,
     const SimpleFontData* font_data_to_substitute,
     FontFallbackPriority fallback_priority) {
   if (fallback_priority == FontFallbackPriority::kEmojiEmoji) {
-    RefPtr<SimpleFontData> emoji_font =
+    scoped_refptr<SimpleFontData> emoji_font =
         GetFontData(font_description, AtomicString(kColorEmojiFontMac));
     if (emoji_font)
       return emoji_font;
@@ -228,13 +225,13 @@ PassRefPtr<SimpleFontData> FontCache::FallbackFontForCharacter(
   return FontDataFromFontPlatformData(&alternate_font, kDoNotRetain);
 }
 
-PassRefPtr<SimpleFontData> FontCache::GetLastResortFallbackFont(
+scoped_refptr<SimpleFontData> FontCache::GetLastResortFallbackFont(
     const FontDescription& font_description,
     ShouldRetain should_retain) {
   // FIXME: Would be even better to somehow get the user's default font here.
   // For now we'll pick the default that the user would get without changing
   // any prefs.
-  RefPtr<SimpleFontData> simple_font_data =
+  scoped_refptr<SimpleFontData> simple_font_data =
       GetFontData(font_description, FontFamilyNames::Times,
                   AlternateFontName::kAllowAlternate, should_retain);
   if (simple_font_data)
@@ -289,7 +286,7 @@ std::unique_ptr<FontPlatformData> FontCache::CreateFontPlatformData(
   // stored in non-system locations.  When loading fails, we do not want to use
   // the returned FontPlatformData since it will not have a valid SkTypeface.
   std::unique_ptr<FontPlatformData> platform_data =
-      WTF::MakeUnique<FontPlatformData>(
+      std::make_unique<FontPlatformData>(
           platform_font, size, synthetic_bold, synthetic_italic,
           font_description.Orientation(), font_description.VariationSettings());
   if (!platform_data->Typeface()) {

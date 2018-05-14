@@ -49,7 +49,7 @@ class V0CustomElementRegistrationContext final
     return new V0CustomElementRegistrationContext();
   }
 
-  ~V0CustomElementRegistrationContext() {}
+  ~V0CustomElementRegistrationContext() = default;
   void DocumentWasDetached() { registry_.DocumentWasDetached(); }
 
   // Definitions
@@ -69,7 +69,7 @@ class V0CustomElementRegistrationContext final
   bool NameIsDefined(const AtomicString& name) const;
   void SetV1(const CustomElementRegistry*);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  protected:
   V0CustomElementRegistrationContext();

@@ -32,21 +32,19 @@ class PackUnpackTest : public ANGLETest
         ANGLETest::SetUp();
 
         // Vertex Shader source
-        const std::string vs = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string vs =
+            R"(#version 300 es
             precision mediump float;
             in vec4 position;
 
             void main()
             {
                 gl_Position = position;
-            }
-        );
+            })";
 
-        // clang-format off
         // Fragment Shader source
-        const std::string sNormFS = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string sNormFS =
+            R"(#version 300 es
             precision mediump float;
             uniform mediump vec2 v;
             layout(location = 0) out mediump vec4 fragColor;
@@ -56,12 +54,11 @@ class PackUnpackTest : public ANGLETest
                 uint u = packSnorm2x16(v);
                 vec2 r = unpackSnorm2x16(u);
                 fragColor = vec4(r, 0.0, 1.0);
-            }
-        );
+            })";
 
         // Fragment Shader source
-        const std::string uNormFS = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string uNormFS =
+            R"(#version 300 es
             precision mediump float;
             uniform mediump vec2 v;
             layout(location = 0) out mediump vec4 fragColor;
@@ -71,12 +68,11 @@ class PackUnpackTest : public ANGLETest
                 uint u = packUnorm2x16(v);
                 vec2 r = unpackUnorm2x16(u);
                 fragColor = vec4(r, 0.0, 1.0);
-            }
-        );
+            })";
 
         // Fragment Shader source
-        const std::string halfFS = SHADER_SOURCE
-        (   #version 300 es\n
+        const std::string halfFS =
+            R"(#version 300 es
             precision mediump float;
             uniform mediump vec2 v;
             layout(location = 0) out mediump vec4 fragColor;
@@ -86,9 +82,7 @@ class PackUnpackTest : public ANGLETest
                  uint u = packHalf2x16(v);
                  vec2 r = unpackHalf2x16(u);
                  fragColor = vec4(r, 0.0, 1.0);
-             }
-        );
-        // clang-format on
+             })";
 
         mSNormProgram = CompileProgram(vs, sNormFS);
         mUNormProgram = CompileProgram(vs, uNormFS);
@@ -180,15 +174,6 @@ TEST_P(PackUnpackTest, PackUnpackUnormNormal)
 // Test the correctness of packHalf2x16 and unpackHalf2x16 functions calculating normal floating numbers.
 TEST_P(PackUnpackTest, PackUnpackHalfNormal)
 {
-    // TODO(cwallez) figure out why it is broken on Intel on Mac
-#if defined(ANGLE_PLATFORM_APPLE)
-    if (IsIntel() && getPlatformRenderer() == EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE)
-    {
-        std::cout << "Test skipped on Intel on Mac." << std::endl;
-        return;
-    }
-#endif
-
     // Expect the shader to output the same value as the input
     compareBeforeAfter(mHalfProgram, 0.5f, -0.2f);
     compareBeforeAfter(mHalfProgram, -0.35f, 0.75f);

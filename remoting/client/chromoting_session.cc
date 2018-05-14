@@ -6,16 +6,19 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "jingle/glue/thread_wrapper.h"
 #include "net/socket/client_socket_factory.h"
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/chromoting_event.h"
-#include "remoting/client/audio_player.h"
+#include "remoting/base/service_urls.h"
+#include "remoting/client/audio/audio_player.h"
 #include "remoting/client/chromoting_client_runtime.h"
 #include "remoting/client/client_telemetry_logger.h"
 #include "remoting/client/input/native_device_keymap.h"
@@ -42,6 +45,27 @@ const bool kXmppUseTls = true;
 // Interval at which to log performance statistics, if enabled.
 const int kPerfStatsIntervalMs = 60000;
 
+// Default DPI to assume for old clients that use notifyClientResolution.
+const int kDefaultDPI = 96;
+
+// Used by NormalizeclientResolution. See comment below.
+const int kMinDimension = 640;
+
+// Normalizes the resolution so that both dimensions are not smaller than
+// kMinDimension.
+void NormalizeClientResolution(protocol::ClientResolution* resolution) {
+  int min_dimension =
+      std::min(resolution->dips_width(), resolution->dips_height());
+  if (min_dimension >= kMinDimension) {
+    return;
+  }
+
+  // Always scale by integer to prevent blurry interpolation.
+  int scale = std::ceil(((float)kMinDimension) / min_dimension);
+  resolution->set_dips_width(resolution->dips_width() * scale);
+  resolution->set_dips_height(resolution->dips_height() * scale);
+}
+
 }  // namespace
 
 ChromotingSession::ChromotingSession(
@@ -58,10 +82,13 @@ ChromotingSession::ChromotingSession(
       video_renderer_(std::move(video_renderer)),
       audio_player_(audio_player),
       capabilities_(info.capabilities),
-      weak_factory_(this) {
+      weak_factory_per_connection_(this),
+      weak_factory_per_instance_lifetime_(this) {
   runtime_ = ChromotingClientRuntime::GetInstance();
   DCHECK(runtime_->ui_task_runner()->BelongsToCurrentThread());
-  weak_ptr_ = weak_factory_.GetWeakPtr();
+  weak_ptr_per_connection_ = weak_factory_per_connection_.GetWeakPtr();
+  weak_ptr_per_instance_lifetime_ =
+      weak_factory_per_instance_lifetime_.GetWeakPtr();
 
   // Initialize XMPP config.
   xmpp_config_.host = kXmppServer;
@@ -70,15 +97,14 @@ ChromotingSession::ChromotingSession(
   xmpp_config_.username = info.username;
   xmpp_config_.auth_token = info.auth_token;
 
-  client_auth_config_.fetch_third_party_token_callback = base::Bind(
-      &ChromotingSession::FetchThirdPartyToken, GetWeakPtr(), info.host_pubkey);
+  client_auth_config_.fetch_third_party_token_callback =
+      base::BindRepeating(&ChromotingSession::FetchThirdPartyToken,
+                          weak_ptr_per_connection_, info.host_pubkey);
 }
 
 ChromotingSession::~ChromotingSession() {
   DCHECK(runtime_->network_task_runner()->BelongsToCurrentThread());
-  if (client_) {
-    ReleaseResources();
-  }
+  ReleaseResources();
 }
 
 void ChromotingSession::Connect() {
@@ -86,27 +112,44 @@ void ChromotingSession::Connect() {
     ConnectToHostOnNetworkThread();
   } else {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::ConnectToHostOnNetworkThread,
-                              GetWeakPtr()));
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::ConnectToHostOnNetworkThread,
+                       weak_ptr_per_connection_));
   }
 }
 
 void ChromotingSession::Disconnect() {
+  DisconnectForReason(protocol::ErrorCode::OK);
+}
+
+void ChromotingSession::DisconnectForReason(protocol::ErrorCode error) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::Disconnect, GetWeakPtr()));
+        FROM_HERE, base::BindOnce(&ChromotingSession::DisconnectForReason,
+                                  weak_ptr_per_connection_, error));
     return;
   }
 
-  stats_logging_enabled_ = false;
+  EnableStatsLogging(false);
 
-  // User disconnection will not trigger OnConnectionState(Closed, OK).
-  // Remote disconnection will trigger OnConnectionState(...) and later trigger
-  // Disconnect().
-  if (connected_) {
-    logger_->LogSessionStateChange(ChromotingEvent::SessionState::CLOSED,
-                                   ChromotingEvent::ConnectionError::NONE);
-    connected_ = false;
+  // Do not log session state change if the connection is never started or is
+  // already closed.
+  if (session_state_ != protocol::ConnectionToHost::INITIALIZING &&
+      session_state_ != protocol::ConnectionToHost::FAILED &&
+      session_state_ != protocol::ConnectionToHost::CLOSED) {
+    ChromotingEvent::SessionState session_state_to_log;
+    if (error != protocol::ErrorCode::OK) {
+      session_state_to_log = ChromotingEvent::SessionState::CONNECTION_FAILED;
+    } else if (session_state_ == protocol::ConnectionToHost::CONNECTED) {
+      session_state_to_log = ChromotingEvent::SessionState::CLOSED;
+    } else {
+      session_state_to_log = ChromotingEvent::SessionState::CONNECTION_CANCELED;
+    }
+    logger_->LogSessionStateChange(
+        session_state_to_log, ClientTelemetryLogger::TranslateError(error));
+    session_state_ = (error == protocol::ErrorCode::OK)
+                         ? protocol::ConnectionToHost::CLOSED
+                         : protocol::ConnectionToHost::FAILED;
   }
 
   ReleaseResources();
@@ -122,14 +165,35 @@ void ChromotingSession::FetchThirdPartyToken(
 
   third_party_token_fetched_callback_ = token_fetched_callback;
   runtime_->ui_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&ChromotingSession::Delegate::FetchThirdPartyToken,
-                            delegate_, token_url, host_public_key, scope));
+      FROM_HERE,
+      base::BindOnce(&ChromotingSession::Delegate::FetchThirdPartyToken,
+                     delegate_, token_url, host_public_key, scope));
+}
+
+void ChromotingSession::GetFeedbackData(
+    GetFeedbackDataCallback callback) const {
+  if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    runtime_->network_task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::GetFeedbackDataOnNetworkThread,
+                       weak_ptr_per_instance_lifetime_, base::Passed(&callback),
+                       base::ThreadTaskRunnerHandle::Get()));
+    return;
+  }
+  GetFeedbackDataOnNetworkThread(std::move(callback),
+                                 base::ThreadTaskRunnerHandle::Get());
 }
 
 void ChromotingSession::HandleOnThirdPartyTokenFetched(
     const std::string& token,
     const std::string& shared_secret) {
-  DCHECK(runtime_->network_task_runner()->BelongsToCurrentThread());
+  if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    runtime_->network_task_runner()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::HandleOnThirdPartyTokenFetched,
+                       weak_ptr_per_connection_, token, shared_secret));
+    return;
+  }
 
   if (!third_party_token_fetched_callback_.is_null()) {
     base::ResetAndReturn(&third_party_token_fetched_callback_)
@@ -163,8 +227,9 @@ void ChromotingSession::SendMouseEvent(int x,
                                        bool button_down) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SendMouseEvent, GetWeakPtr(),
-                              x, y, button, button_down));
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::SendMouseEvent,
+                       weak_ptr_per_connection_, x, y, button, button_down));
     return;
   }
 
@@ -181,8 +246,8 @@ void ChromotingSession::SendMouseEvent(int x,
 void ChromotingSession::SendMouseWheelEvent(int delta_x, int delta_y) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SendMouseWheelEvent,
-                              GetWeakPtr(), delta_x, delta_y));
+        FROM_HERE, base::BindOnce(&ChromotingSession::SendMouseWheelEvent,
+                                  weak_ptr_per_connection_, delta_x, delta_y));
     return;
   }
 
@@ -213,8 +278,8 @@ bool ChromotingSession::SendKeyEvent(int scan_code,
 void ChromotingSession::SendTextEvent(const std::string& text) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(&ChromotingSession::SendTextEvent, GetWeakPtr(), text));
+        FROM_HERE, base::BindOnce(&ChromotingSession::SendTextEvent,
+                                  weak_ptr_per_connection_, text));
     return;
   }
 
@@ -227,19 +292,45 @@ void ChromotingSession::SendTouchEvent(
     const protocol::TouchEvent& touch_event) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SendTouchEvent, GetWeakPtr(),
-                              touch_event));
+        FROM_HERE, base::BindOnce(&ChromotingSession::SendTouchEvent,
+                                  weak_ptr_per_connection_, touch_event));
     return;
   }
 
   client_->input_stub()->InjectTouchEvent(touch_event);
 }
 
+void ChromotingSession::SendClientResolution(int dips_width,
+                                             int dips_height,
+                                             int scale) {
+  if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    runtime_->network_task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(&ChromotingSession::SendClientResolution,
+                                  weak_ptr_per_connection_, dips_width,
+                                  dips_height, scale));
+    return;
+  }
+
+  protocol::ClientResolution client_resolution;
+  client_resolution.set_dips_width(dips_width);
+  client_resolution.set_dips_height(dips_height);
+  client_resolution.set_x_dpi(scale * kDefaultDPI);
+  client_resolution.set_y_dpi(scale * kDefaultDPI);
+  NormalizeClientResolution(&client_resolution);
+
+  // Include the legacy width & height in physical pixels for use by older
+  // hosts.
+  client_resolution.set_width_deprecated(dips_width * scale);
+  client_resolution.set_height_deprecated(dips_height * scale);
+
+  client_->host_stub()->NotifyClientResolution(client_resolution);
+}
+
 void ChromotingSession::EnableVideoChannel(bool enable) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::EnableVideoChannel,
-                              GetWeakPtr(), enable));
+        FROM_HERE, base::BindOnce(&ChromotingSession::EnableVideoChannel,
+                                  weak_ptr_per_connection_, enable));
     return;
   }
 
@@ -252,8 +343,8 @@ void ChromotingSession::SendClientMessage(const std::string& type,
                                           const std::string& data) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SendClientMessage,
-                              GetWeakPtr(), type, data));
+        FROM_HERE, base::BindOnce(&ChromotingSession::SendClientMessage,
+                                  weak_ptr_per_connection_, type, data));
     return;
   }
 
@@ -270,8 +361,8 @@ void ChromotingSession::OnConnectionState(
 
   // This code assumes no intermediate connection state between CONNECTED and
   // CLOSED/FAILED.
-  connected_ = state == protocol::ConnectionToHost::CONNECTED;
-  EnableStatsLogging(connected_);
+  session_state_ = state;
+  EnableStatsLogging(session_state_ == protocol::ConnectionToHost::CONNECTED);
 
   logger_->LogSessionStateChange(ClientTelemetryLogger::TranslateState(state),
                                  ClientTelemetryLogger::TranslateError(error));
@@ -284,8 +375,13 @@ void ChromotingSession::OnConnectionState(
   }
 
   runtime_->ui_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&ChromotingSession::Delegate::OnConnectionState,
-                            delegate_, state, error));
+      FROM_HERE, base::BindOnce(&ChromotingSession::Delegate::OnConnectionState,
+                                delegate_, state, error));
+
+  if (state == protocol::ConnectionToHost::CLOSED ||
+      state == protocol::ConnectionToHost::FAILED) {
+    ReleaseResources();
+  }
 }
 
 void ChromotingSession::OnConnectionReady(bool ready) {
@@ -298,29 +394,30 @@ void ChromotingSession::OnRouteChanged(const std::string& channel_name,
                         protocol::TransportRoute::GetTypeString(route.type) +
                         " connection.";
   VLOG(1) << "Route: " << message;
+  logger_->SetTransportRoute(route);
 }
 
 void ChromotingSession::SetCapabilities(const std::string& capabilities) {
   runtime_->ui_task_runner()->PostTask(
-      FROM_HERE, base::Bind(&ChromotingSession::Delegate::SetCapabilities,
-                            delegate_, capabilities));
+      FROM_HERE, base::BindOnce(&ChromotingSession::Delegate::SetCapabilities,
+                                delegate_, capabilities));
 }
 
 void ChromotingSession::SetPairingResponse(
     const protocol::PairingResponse& response) {
   runtime_->ui_task_runner()->PostTask(
       FROM_HERE,
-      base::Bind(&ChromotingSession::Delegate::CommitPairingCredentials,
-                 delegate_, client_auth_config_.host_id, response.client_id(),
-                 response.shared_secret()));
+      base::BindOnce(&ChromotingSession::Delegate::CommitPairingCredentials,
+                     delegate_, client_auth_config_.host_id,
+                     response.client_id(), response.shared_secret()));
 }
 
 void ChromotingSession::DeliverHostMessage(
     const protocol::ExtensionMessage& message) {
   runtime_->ui_task_runner()->PostTask(
       FROM_HERE,
-      base::Bind(&ChromotingSession::Delegate::HandleExtensionMessage,
-                 delegate_, message.type(), message.data()));
+      base::BindOnce(&ChromotingSession::Delegate::HandleExtensionMessage,
+                     delegate_, message.type(), message.data()));
 }
 
 void ChromotingSession::SetDesktopSize(const webrtc::DesktopSize& size,
@@ -340,10 +437,6 @@ protocol::CursorShapeStub* ChromotingSession::GetCursorShapeStub() {
 void ChromotingSession::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
   NOTIMPLEMENTED();
-}
-
-base::WeakPtr<ChromotingSession> ChromotingSession::GetWeakPtr() {
-  return weak_ptr_;
 }
 
 void ChromotingSession::ConnectToHostOnNetworkThread() {
@@ -375,12 +468,14 @@ void ChromotingSession::ConnectToHostOnNetworkThread() {
   scoped_refptr<protocol::TransportContext> transport_context =
       new protocol::TransportContext(
           signaling_.get(),
-          base::MakeUnique<protocol::ChromiumPortAllocatorFactory>(),
-          base::MakeUnique<ChromiumUrlRequestFactory>(
+          std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
+          std::make_unique<ChromiumUrlRequestFactory>(
               runtime_->url_requester()),
           protocol::NetworkSettings(
               protocol::NetworkSettings::NAT_TRAVERSAL_FULL),
           protocol::TransportRole::CLIENT);
+  transport_context->set_ice_config_url(
+      ServiceUrls::GetInstance()->ice_config_url(), runtime_->token_getter());
 
 #if defined(ENABLE_WEBRTC_REMOTING_CLIENT)
   if (connection_info_.flags.find("useWebrtc") != std::string::npos) {
@@ -399,8 +494,9 @@ void ChromotingSession::ConnectToHostOnNetworkThread() {
 void ChromotingSession::SetDeviceName(const std::string& device_name) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SetDeviceName, GetWeakPtr(),
-                              device_name));
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::SetDeviceName,
+                       weak_ptr_per_instance_lifetime_, device_name));
     return;
   }
 
@@ -410,8 +506,9 @@ void ChromotingSession::SetDeviceName(const std::string& device_name) {
 void ChromotingSession::SendKeyEventInternal(int usb_key_code, bool key_down) {
   if (!runtime_->network_task_runner()->BelongsToCurrentThread()) {
     runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingSession::SendKeyEventInternal,
-                              GetWeakPtr(), usb_key_code, key_down));
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::SendKeyEventInternal,
+                       weak_ptr_per_connection_, usb_key_code, key_down));
     return;
   }
 
@@ -426,7 +523,9 @@ void ChromotingSession::EnableStatsLogging(bool enabled) {
 
   if (enabled && !stats_logging_enabled_) {
     runtime_->network_task_runner()->PostDelayedTask(
-        FROM_HERE, base::Bind(&ChromotingSession::LogPerfStats, GetWeakPtr()),
+        FROM_HERE,
+        base::BindOnce(&ChromotingSession::LogPerfStats,
+                       weak_ptr_per_connection_),
         base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
   }
   stats_logging_enabled_ = enabled;
@@ -441,13 +540,29 @@ void ChromotingSession::LogPerfStats() {
   logger_->LogStatistics(perf_tracker_.get());
 
   runtime_->network_task_runner()->PostDelayedTask(
-      FROM_HERE, base::Bind(&ChromotingSession::LogPerfStats, GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&ChromotingSession::LogPerfStats,
+                     weak_ptr_per_connection_),
       base::TimeDelta::FromMilliseconds(kPerfStatsIntervalMs));
 }
 
-void ChromotingSession::ReleaseResources() {
-  logger_.reset();
+void ChromotingSession::ChromotingSession::GetFeedbackDataOnNetworkThread(
+    GetFeedbackDataCallback callback,
+    scoped_refptr<base::SingleThreadTaskRunner> response_thread) const {
+  DCHECK(runtime_->network_task_runner()->BelongsToCurrentThread());
+  auto data = std::make_unique<FeedbackData>();
+  if (logger_) {
+    data->FillWithChromotingEvent(logger_->current_session_state_event());
+  }
+  if (response_thread->BelongsToCurrentThread()) {
+    std::move(callback).Run(std::move(data));
+    return;
+  }
+  response_thread->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), base::Passed(&data)));
+}
 
+void ChromotingSession::ReleaseResources() {
   // |client_| must be torn down before |signaling_|.
   client_.reset();
   delegate_.reset();
@@ -458,7 +573,13 @@ void ChromotingSession::ReleaseResources() {
   client_context_.reset();
   cursor_shape_stub_.reset();
 
-  weak_factory_.InvalidateWeakPtrs();
+  // Weak factory can only be invalidated once (due to DCHECK in it). After that
+  // the instance will no longer be usable. This is a design flaw that makes the
+  // instance no longer reusable after the caller calls Disconnect. Ideally we
+  // should factor out a Core that lives between (Connect, Disconnect).
+  if (weak_ptr_per_connection_) {
+    weak_factory_per_connection_.InvalidateWeakPtrs();
+  }
 }
 
 }  // namespace remoting

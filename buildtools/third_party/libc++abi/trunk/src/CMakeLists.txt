@@ -52,36 +52,32 @@ if (LIBCXXABI_HAS_CXA_THREAD_ATEXIT_IMPL)
   add_definitions(-DHAVE___CXA_THREAD_ATEXIT_IMPL)
 endif()
 
-# Generate library list
-set(libraries ${LIBCXXABI_CXX_ABI_LIBRARIES})
-
 if (LIBCXXABI_ENABLE_THREADS)
-  append_if(libraries LIBCXXABI_HAS_PTHREAD_LIB pthread)
+  add_library_flags_if(LIBCXXABI_HAS_PTHREAD_LIB pthread)
 endif()
 
-append_if(libraries LIBCXXABI_HAS_C_LIB c)
+add_library_flags_if(LIBCXXABI_HAS_C_LIB c)
 if (LIBCXXABI_USE_LLVM_UNWINDER)
   # Prefer using the in-tree version of libunwind, either shared or static. If
   # none are found fall back to using -lunwind.
   # FIXME: Is it correct to prefer the static version of libunwind?
   if (NOT LIBCXXABI_ENABLE_STATIC_UNWINDER AND (TARGET unwind_shared OR HAVE_LIBUNWIND))
-    list(APPEND libraries unwind_shared)
+    list(APPEND LIBCXXABI_LIBRARIES unwind_shared)
   elseif (LIBCXXABI_ENABLE_STATIC_UNWINDER AND (TARGET unwind_static OR HAVE_LIBUNWIND))
-    list(APPEND libraries unwind_static)
+    list(APPEND LIBCXXABI_LIBRARIES unwind_static)
   else()
-    list(APPEND libraries unwind)
+    list(APPEND LIBCXXABI_LIBRARIES unwind)
   endif()
 else()
-  append_if(libraries LIBCXXABI_HAS_GCC_S_LIB gcc_s)
+  add_library_flags_if(LIBCXXABI_HAS_GCC_S_LIB gcc_s)
 endif()
 if (MINGW)
   # MINGW_LIBRARIES is defined in config-ix.cmake
-  list(APPEND libraries ${MINGW_LIBRARIES})
+  list(APPEND LIBCXXABI_LIBRARIES ${MINGW_LIBRARIES})
 endif()
 
 # Setup flags.
-append_if(LIBCXXABI_COMPILE_FLAGS LIBCXXABI_HAS_FPIC_FLAG -fPIC)
-append_if(LIBCXXABI_LINK_FLAGS LIBCXXABI_HAS_NODEFAULTLIBS_FLAG -nodefaultlibs)
+add_link_flags_if_supported(-nodefaultlibs)
 
 set(LIBCXXABI_SHARED_LINK_FLAGS)
 
@@ -101,9 +97,9 @@ if ( APPLE )
   endif()
 endif()
 
-string(REPLACE ";" " " LIBCXXABI_COMPILE_FLAGS "${LIBCXXABI_COMPILE_FLAGS}")
-string(REPLACE ";" " " LIBCXXABI_LINK_FLAGS "${LIBCXXABI_LINK_FLAGS}")
-string(REPLACE ";" " " LIBCXXABI_SHARED_LINK_FLAGS "${LIBCXXABI_SHARED_LINK_FLAGS}")
+split_list(LIBCXXABI_COMPILE_FLAGS)
+split_list(LIBCXXABI_LINK_FLAGS)
+split_list(LIBCXXABI_SHARED_LINK_FLAGS)
 
 # FIXME: libc++abi.so will not link when modules are enabled because it depends
 # on symbols defined in libc++.so which has not yet been built.
@@ -113,53 +109,97 @@ endif()
 
 # Add a object library that contains the compiled source files.
 add_library(cxxabi_objects OBJECT ${LIBCXXABI_SOURCES} ${LIBCXXABI_HEADERS})
-
 set_target_properties(cxxabi_objects
-  PROPERTIES
-    COMPILE_FLAGS "${LIBCXXABI_COMPILE_FLAGS}"
-  )
+                      PROPERTIES
+                        CXX_EXTENSIONS
+                          OFF
+                        CXX_STANDARD
+                          11
+                        CXX_STANDARD_REQUIRED
+                          ON
+                        COMPILE_FLAGS
+                          "${LIBCXXABI_COMPILE_FLAGS}"
+                        POSITION_INDEPENDENT_CODE
+                          ON)
 
 set(LIBCXXABI_TARGETS)
 
 # Build the shared library.
 if (LIBCXXABI_ENABLE_SHARED)
   add_library(cxxabi_shared SHARED $<TARGET_OBJECTS:cxxabi_objects>)
-  target_link_libraries(cxxabi_shared ${libraries})
+  if(LLVM_FOUND)
+    llvm_setup_rpath(cxxabi_shared)
+  endif()
+  target_link_libraries(cxxabi_shared ${LIBCXXABI_LIBRARIES})
   set_target_properties(cxxabi_shared
-    PROPERTIES
-      LINK_FLAGS    "${LIBCXXABI_LINK_FLAGS} ${LIBCXXABI_SHARED_LINK_FLAGS}"
-      OUTPUT_NAME   "c++abi"
-      VERSION       "1.0"
-      SOVERSION     "1"
-    )
+                        PROPERTIES
+                          CXX_EXTENSIONS
+                            OFF
+                          CXX_STANDARD
+                            11
+                          CXX_STANDARD_REQUIRED
+                            ON
+                          LINK_FLAGS
+                            "${LIBCXXABI_LINK_FLAGS} ${LIBCXXABI_SHARED_LINK_FLAGS}"
+                          OUTPUT_NAME
+                            "c++abi"
+                          POSITION_INDEPENDENT_CODE
+                            ON
+                          SOVERSION
+                            "1"
+                          VERSION
+                            "1.0")
   list(APPEND LIBCXXABI_TARGETS "cxxabi_shared")
 endif()
 
 # Build the static library.
 if (LIBCXXABI_ENABLE_STATIC)
-  add_library(cxxabi_static STATIC $<TARGET_OBJECTS:cxxabi_objects>)
-  target_link_libraries(cxxabi_static ${libraries})
+  set(cxxabi_static_sources $<TARGET_OBJECTS:cxxabi_objects>)
+  if (LIBCXXABI_USE_LLVM_UNWINDER AND LIBCXXABI_ENABLE_STATIC_UNWINDER)
+    if (TARGET unwind_static OR HAVE_LIBUNWIND)
+      list(APPEND cxxabi_static_sources $<TARGET_OBJECTS:unwind_objects>)
+    endif()
+  endif()
+  add_library(cxxabi_static STATIC ${cxxabi_static_sources})
+  target_link_libraries(cxxabi_static ${LIBCXXABI_LIBRARIES})
   set_target_properties(cxxabi_static
-    PROPERTIES
-      LINK_FLAGS    "${LIBCXXABI_LINK_FLAGS}"
-      OUTPUT_NAME   "c++abi"
-  )
+                        PROPERTIES
+                          CXX_EXTENSIONS
+                            OFF
+                          CXX_STANDARD
+                            11
+                          CXX_STANDARD_REQUIRED
+                            ON
+                          LINK_FLAGS
+                            "${LIBCXXABI_LINK_FLAGS}"
+                          OUTPUT_NAME
+                            "c++abi"
+                          POSITION_INDEPENDENT_CODE
+                            ON)
   list(APPEND LIBCXXABI_TARGETS "cxxabi_static")
 endif()
 
 # Add a meta-target for both libraries.
 add_custom_target(cxxabi DEPENDS ${LIBCXXABI_TARGETS})
 
-install(TARGETS ${LIBCXXABI_TARGETS}
-  LIBRARY DESTINATION lib${LIBCXXABI_LIBDIR_SUFFIX} COMPONENT cxxabi
-  ARCHIVE DESTINATION lib${LIBCXXABI_LIBDIR_SUFFIX} COMPONENT cxxabi
-  )
+if (LIBCXXABI_INSTALL_LIBRARY)
+  install(TARGETS ${LIBCXXABI_TARGETS}
+    LIBRARY DESTINATION ${LIBCXXABI_INSTALL_PREFIX}lib${LIBCXXABI_LIBDIR_SUFFIX} COMPONENT cxxabi
+    ARCHIVE DESTINATION ${LIBCXXABI_INSTALL_PREFIX}lib${LIBCXXABI_LIBDIR_SUFFIX} COMPONENT cxxabi
+    )
+endif()
 
-if (NOT CMAKE_CONFIGURATION_TYPES)
+if (NOT CMAKE_CONFIGURATION_TYPES AND LIBCXXABI_INSTALL_LIBRARY)
   add_custom_target(install-cxxabi
     DEPENDS cxxabi
     COMMAND "${CMAKE_COMMAND}"
             -DCMAKE_INSTALL_COMPONENT=cxxabi
+            -P "${LIBCXXABI_BINARY_DIR}/cmake_install.cmake")
+  add_custom_target(install-cxxabi-stripped
+    DEPENDS cxxabi
+    COMMAND "${CMAKE_COMMAND}"
+            -DCMAKE_INSTALL_COMPONENT=cxxabi
+            -DCMAKE_INSTALL_DO_STRIP=1
             -P "${LIBCXXABI_BINARY_DIR}/cmake_install.cmake")
 
   # TODO: This is a legacy target name and should be removed at some point.

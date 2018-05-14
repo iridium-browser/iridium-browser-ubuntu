@@ -28,9 +28,8 @@
 #include "core/geometry/DOMQuad.h"
 #include "core/geometry/DOMRect.h"
 #include "core/geometry/DOMRectReadOnly.h"
-#include "core/html/ImageData.h"
+#include "core/html/canvas/ImageData.h"
 #include "core/typed_arrays/DOMArrayBufferBase.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/wtf/AutoReset.h"
 #include "platform/wtf/DateMath.h"
 #include "platform/wtf/allocator/Partitions.h"
@@ -57,7 +56,7 @@ namespace blink {
 // adjustment to this value.
 
 V8ScriptValueSerializer::V8ScriptValueSerializer(
-    RefPtr<ScriptState> script_state,
+    scoped_refptr<ScriptState> script_state,
     const Options& options)
     : script_state_(std::move(script_state)),
       serialized_script_value_(SerializedScriptValue::Create()),
@@ -67,7 +66,7 @@ V8ScriptValueSerializer::V8ScriptValueSerializer(
       wasm_policy_(options.wasm_policy),
       for_storage_(options.for_storage == SerializedScriptValue::kForStorage) {}
 
-RefPtr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
+scoped_refptr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
     v8::Local<v8::Value> value,
     ExceptionState& exception_state) {
 #if DCHECK_IS_ON()
@@ -103,6 +102,8 @@ RefPtr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
   if (exception_state.HadException())
     return nullptr;
 
+  serialized_script_value_->CloneSharedArrayBuffers(shared_array_buffers_);
+
   // Finalize the results.
   std::pair<uint8_t*, size_t> buffer = serializer_.Release();
   serialized_script_value_->SetData(
@@ -118,7 +119,7 @@ void V8ScriptValueSerializer::PrepareTransfer(ExceptionState& exception_state) {
   for (uint32_t i = 0; i < transferables_->array_buffers.size(); i++) {
     DOMArrayBufferBase* array_buffer = transferables_->array_buffers[i].Get();
     if (!array_buffer->IsShared()) {
-      v8::Local<v8::Value> wrapper = ToV8(array_buffer, script_state_.Get());
+      v8::Local<v8::Value> wrapper = ToV8(array_buffer, script_state_.get());
       serializer_.TransferArrayBuffer(
           i, v8::Local<v8::ArrayBuffer>::Cast(wrapper));
     } else {
@@ -137,12 +138,9 @@ void V8ScriptValueSerializer::FinalizeTransfer(
 
   v8::Isolate* isolate = script_state_->GetIsolate();
 
-  // The order of ArrayBuffers and SharedArrayBuffers matters; we use the index
-  // into this array for deserialization.
   ArrayBufferArray array_buffers;
   if (transferables_)
     array_buffers.AppendVector(transferables_->array_buffers);
-  array_buffers.AppendVector(shared_array_buffers_);
 
   if (!array_buffers.IsEmpty()) {
     serialized_script_value_->TransferArrayBuffers(isolate, array_buffers,
@@ -178,18 +176,13 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
   const WrapperTypeInfo* wrapper_type_info = wrappable->GetWrapperTypeInfo();
   if (wrapper_type_info == &V8Blob::wrapperTypeInfo) {
     Blob* blob = wrappable->ToImpl<Blob>();
-    if (blob->isClosed()) {
-      exception_state.ThrowDOMException(
-          kDataCloneError,
-          "A Blob object has been closed, and could therefore not be cloned.");
-      return false;
-    }
     serialized_script_value_->BlobDataHandles().Set(blob->Uuid(),
                                                     blob->GetBlobDataHandle());
     if (blob_info_array_) {
       size_t index = blob_info_array_->size();
       DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
-      blob_info_array_->emplace_back(blob->Uuid(), blob->type(), blob->size());
+      blob_info_array_->emplace_back(blob->GetBlobDataHandle(), blob->type(),
+                                     blob->size());
       WriteTag(kBlobIndexTag);
       WriteUint32(static_cast<uint32_t>(index));
     } else {
@@ -244,14 +237,16 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
     WriteUint32Enum(color_params.GetSerializedColorSpace());
     WriteUint32Enum(ImageSerializationTag::kCanvasPixelFormatTag);
     WriteUint32Enum(color_params.GetSerializedPixelFormat());
-    WriteUint32Enum(ImageSerializationTag::kOriginClean);
+    WriteUint32Enum(ImageSerializationTag::kCanvasOpacityModeTag);
+    WriteUint32Enum(color_params.GetSerializedOpacityMode());
+    WriteUint32Enum(ImageSerializationTag::kOriginCleanTag);
     WriteUint32(image_bitmap->OriginClean());
-    WriteUint32Enum(ImageSerializationTag::kIsPremultiplied);
+    WriteUint32Enum(ImageSerializationTag::kIsPremultipliedTag);
     WriteUint32(image_bitmap->IsPremultiplied());
     WriteUint32Enum(ImageSerializationTag::kEndTag);
     WriteUint32(image_bitmap->width());
     WriteUint32(image_bitmap->height());
-    RefPtr<Uint8Array> pixels = image_bitmap->CopyBitmapData();
+    scoped_refptr<Uint8Array> pixels = image_bitmap->CopyBitmapData();
     WriteUint32(pixels->length());
     WriteRawBytes(pixels->Data(), pixels->length());
     return true;
@@ -437,12 +432,6 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
 
 bool V8ScriptValueSerializer::WriteFile(File* file,
                                         ExceptionState& exception_state) {
-  if (file->isClosed()) {
-    exception_state.ThrowDOMException(
-        kDataCloneError,
-        "A File object has been closed, and could therefore not be cloned.");
-    return false;
-  }
   serialized_script_value_->BlobDataHandles().Set(file->Uuid(),
                                                   file->GetBlobDataHandle());
   if (blob_info_array_) {
@@ -453,8 +442,9 @@ bool V8ScriptValueSerializer::WriteFile(File* file,
     file->CaptureSnapshot(size, last_modified_ms);
     // FIXME: transition WebBlobInfo.lastModified to be milliseconds-based also.
     double last_modified = last_modified_ms / kMsPerSecond;
-    blob_info_array_->emplace_back(file->Uuid(), file->GetPath(), file->name(),
-                                   file->type(), last_modified, size);
+    blob_info_array_->emplace_back(file->GetBlobDataHandle(), file->GetPath(),
+                                   file->name(), file->type(), last_modified,
+                                   size);
     WriteUint32(static_cast<uint32_t>(index));
   } else {
     WriteUTF8String(file->HasBackingFile() ? file->GetPath() : g_empty_string);
@@ -533,26 +523,15 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
   }
 
   DOMSharedArrayBuffer* shared_array_buffer =
-      V8SharedArrayBuffer::toImpl(v8_shared_array_buffer);
+      V8SharedArrayBuffer::ToImpl(v8_shared_array_buffer);
 
   // The index returned from this function will be serialized into the data
   // stream. When deserializing, this will be used to index into the
-  // arrayBufferContents array of the SerializedScriptValue.
-  //
-  // The v8::ValueSerializer will use the same index space for transferred
-  // ArrayBuffers, but those will all occur first, because their indexes are
-  // generated in order via v8::ValueSerializer::TransferArrayBuffer (see
-  // prepareTransfer above).
-  //
-  // So we offset all SharedArrayBuffer indexes by the number of transferred
-  // ArrayBuffers.
+  // sharedArrayBufferContents array of the SerializedScriptValue.
   size_t index = shared_array_buffers_.Find(shared_array_buffer);
   if (index == kNotFound) {
     shared_array_buffers_.push_back(shared_array_buffer);
     index = shared_array_buffers_.size() - 1;
-  }
-  if (transferables_) {
-    index += transferables_->array_buffers.size();
   }
   return v8::Just<uint32_t>(index);
 }

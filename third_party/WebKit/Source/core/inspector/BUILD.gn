@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
 import("//third_party/WebKit/Source/bindings/bindings.gni")
 import("//third_party/WebKit/Source/core/core.gni")
 import("//third_party/inspector_protocol/inspector_protocol.gni")
@@ -34,7 +35,8 @@ blink_core_sources("inspector") {
     "InspectorAnimationAgent.h",
     "InspectorApplicationCacheAgent.cpp",
     "InspectorApplicationCacheAgent.h",
-    "InspectorBaseAgent.cpp",
+    "InspectorAuditsAgent.cpp",
+    "InspectorAuditsAgent.h",
     "InspectorBaseAgent.h",
     "InspectorCSSAgent.cpp",
     "InspectorCSSAgent.h",
@@ -51,8 +53,8 @@ blink_core_sources("inspector") {
     "InspectorHighlight.h",
     "InspectorHistory.cpp",
     "InspectorHistory.h",
-    "InspectorInputAgent.cpp",
-    "InspectorInputAgent.h",
+    "InspectorIOAgent.cpp",
+    "InspectorIOAgent.h",
     "InspectorLayerTreeAgent.cpp",
     "InspectorLayerTreeAgent.h",
     "InspectorLogAgent.cpp",
@@ -67,6 +69,8 @@ blink_core_sources("inspector") {
     "InspectorOverlayHost.h",
     "InspectorPageAgent.cpp",
     "InspectorPageAgent.h",
+    "InspectorPerformanceAgent.cpp",
+    "InspectorPerformanceAgent.h",
     "InspectorResourceContainer.cpp",
     "InspectorResourceContainer.h",
     "InspectorResourceContentLoader.cpp",
@@ -87,6 +91,8 @@ blink_core_sources("inspector") {
     "MainThreadDebugger.h",
     "NetworkResourcesData.cpp",
     "NetworkResourcesData.h",
+    "ResolveNode.cpp",
+    "ResolveNode.h",
     "ThreadDebugger.cpp",
     "ThreadDebugger.h",
     "V8InspectorString.cpp",
@@ -105,11 +111,6 @@ blink_core_sources("inspector") {
     # Collides with InspectorPageAgent.cpp (patch incoming)
     "MainThreadDebugger.cpp",
   ]
-
-  configs += [
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    "//build/config/compiler:no_size_t_to_int_warning",
-  ]
 }
 
 # inspector protocol -----------------------------------------------------------
@@ -123,7 +124,7 @@ inspector_protocol_generate("protocol_sources") {
   config_values = [ "imported.path=$_imported" ]
 
   inputs = [
-    "browser_protocol.json",
+    "$blink_core_output_dir/inspector/browser_protocol.json",
     v8_inspector_js_protocol,
     "inspector_protocol_config.json",
   ]
@@ -136,6 +137,8 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/Animation.h",
     "inspector/protocol/ApplicationCache.cpp",
     "inspector/protocol/ApplicationCache.h",
+    "inspector/protocol/Audits.cpp",
+    "inspector/protocol/Audits.h",
     "inspector/protocol/CacheStorage.cpp",
     "inspector/protocol/CacheStorage.h",
     "inspector/protocol/CSS.cpp",
@@ -158,8 +161,6 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/Forward.h",
     "inspector/protocol/IndexedDB.cpp",
     "inspector/protocol/IndexedDB.h",
-    "inspector/protocol/Input.cpp",
-    "inspector/protocol/Input.h",
     "inspector/protocol/IO.cpp",
     "inspector/protocol/IO.h",
     "inspector/protocol/LayerTree.cpp",
@@ -174,6 +175,8 @@ inspector_protocol_generate("protocol_sources") {
     "inspector/protocol/Overlay.h",
     "inspector/protocol/Page.cpp",
     "inspector/protocol/Page.h",
+    "inspector/protocol/Performance.cpp",
+    "inspector/protocol/Performance.h",
     "inspector/protocol/Protocol.cpp",
     "inspector/protocol/Protocol.h",
     "inspector/protocol/Runtime.h",
@@ -186,12 +189,13 @@ inspector_protocol_generate("protocol_sources") {
   ]
 
   deps = [
+    ":protocol_convert_to_json",
     ":protocol_version",
   ]
 }
 
 # Compiles the sources generated above.
-source_set("generated") {
+jumbo_source_set("generated") {
   sources = get_target_outputs(":protocol_sources")
 
   configs -= core_config_remove
@@ -216,11 +220,30 @@ source_set("generated") {
   ]
 }
 
+action("protocol_convert_to_json") {
+  script = _inspector_protocol_dir + "/ConvertProtocolToJSON.py"
+  inputs = [
+    "browser_protocol.pdl",
+  ]
+  output_file = "$blink_core_output_dir/inspector/browser_protocol.json"
+  outputs = [
+    output_file,
+  ]
+  args = [
+    rebase_path("browser_protocol.pdl", root_build_dir),
+    rebase_path(output_file, root_build_dir),
+  ]
+}
+
 action("protocol_compatibility_check") {
   script = _inspector_protocol_dir + "/CheckProtocolCompatibility.py"
+  deps = [
+    ":protocol_convert_to_json",
+  ]
 
   inputs = [
-    "browser_protocol.json",
+    "$blink_core_output_dir/inspector/browser_protocol.json",
+    "browser_protocol-1.3.json",
     v8_inspector_js_protocol,
   ]
   _stamp = "$blink_core_output_dir/inspector/browser_protocol.stamp"
@@ -231,7 +254,8 @@ action("protocol_compatibility_check") {
   args = [
     "--stamp",
     rebase_path(_stamp, root_build_dir),
-    rebase_path("browser_protocol.json", root_build_dir),
+    rebase_path("$blink_core_output_dir/inspector/browser_protocol.json",
+                root_build_dir),
     rebase_path(v8_inspector_js_protocol, root_build_dir),
   ]
 }
@@ -239,11 +263,12 @@ action("protocol_compatibility_check") {
 action("protocol_version") {
   deps = [
     ":protocol_compatibility_check",
+    ":protocol_convert_to_json",
   ]
   script = _inspector_protocol_dir + "/ConcatenateProtocols.py"
 
   inputs = [
-    "browser_protocol.json",
+    "$blink_core_output_dir/inspector/browser_protocol.json",
     v8_inspector_js_protocol,
   ]
   output_file = "$blink_core_output_dir/inspector/protocol.json"
@@ -252,7 +277,8 @@ action("protocol_version") {
   ]
 
   args = [
-    rebase_path("browser_protocol.json", root_build_dir),
+    rebase_path("$blink_core_output_dir/inspector/browser_protocol.json",
+                root_build_dir),
     rebase_path(v8_inspector_js_protocol, root_build_dir),
     rebase_path(output_file, root_build_dir),
   ]

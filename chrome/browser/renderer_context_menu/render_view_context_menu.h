@@ -63,19 +63,13 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 
   ~RenderViewContextMenu() override;
 
-  // Returns the offset amount if the context menu requires off-setting.
-  //
-  // If |render_frame_host| belongs to a WebContents that is nested within
-  // other WebContents(s), then this value is the offset between the topmost
-  // WebContents and the frame's WebContents.
-  static gfx::Vector2d GetOffset(content::RenderFrameHost* render_frame_host);
-
   // Adds the spell check service item to the context menu.
   static void AddSpellCheckServiceItem(ui::SimpleMenuModel* menu,
                                        bool is_checked);
 
   // RenderViewContextMenuBase:
   bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdVisible(int command_id) const override;
   bool IsCommandIdEnabled(int command_id) const override;
   void ExecuteCommand(int command_id, int event_flags) override;
   void AddSpellCheckServiceItem(bool is_checked) override;
@@ -126,10 +120,15 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // Gets the extension (if any) associated with the WebContents that we're in.
   const extensions::Extension* GetExtension() const;
 
+  // Queries the translate service to obtain the user's transate target
+  // language.
+  std::string GetTargetLanguage() const;
+
   void AppendDeveloperItems();
   void AppendDevtoolsForUnpackedExtensions();
   void AppendLinkItems();
   void AppendOpenWithLinkItems();
+  void AppendOpenInBookmarkAppLinkItems();
   void AppendImageItems();
   void AppendAudioItems();
   void AppendCanvasItems();
@@ -154,6 +153,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendSearchWebForImageItems();
   void AppendProtocolHandlerSubMenu();
   void AppendPasswordItems();
+  void AppendPictureInPictureItem();
 
   // Command enabled query functions.
   bool IsReloadEnabled() const;
@@ -171,7 +171,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   bool IsOpenLinkOTREnabled() const;
 
   // Command execution functions.
-  void ExecOpenLinkNewTab();
+  void ExecOpenBookmarkApp();
   void ExecProtocolHandler(int event_flags, int handler_index);
   void ExecOpenLinkInProfile(int profile_index);
   void ExecInspectElement();
@@ -196,6 +196,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void ExecTranslate();
   void ExecLanguageSettings(int event_flags);
   void ExecProtocolHandlerSettings(int event_flags);
+  void ExecPictureInPicture();
 
   // Writes the specified text/url to the system clipboard
   void WriteURLToClipboard(const GURL& url);
@@ -230,8 +231,10 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
       spelling_options_submenu_observer_;
 #endif
 
+#if defined(OS_CHROMEOS)
   // An observer that handles "Open with <app>" items.
   std::unique_ptr<RenderViewContextMenuObserver> open_with_menu_observer_;
+#endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   // An observer that disables menu items when print preview is active.

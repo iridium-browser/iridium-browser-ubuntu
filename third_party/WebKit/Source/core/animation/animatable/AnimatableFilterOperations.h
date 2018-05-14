@@ -38,20 +38,20 @@ namespace blink {
 
 class AnimatableFilterOperations final : public AnimatableValue {
  public:
-  static PassRefPtr<AnimatableFilterOperations> Create(
+  static scoped_refptr<AnimatableFilterOperations> Create(
       const FilterOperations& operations) {
-    return AdoptRef(new AnimatableFilterOperations(operations));
+    return base::AdoptRef(new AnimatableFilterOperations(operations));
   }
 
-  ~AnimatableFilterOperations() override {}
+  ~AnimatableFilterOperations() override = default;
 
   const FilterOperations& Operations() const {
     return operation_wrapper_->Operations();
   }
 
  protected:
-  PassRefPtr<AnimatableValue> InterpolateTo(const AnimatableValue*,
-                                            double fraction) const override;
+  scoped_refptr<AnimatableValue> InterpolateTo(const AnimatableValue*,
+                                               double fraction) const override;
 
  private:
   AnimatableFilterOperations(const FilterOperations& operations)

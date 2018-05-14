@@ -18,9 +18,23 @@ from dashboard.services import gitiles_service
 from dashboard.pinpoint.handlers import new
 from dashboard.pinpoint.models import job as job_module
 
-AUTHORIZED_USER = users.User(email='authorized_person@chromium.org',
-                             _auth_domain='google.com')
-UNAUTHORIZED_USER = users.User(email='foo@bar.com', _auth_domain='bar.com')
+
+_AUTHORIZED_USER = users.User(email='authorized_person@chromium.org',
+                              _auth_domain='google.com')
+_UNAUTHORIZED_USER = users.User(email='foo@bar.com', _auth_domain='bar.com')
+
+
+_BASE_REQUEST = {
+    'target': 'telemetry_perf_tests',
+    'configuration': 'chromium-rel-mac11-pro',
+    'benchmark': 'speedometer',
+    'auto_explore': '1',
+    'bug_id': '12345',
+    'start_repository': 'src',
+    'start_git_hash': '1',
+    'end_repository': 'src',
+    'end_git_hash': '3',
+}
 
 
 class NewTest(testing_common.TestCase):
@@ -35,50 +49,25 @@ class NewTest(testing_common.TestCase):
 
     self.SetCurrentUser('internal@chromium.org', is_admin=True)
 
+    namespaced_stored_object.Set('bot_configurations', {
+        'chromium-rel-mac11-pro': {
+            'browser': 'release',
+            'builder': 'Mac Builder',
+            'dimensions': {},
+        },
+    })
     namespaced_stored_object.Set('repositories', {
         'catapult': {'repository_url': 'http://catapult'},
         'src': {'repository_url': 'http://src'},
     })
 
-  def _SetAuthorizedOAuth(self, mock_oauth):
-    mock_oauth.get_current_user.return_value = AUTHORIZED_USER
-    mock_oauth.get_client_id.return_value = (
-        api_auth.OAUTH_CLIENT_ID_WHITELIST[0])
-
-  @mock.patch.object(utils, 'IsGroupMember', mock.MagicMock(return_value=False))
-  @mock.patch.object(api_auth, 'oauth')
-  def testPost_NoAccess_ShowsError(self, mock_oauth):
-    self.SetCurrentUser('external@chromium.org')
-    mock_oauth.get_current_user.return_value = UNAUTHORIZED_USER
-    mock_oauth.get_client_id.return_value = (
-        api_auth.OAUTH_CLIENT_ID_WHITELIST[0])
-    response = self.testapp.post('/api/new', status=200)
-    self.assertIn('error', json.loads(response.body))
-
-  @mock.patch.object(api_auth, 'oauth')
-  @mock.patch.object(api_auth, 'users')
-  def testPost_NoOauthUser(self, mock_users, mock_oauth):
-    mock_users.get_current_user.return_value = None
-    mock_oauth.get_current_user.return_value = None
-    mock_oauth.get_client_id.return_value = (
-        api_auth.OAUTH_CLIENT_ID_WHITELIST[0])
-    response = self.testapp.post('/api/new', status=200)
-    self.assertIn('error', json.loads(response.body))
-
-  @mock.patch.object(api_auth, 'oauth')
-  @mock.patch.object(api_auth, 'users')
-  def testPost_BadOauthClientId(self, mock_users, mock_oauth):
-    mock_users.get_current_user.return_value = None
-    mock_oauth.get_current_user.return_value = AUTHORIZED_USER
-    mock_oauth.get_client_id.return_value = 'invalid'
-    response = self.testapp.post('/api/new', status=200)
-    self.assertIn('error', json.loads(response.body))
-
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
   @mock.patch(
       'dashboard.services.issue_tracker_service.IssueTrackerService',
       mock.MagicMock())
   @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
   @mock.patch.object(gitiles_service, 'CommitRange')
   def testPost(self, mock_commit_range):
     mock_commit_range.return_value = [
@@ -86,80 +75,133 @@ class NewTest(testing_common.TestCase):
         {'commit': '2'},
         {'commit': '3'},
     ]
-    params = {
-        'configuration': 'chromium-rel-mac11-pro',
-        'test_suite': 'speedometer',
-        'test': '',
-        'metric': 'Total',
-        'auto_explore': '1',
-        'bug_id': 12345,
-        'start_repository': 'src',
-        'start_git_hash': '1',
-        'end_repository': 'src',
-        'end_git_hash': '3'
-    }
-    response = self.testapp.post('/api/new', params, status=200)
-    self.assertIn('jobId', json.loads(response.body))
+    response = self.testapp.post('/api/new', _BASE_REQUEST, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+    self.assertEqual(
+        result['jobUrl'],
+        'https://testbed.example.com/job/%s' % result['jobId'])
 
-  def testPost_MetricButNoTestSuite(self):
-    params = {
-        'configuration': 'chromium-rel-mac11-pro',
-        'test_suite': '',
-        'test': '',
-        'metric': 'Total',
-        'auto_explore': '1',
-        'bug_id': 12345,
-        'start_repository': 'src',
-        'start_git_hash': '1',
-        'end_repository': 'src',
-        'end_git_hash': '3'
-    }
-    response = self.testapp.post('/api/new', params, status=200)
-    self.assertEqual({'error': new._ERROR_METRIC_NO_TEST_SUITE},
-                     json.loads(response.body))
-
-  @mock.patch.object(
-      gitiles_service, 'CommitInfo',
-      mock.MagicMock(side_effect=gitiles_service.NotFoundError))
-  def testPost_InvalidChange(self):
-    params = {
-        'configuration': 'chromium-rel-mac11-pro',
-        'test_suite': 'speedometer',
-        'test': '',
-        'metric': 'Total',
-        'auto_explore': '1',
-        'bug_id': 12345,
-        'start_repository': 'src',
-        'start_git_hash': '1',
-        'end_repository': 'src',
-        'end_git_hash': '3'
-    }
-    response = self.testapp.post('/api/new', params, status=200)
-    self.assertEqual({'error': 'NotFoundError()'},
-                     json.loads(response.body))
-
-  def testPost_InvalidBug(self):
-    params = {
-        'configuration': 'chromium-rel-mac11-pro',
-        'test_suite': 'speedometer',
-        'test': '',
-        'metric': 'Total',
-        'auto_explore': '1',
-        'bug_id': 'not_an_int',
-        'start_repository': 'src',
-        'start_git_hash': '1',
-        'end_repository': 'src',
-        'end_git_hash': '3'
-    }
-    response = self.testapp.post('/api/new', params, status=200)
-    self.assertEqual({'error': new._ERROR_BUG_ID},
-                     json.loads(response.body))
-
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
   @mock.patch(
       'dashboard.services.issue_tracker_service.IssueTrackerService',
       mock.MagicMock())
   @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  def testPost_AutoExploreTrue(self, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    params = {}
+    params.update(_BASE_REQUEST)
+    params['auto_explore'] = True
+    response = self.testapp.post('/api/new', params, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+    job = job_module.JobFromId(result['jobId'])
+    self.assertTrue(job.auto_explore)
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  def testPost_WithChanges(self, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    base_request = {}
+    base_request.update(_BASE_REQUEST)
+    del base_request['start_git_hash']
+    del base_request['start_repository']
+    del base_request['end_git_hash']
+    del base_request['end_repository']
+    base_request['changes'] = json.dumps([
+        {'commits': [{'repository': 'src', 'git_hash': '1'}]},
+        {'commits': [{'repository': 'src', 'git_hash': '3'}]}])
+
+    response = self.testapp.post('/api/new', base_request, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+    self.assertEqual(
+        result['jobUrl'],
+        'https://testbed.example.com/job/%s' % result['jobId'])
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  @mock.patch('dashboard.pinpoint.models.change.patch.FromDict')
+  def testPost_WithPatch(self, mock_patch, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    mock_patch.return_value = None
+    params = {
+        'patch': 'https://lalala/c/foo/bar/+/123'
+    }
+    params.update(_BASE_REQUEST)
+    response = self.testapp.post('/api/new', params, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+    self.assertEqual(
+        result['jobUrl'],
+        'https://testbed.example.com/job/%s' % result['jobId'])
+    mock_patch.assert_called_with(params['patch'])
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  def testPost_MissingTarget(self):
+    request = dict(_BASE_REQUEST)
+    del request['target']
+    response = self.testapp.post('/api/new', request, status=200)
+    self.assertIn('error', json.loads(response.body))
+
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  def testPost_InvalidTestConfig(self):
+    request = dict(_BASE_REQUEST)
+    del request['configuration']
+    response = self.testapp.post('/api/new', request, status=200)
+    self.assertIn('error', json.loads(response.body))
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch.object(
+      gitiles_service, 'CommitInfo',
+      mock.MagicMock(side_effect=gitiles_service.NotFoundError('message')))
+  def testPost_InvalidChange(self):
+    response = self.testapp.post('/api/new', _BASE_REQUEST, status=200)
+    self.assertEqual({'error': 'message'}, json.loads(response.body))
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  def testPost_InvalidBug(self):
+    request = dict(_BASE_REQUEST)
+    request['bug_id'] = 'not_an_int'
+    response = self.testapp.post('/api/new', request, status=200)
+    self.assertEqual({'error': new._ERROR_BUG_ID},
+                     json.loads(response.body))
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
   @mock.patch.object(gitiles_service, 'CommitRange')
   def testPost_EmptyBug(self, mock_commit_range):
     mock_commit_range.return_value = [
@@ -167,19 +209,71 @@ class NewTest(testing_common.TestCase):
         {'commit': '2'},
         {'commit': '3'},
     ]
-    params = {
-        'configuration': 'chromium-rel-mac11-pro',
-        'test_suite': 'speedometer',
-        'test': '',
-        'metric': 'Total',
-        'auto_explore': '1',
-        'bug_id': '',
-        'start_repository': 'src',
-        'start_git_hash': '1',
-        'end_repository': 'src',
-        'end_git_hash': '3'
-    }
-    response = self.testapp.post('/api/new', params, status=200)
-    self.assertIn('jobId', json.loads(response.body))
+    request = dict(_BASE_REQUEST)
+    request['bug_id'] = ''
+    response = self.testapp.post('/api/new', request, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+    self.assertEqual(
+        result['jobUrl'],
+        'https://testbed.example.com/job/%s' % result['jobId'])
     job = job_module.Job.query().get()
     self.assertEqual(None, job.bug_id)
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  def testPost_ValidTags(self, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    request = dict(_BASE_REQUEST)
+    request['tags'] = json.dumps({'key': 'value'})
+    response = self.testapp.post('/api/new', request, status=200)
+    result = json.loads(response.body)
+    self.assertIn('jobId', result)
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  def testPost_InvalidTags(self, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    request = dict(_BASE_REQUEST)
+    request['tags'] = json.dumps(['abc'])
+    response = self.testapp.post('/api/new', request, status=200)
+    self.assertIn('error', json.loads(response.body))
+
+  @mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+  @mock.patch(
+      'dashboard.services.issue_tracker_service.IssueTrackerService',
+      mock.MagicMock())
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
+      return_value={'commit': 'abc'}))
+  @mock.patch.object(gitiles_service, 'CommitRange')
+  def testPost_InvalidTagType(self, mock_commit_range):
+    mock_commit_range.return_value = [
+        {'commit': '1'},
+        {'commit': '2'},
+        {'commit': '3'},
+    ]
+    request = dict(_BASE_REQUEST)
+    request['tags'] = json.dumps({'abc': 123})
+    response = self.testapp.post('/api/new', request, status=200)
+    self.assertIn('error', json.loads(response.body))

@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "build/build_config.h"
 #include "media/base/cdm_config.h"
 #include "media/base/mock_filters.h"
 #include "media/base/test_helpers.h"
@@ -29,6 +29,8 @@
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "services/service_manager/public/cpp/service_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using testing::Exactly;
 using testing::Invoke;
@@ -46,8 +48,8 @@ const char kSecurityOrigin[] = "http://foo.com";
 
 class MockRendererClient : public mojom::RendererClient {
  public:
-  MockRendererClient() {}
-  ~MockRendererClient() override {}
+  MockRendererClient() = default;
+  ~MockRendererClient() override = default;
 
   // mojom::RendererClient implementation.
   MOCK_METHOD3(OnTimeUpdate,
@@ -76,7 +78,7 @@ class MediaServiceTest : public service_manager::test::ServiceTest {
       : ServiceTest("media_service_unittests"),
         renderer_client_binding_(&renderer_client_),
         video_stream_(DemuxerStream::VIDEO) {}
-  ~MediaServiceTest() override {}
+  ~MediaServiceTest() override = default;
 
   void SetUp() override {
     ServiceTest::SetUp();
@@ -85,7 +87,7 @@ class MediaServiceTest : public service_manager::test::ServiceTest {
     connector()->BindInterface(media::mojom::kMediaServiceName, &media_service);
 
     service_manager::mojom::InterfaceProviderPtr interfaces;
-    auto provider = base::MakeUnique<MediaInterfaceProvider>(
+    auto provider = std::make_unique<MediaInterfaceProvider>(
         mojo::MakeRequest(&interfaces));
     media_service->CreateInterfaceFactory(
         mojo::MakeRequest(&interface_factory_), std::move(interfaces));
@@ -105,13 +107,13 @@ class MediaServiceTest : public service_manager::test::ServiceTest {
   void InitializeCdm(const std::string& key_system,
                      bool expected_result,
                      int cdm_id) {
-    interface_factory_->CreateCdm(mojo::MakeRequest(&cdm_));
+    interface_factory_->CreateCdm(key_system, mojo::MakeRequest(&cdm_));
 
     EXPECT_CALL(*this, OnCdmInitializedInternal(expected_result, cdm_id))
         .Times(Exactly(1))
         .WillOnce(InvokeWithoutArgs(run_loop_.get(), &base::RunLoop::Quit));
-    cdm_->Initialize(key_system, kSecurityOrigin,
-                     mojom::CdmConfig::From(CdmConfig()),
+    cdm_->Initialize(key_system, url::Origin::Create(GURL(kSecurityOrigin)),
+                     CdmConfig(),
                      base::Bind(&MediaServiceTest::OnCdmInitialized,
                                 base::Unretained(this)));
   }
@@ -125,9 +127,9 @@ class MediaServiceTest : public service_manager::test::ServiceTest {
 
     video_stream_.set_video_decoder_config(video_config);
 
-    mojom::DemuxerStreamPtr video_stream_proxy;
+    mojom::DemuxerStreamPtrInfo video_stream_proxy_info;
     mojo_video_stream_.reset(new MojoDemuxerStreamImpl(
-        &video_stream_, MakeRequest(&video_stream_proxy)));
+        &video_stream_, MakeRequest(&video_stream_proxy_info)));
 
     mojom::RendererClientAssociatedPtrInfo client_ptr_info;
     renderer_client_binding_.Bind(mojo::MakeRequest(&client_ptr_info));
@@ -135,8 +137,8 @@ class MediaServiceTest : public service_manager::test::ServiceTest {
     EXPECT_CALL(*this, OnRendererInitialized(expected_result))
         .Times(Exactly(1))
         .WillOnce(InvokeWithoutArgs(run_loop_.get(), &base::RunLoop::Quit));
-    std::vector<mojom::DemuxerStreamPtr> streams;
-    streams.push_back(std::move(video_stream_proxy));
+    std::vector<mojom::DemuxerStreamPtrInfo> streams;
+    streams.push_back(std::move(video_stream_proxy_info));
     renderer_->Initialize(std::move(client_ptr_info), std::move(streams),
                           base::nullopt, base::nullopt,
                           base::Bind(&MediaServiceTest::OnRendererInitialized,

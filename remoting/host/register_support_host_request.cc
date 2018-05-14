@@ -74,9 +74,12 @@ void RegisterSupportHostRequest::OnSignalStrategyStateChange(
     SignalStrategy::State state) {
   if (state == SignalStrategy::CONNECTED) {
     DCHECK(!callback_.is_null());
+    // The host_jid will be written to the SupportHostStore for lookup. Use id()
+    // instead of jid() so that we can write the lcs address instead of the
+    // remoting bot JID.
+    std::string host_jid = signal_strategy_->GetLocalAddress().id();
     request_ = iq_sender_->SendIq(
-        buzz::STR_SET, directory_bot_jid_,
-        CreateRegistrationRequest(signal_strategy_->GetLocalAddress().jid()),
+        buzz::STR_SET, directory_bot_jid_, CreateRegistrationRequest(host_jid),
         base::Bind(&RegisterSupportHostRequest::ProcessResponse,
                    base::Unretained(this)));
     if (!request_) {
@@ -103,10 +106,10 @@ bool RegisterSupportHostRequest::OnSignalStrategyIncomingStanza(
 
 std::unique_ptr<XmlElement>
 RegisterSupportHostRequest::CreateRegistrationRequest(const std::string& jid) {
-  auto query = base::MakeUnique<XmlElement>(
+  auto query = std::make_unique<XmlElement>(
       QName(kChromotingXmlNamespace, kRegisterQueryTag));
 
-  auto public_key = base::MakeUnique<XmlElement>(
+  auto public_key = std::make_unique<XmlElement>(
       QName(kChromotingXmlNamespace, kPublicKeyTag));
   public_key->AddText(key_pair_->GetPublicKey());
   query->AddElement(public_key.release());
@@ -114,19 +117,19 @@ RegisterSupportHostRequest::CreateRegistrationRequest(const std::string& jid) {
   query->AddElement(CreateSignature(jid).release());
 
   // Add host version.
-  auto host_version = base::MakeUnique<XmlElement>(
+  auto host_version = std::make_unique<XmlElement>(
       QName(kChromotingXmlNamespace, kHostVersionTag));
   host_version->AddText(STRINGIZE(VERSION));
   query->AddElement(host_version.release());
 
   // Add host os name.
-  auto host_os_name = base::MakeUnique<XmlElement>(
+  auto host_os_name = std::make_unique<XmlElement>(
       QName(kChromotingXmlNamespace, kHostOsNameTag));
   host_os_name->AddText(GetHostOperatingSystemName());
   query->AddElement(host_os_name.release());
 
   // Add host os version.
-  auto host_os_version = base::MakeUnique<XmlElement>(
+  auto host_os_version = std::make_unique<XmlElement>(
       QName(kChromotingXmlNamespace, kHostOsVersionTag));
   host_os_version->AddText(GetHostOperatingSystemVersion());
   query->AddElement(host_os_version.release());

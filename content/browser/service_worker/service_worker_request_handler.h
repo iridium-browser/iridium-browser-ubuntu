@@ -16,16 +16,20 @@
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
-#include "content/public/common/service_worker_modes.h"
 #include "net/url_request/url_request_job_factory.h"
+#include "services/network/public/mojom/fetch_api.mojom.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom.h"
 
 namespace net {
 class NetworkDelegate;
 class URLRequest;
 class URLRequestInterceptor;
+}
+
+namespace network {
+class ResourceRequestBody;
 }
 
 namespace storage {
@@ -35,7 +39,6 @@ class BlobStorageContext;
 namespace content {
 
 class ResourceContext;
-class ResourceRequestBody;
 class ServiceWorkerContextCore;
 class ServiceWorkerContextWrapper;
 class ServiceWorkerNavigationHandleCore;
@@ -58,26 +61,26 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       bool skip_service_worker,
       ResourceType resource_type,
       RequestContextType request_context_type,
-      RequestContextFrameType frame_type,
+      network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
-      scoped_refptr<ResourceRequestBody> body,
+      scoped_refptr<network::ResourceRequestBody> body,
       const base::Callback<WebContents*(void)>& web_contents_getter);
 
-  // PlzNavigate and --enable-network-service.
+  // S13nServiceWorker:
   // Same as InitializeForNavigation() but instead of attaching to a URLRequest,
   // just creates a URLLoaderRequestHandler and returns it.
   static std::unique_ptr<URLLoaderRequestHandler>
   InitializeForNavigationNetworkService(
-      const ResourceRequest& resource_request,
+      const network::ResourceRequest& resource_request,
       ResourceContext* resource_context,
       ServiceWorkerNavigationHandleCore* navigation_handle_core,
       storage::BlobStorageContext* blob_storage_context,
       bool skip_service_worker,
       ResourceType resource_type,
       RequestContextType request_context_type,
-      RequestContextFrameType frame_type,
+      network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
-      scoped_refptr<ResourceRequestBody> body,
+      scoped_refptr<network::ResourceRequestBody> body,
       const base::Callback<WebContents*(void)>& web_contents_getter);
 
   // Attaches a newly created handler if the given |request| needs to
@@ -93,14 +96,15 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       int process_id,
       int provider_id,
       bool skip_service_worker,
-      FetchRequestMode request_mode,
-      FetchCredentialsMode credentials_mode,
-      FetchRedirectMode redirect_mode,
+      network::mojom::FetchRequestMode request_mode,
+      network::mojom::FetchCredentialsMode credentials_mode,
+      network::mojom::FetchRedirectMode redirect_mode,
       const std::string& integrity,
+      bool keepalive,
       ResourceType resource_type,
       RequestContextType request_context_type,
-      RequestContextFrameType frame_type,
-      scoped_refptr<ResourceRequestBody> body);
+      network::mojom::RequestContextFrameType frame_type,
+      scoped_refptr<network::ResourceRequestBody> body);
 
   // Returns the handler attached to |request|. This may return NULL
   // if no handler is attached.
@@ -131,11 +135,12 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       ResourceContext* context) = 0;
 
   // URLLoaderRequestHandler overrides.
-  void MaybeCreateLoader(const ResourceRequest& request,
+  void MaybeCreateLoader(const network::ResourceRequest& request,
                          ResourceContext* resource_context,
                          LoaderCallback callback) override;
 
-  // Methods to support cross site navigations.
+  // These are obsolete, needed for non-PlzNavigate.
+  // TODO(falken): Remove these completely.
   void PrepareForCrossSiteTransfer(int old_process_id);
   void CompleteCrossSiteTransfer(int new_process_id,
                                  int new_provider_id);
@@ -159,9 +164,7 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
   ResourceType resource_type_;
 
  private:
-  std::unique_ptr<ServiceWorkerProviderHost> host_for_cross_site_transfer_;
-  int old_process_id_;
-  int old_provider_id_;
+  static int user_data_key_;  // Only address is used.
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerRequestHandler);
 };

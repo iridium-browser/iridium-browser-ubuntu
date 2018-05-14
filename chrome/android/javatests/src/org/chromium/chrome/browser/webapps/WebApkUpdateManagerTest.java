@@ -4,8 +4,6 @@
 
 package org.chromium.chrome.browser.webapps;
 
-import android.content.Context;
-import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 
 import org.junit.After;
@@ -15,6 +13,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CallbackHelper;
@@ -23,12 +22,11 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.browser.WebappTestPage;
 import org.chromium.content_public.common.ScreenOrientationValues;
-import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.net.test.EmbeddedTestServerRule;
 import org.chromium.webapk.lib.client.WebApkVersion;
 
 import java.util.HashMap;
@@ -39,13 +37,14 @@ import java.util.Map;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
         ChromeSwitches.CHECK_FOR_WEB_MANIFEST_UPDATE_ON_STARTUP})
 public class WebApkUpdateManagerTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
 
-    private static final String WEBAPK_PACKAGE = "test.package";
+    @Rule
+    public EmbeddedTestServerRule mTestServerRule = new EmbeddedTestServerRule();
+
     private static final String WEBAPK_ID = "webapk_id";
     private static final String WEBAPK_MANIFEST_URL =
             "/chrome/test/data/banners/manifest_one_icon.json";
@@ -58,12 +57,11 @@ public class WebApkUpdateManagerTest {
     private static final String WEBAPK_SHORT_NAME = "Manifest test app";
     private static final String WEBAPK_ICON_URL = "/chrome/test/data/banners/image-512px.png";
     private static final String WEBAPK_ICON_MURMUR2_HASH = "7742433188808797392";
-    private static final int WEBAPK_DISPLAY_MODE = WebDisplayMode.STANDALONE;
+    private static final @WebDisplayMode int WEBAPK_DISPLAY_MODE = WebDisplayMode.STANDALONE;
     private static final int WEBAPK_ORIENTATION = ScreenOrientationValues.LANDSCAPE;
     private static final long WEBAPK_THEME_COLOR = 2147483648L;
     private static final long WEBAPK_BACKGROUND_COLOR = 2147483648L;
 
-    private EmbeddedTestServer mTestServer;
     private Tab mTab;
 
     /**
@@ -75,14 +73,8 @@ public class WebApkUpdateManagerTest {
         private boolean mNeedsUpdate = false;
 
         public TestWebApkUpdateManager(CallbackHelper waiter, WebappDataStorage storage) {
-            super(null, storage);
+            super(storage);
             mWaiter = waiter;
-        }
-
-        @Override
-        public void onWebManifestForInitialUrlNotWebApkCompatible() {
-            super.onWebManifestForInitialUrlNotWebApkCompatible();
-            mWaiter.notifyCalled();
         }
 
         @Override
@@ -93,8 +85,9 @@ public class WebApkUpdateManagerTest {
         }
 
         @Override
-        protected void buildProtoAndScheduleUpdate(final WebApkInfo info, String primaryIconUrl,
-                String badgeIconUrl, boolean isManifestStale) {
+        protected void storeWebApkUpdateRequestToFile(String updateRequestPath, WebApkInfo info,
+                String primaryIconUrl, String badgeIconUrl, boolean isManifestStale,
+                @WebApkUpdateReason int updateReason, Callback<Boolean> callback) {
             mNeedsUpdate = true;
         }
 
@@ -110,23 +103,23 @@ public class WebApkUpdateManagerTest {
         public String name;
         public String shortName;
         public Map<String, String> iconUrlToMurmur2HashMap;
-        public int displayMode;
+        public @WebDisplayMode int displayMode;
         public int orientation;
         public long themeColor;
         public long backgroundColor;
     }
 
-    public CreationData defaultCreationData(EmbeddedTestServer server) {
+    public CreationData defaultCreationData() {
         CreationData creationData = new CreationData();
-        creationData.manifestUrl = mTestServer.getURL(WEBAPK_MANIFEST_URL);
-        creationData.startUrl = server.getURL(WEBAPK_START_URL);
-        creationData.scope = server.getURL(WEBAPK_SCOPE_URL);
+        creationData.manifestUrl = mTestServerRule.getServer().getURL(WEBAPK_MANIFEST_URL);
+        creationData.startUrl = mTestServerRule.getServer().getURL(WEBAPK_START_URL);
+        creationData.scope = mTestServerRule.getServer().getURL(WEBAPK_SCOPE_URL);
         creationData.name = WEBAPK_NAME;
         creationData.shortName = WEBAPK_SHORT_NAME;
 
         creationData.iconUrlToMurmur2HashMap = new HashMap<String, String>();
         creationData.iconUrlToMurmur2HashMap.put(
-                server.getURL(WEBAPK_ICON_URL), WEBAPK_ICON_MURMUR2_HASH);
+                mTestServerRule.getServer().getURL(WEBAPK_ICON_URL), WEBAPK_ICON_MURMUR2_HASH);
 
         creationData.displayMode = WEBAPK_DISPLAY_MODE;
         creationData.orientation = WEBAPK_ORIENTATION;
@@ -139,8 +132,6 @@ public class WebApkUpdateManagerTest {
     public void setUp() throws Exception {
         mActivityTestRule.startMainActivityOnBlankPage();
         RecordHistogram.setDisabledForTests(true);
-        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        mTestServer = EmbeddedTestServer.createAndStartServer(context);
         mTab = mActivityTestRule.getActivity().getActivityTab();
 
         TestFetchStorageCallback callback = new TestFetchStorageCallback();
@@ -150,7 +141,6 @@ public class WebApkUpdateManagerTest {
 
     @After
     public void tearDown() throws Exception {
-        mTestServer.stopAndDestroyServer();
         RecordHistogram.setDisabledForTests(false);
     }
 
@@ -163,12 +153,12 @@ public class WebApkUpdateManagerTest {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                WebApkInfo info = WebApkInfo.create(WEBAPK_ID, "", false /* forceNavigation */,
-                        creationData.scope, null, null, creationData.name, creationData.shortName,
-                        creationData.displayMode, creationData.orientation, 0,
-                        creationData.themeColor, creationData.backgroundColor, "",
-                        WebApkVersion.CURRENT_SHELL_APK_VERSION, creationData.manifestUrl,
-                        creationData.startUrl, creationData.iconUrlToMurmur2HashMap);
+                WebApkInfo info = WebApkInfo.create(WEBAPK_ID, "", creationData.scope, null, null,
+                        creationData.name, creationData.shortName, creationData.displayMode,
+                        creationData.orientation, 0, creationData.themeColor,
+                        creationData.backgroundColor, "", WebApkVersion.CURRENT_SHELL_APK_VERSION,
+                        creationData.manifestUrl, creationData.startUrl,
+                        creationData.iconUrlToMurmur2HashMap, false /* forceNavigation */);
                 updateManager.updateIfNeeded(mTab, info);
             }
         });
@@ -188,12 +178,12 @@ public class WebApkUpdateManagerTest {
     @Feature({"WebApk"})
     public void testCanonicalUrlsIdenticalShouldNotUpgrade() throws Exception {
         // URL canonicalization should replace "%74" with 't'.
-        CreationData creationData = defaultCreationData(mTestServer);
-        creationData.startUrl = mTestServer.getURL(
+        CreationData creationData = defaultCreationData();
+        creationData.startUrl = mTestServerRule.getServer().getURL(
                 "/chrome/test/data/banners/manifest_%74est_page.html");
 
-        WebappTestPage.navigateToPageWithServiceWorkerAndManifest(
-                mTestServer, mTab, WEBAPK_MANIFEST_URL);
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEBAPK_MANIFEST_URL);
         Assert.assertFalse(checkUpdateNeeded(creationData));
     }
 
@@ -205,12 +195,12 @@ public class WebApkUpdateManagerTest {
     @Feature({"WebApk"})
     public void testCanonicalUrlsDifferentShouldUpgrade() throws Exception {
         // URL canonicalization should replace "%62" with 'b'.
-        CreationData creationData = defaultCreationData(mTestServer);
-        creationData.startUrl = mTestServer.getURL(
+        CreationData creationData = defaultCreationData();
+        creationData.startUrl = mTestServerRule.getServer().getURL(
                 "/chrome/test/data/banners/manifest_%62est_page.html");
 
-        WebappTestPage.navigateToPageWithServiceWorkerAndManifest(
-                mTestServer, mTab, WEBAPK_MANIFEST_URL);
+        WebappTestPage.navigateToServiceWorkerPageWithManifest(
+                mTestServerRule.getServer(), mTab, WEBAPK_MANIFEST_URL);
         Assert.assertTrue(checkUpdateNeeded(creationData));
     }
 }

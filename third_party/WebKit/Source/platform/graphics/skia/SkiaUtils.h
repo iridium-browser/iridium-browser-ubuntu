@@ -46,8 +46,6 @@
 
 namespace blink {
 
-class GraphicsContext;
-
 /**** constants ****/
 
 enum {
@@ -59,6 +57,8 @@ enum {
   // In Skia, we will also limit width/height to 32767.
   kMaxSkiaDim = 32767  // Maximum width/height in CSS pixels.
 };
+
+bool PLATFORM_EXPORT IsValidImageSize(const IntSize&);
 
 SkBlendMode PLATFORM_EXPORT
     WebCoreCompositeToSkiaComposite(CompositeOperator,
@@ -110,9 +110,6 @@ inline WindRule SkFillTypeToWindRule(SkPath::FillType fill_type) {
 SkMatrix PLATFORM_EXPORT AffineTransformToSkMatrix(const AffineTransform&);
 
 bool NearlyIntegral(float value);
-
-InterpolationQuality LimitInterpolationQuality(const GraphicsContext&,
-                                               InterpolationQuality resampling);
 
 InterpolationQuality ComputeInterpolationQuality(float src_width,
                                                  float src_height,

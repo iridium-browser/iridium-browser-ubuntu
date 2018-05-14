@@ -65,21 +65,20 @@ void PrintingContextLinux::PrintDocument(const MetafilePlayer& metafile) {
   print_dialog_->PrintDocument(metafile, document_name_);
 }
 
-void PrintingContextLinux::AskUserForSettings(
-    int max_pages,
-    bool has_selection,
-    bool is_scripted,
-    const PrintSettingsCallback& callback) {
+void PrintingContextLinux::AskUserForSettings(int max_pages,
+                                              bool has_selection,
+                                              bool is_scripted,
+                                              PrintSettingsCallback callback) {
   if (!print_dialog_) {
     // Can only get here if the renderer is sending bad messages.
     // http://crbug.com/341777
     NOTREACHED();
-    callback.Run(FAILED);
+    std::move(callback).Run(FAILED);
     return;
   }
 
-  print_dialog_->ShowDialog(
-      delegate_->GetParentView(), has_selection, callback);
+  print_dialog_->ShowDialog(delegate_->GetParentView(), has_selection,
+                            std::move(callback));
 }
 
 PrintingContext::Result PrintingContextLinux::UseDefaultSettings() {
@@ -182,7 +181,7 @@ void PrintingContextLinux::ReleaseContext() {
   // Intentional No-op.
 }
 
-skia::NativeDrawingContext PrintingContextLinux::context() const {
+printing::NativeDrawingContext PrintingContextLinux::context() const {
   // Intentional No-op.
   return NULL;
 }

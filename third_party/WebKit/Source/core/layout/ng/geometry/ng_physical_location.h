@@ -14,7 +14,7 @@ namespace blink {
 // NGPhysicalLocation is the position of a rect (typically a fragment) relative
 // to the root document.
 struct CORE_EXPORT NGPhysicalLocation {
-  NGPhysicalLocation() {}
+  NGPhysicalLocation() = default;
   NGPhysicalLocation(LayoutUnit left, LayoutUnit top) : left(left), top(top) {}
   LayoutUnit left;
   LayoutUnit top;
@@ -24,10 +24,7 @@ struct CORE_EXPORT NGPhysicalLocation {
   String ToString() const;
 };
 
-CORE_EXPORT inline std::ostream& operator<<(std::ostream& os,
-                                            const NGPhysicalLocation& value) {
-  return os << value.ToString();
-}
+CORE_EXPORT std::ostream& operator<<(std::ostream&, const NGPhysicalLocation&);
 
 }  // namespace blink
 

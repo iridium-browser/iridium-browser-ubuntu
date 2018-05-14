@@ -34,7 +34,8 @@ class ThumbnailLayer;
 // A native component of the Java TabContentManager class.
 class TabContentManager : public ThumbnailCacheObserver {
  public:
-  static TabContentManager* FromJavaObject(jobject jobj);
+  static TabContentManager* FromJavaObject(
+      const base::android::JavaRef<jobject>& jobj);
 
   TabContentManager(JNIEnv* env,
                     jobject obj,
@@ -68,8 +69,6 @@ class TabContentManager : public ThumbnailCacheObserver {
   // make sure all live layers are detached.
   void DetachLiveLayer(int tab_id, scoped_refptr<cc::Layer> layer);
 
-  // Callback for when the thumbnail decompression for tab_id is done.
-  void OnFinishDecompressThumbnail(int tab_id, bool success, SkBitmap bitmap);
   // JNI methods.
   jboolean HasFullCachedThumbnail(
       JNIEnv* env,
@@ -96,9 +95,6 @@ class TabContentManager : public ThumbnailCacheObserver {
   void RemoveTabThumbnail(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jint tab_id);
-  void GetDecompressedThumbnail(JNIEnv* env,
-                                const base::android::JavaParamRef<jobject>& obj,
-                                jint tab_id);
   void OnUIResourcesWereEvicted();
 
   // ThumbnailCacheObserver implementation;

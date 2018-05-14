@@ -6,12 +6,14 @@
 
 #include <memory>
 
+#include "build/build_config.h"
 #include "chrome/browser/chooser_controller/chooser_controller.h"
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/browser/extensions/chrome_extension_chooser_dialog.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/ui/login/login_handler.h"
 #include "chrome/browser/ui/views/task_manager_view.h"
+#include "chrome/browser/ui/views_mode_controller.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/intent_picker_bubble_view.h"
@@ -23,11 +25,14 @@
 // excluded in a Mac Cocoa build: definitions under chrome/browser/ui/cocoa may
 // select at runtime whether to show a Cocoa dialog, or the toolkit-views dialog
 // provided by browser_dialogs.h.
-
 // static
-LoginHandler* LoginHandler::Create(net::AuthChallengeInfo* auth_info,
-                                   net::URLRequest* request) {
-  return chrome::CreateLoginHandlerViews(auth_info, request);
+LoginHandler* LoginHandler::Create(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback) {
+  return chrome::CreateLoginHandlerViews(auth_info, web_contents_getter,
+                                         auth_required_callback);
 }
 
 // static
@@ -42,6 +47,10 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_window,
 // static
 ExtensionInstallPrompt::ShowDialogCallback
 ExtensionInstallPrompt::GetDefaultShowDialogCallback() {
+#if defined(OS_MACOSX)
+  if (views_mode_controller::IsViewsBrowserCocoa())
+    return GetDefaultShowDialogCallbackCocoa();
+#endif
   return ExtensionInstallPrompt::GetViewsShowDialogCallback();
 }
 
@@ -56,6 +65,7 @@ void ChromeExtensionChooserDialog::ShowDialog(
 
 namespace chrome {
 
+#if !defined(OS_MACOSX)
 task_manager::TaskManagerTableModel* ShowTaskManager(Browser* browser) {
   return task_manager::TaskManagerView::Show(browser);
 }
@@ -63,6 +73,7 @@ task_manager::TaskManagerTableModel* ShowTaskManager(Browser* browser) {
 void HideTaskManager() {
   task_manager::TaskManagerView::Hide();
 }
+#endif
 
 }  // namespace chrome
 

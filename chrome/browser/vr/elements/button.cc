@@ -4,60 +4,139 @@
 
 #include "chrome/browser/vr/elements/button.h"
 
-#include "base/memory/ptr_util.h"
-#include "chrome/browser/vr/elements/button_texture.h"
+#include "base/bind.h"
+#include "chrome/browser/vr/elements/invisible_hit_target.h"
+#include "chrome/browser/vr/elements/rect.h"
+#include "chrome/browser/vr/elements/ui_element.h"
+#include "chrome/browser/vr/elements/ui_element_name.h"
+#include "chrome/browser/vr/elements/vector_icon.h"
+#include "chrome/browser/vr/ui_scene_constants.h"
+
 #include "ui/gfx/geometry/point_f.h"
 
 namespace vr {
 
-Button::Button(base::Callback<void()> click_handler,
-               std::unique_ptr<ButtonTexture> texture)
-    : TexturedElement(256),
-      texture_(std::move(texture)),
-      click_handler_(click_handler) {}
+namespace {
+
+constexpr float kHitPlaneScaleFactorHovered = 1.2f;
+constexpr float kDefaultHoverOffsetDMM = 0.048f;
+
+}  // namespace
+
+Button::Button(base::RepeatingCallback<void()> click_handler)
+    : click_handler_(click_handler), hover_offset_(kDefaultHoverOffsetDMM) {
+  auto background = std::make_unique<Rect>();
+  background->SetType(kTypeButtonBackground);
+  background->set_bubble_events(true);
+  background->set_contributes_to_parent_bounds(false);
+  background->SetTransitionedProperties({TRANSFORM});
+  background_ = background.get();
+  AddChild(std::move(background));
+
+  auto hit_plane = std::make_unique<InvisibleHitTarget>();
+  hit_plane->SetType(kTypeButtonHitTarget);
+  hit_plane->set_focusable(false);
+  hit_plane->set_bubble_events(true);
+  hit_plane->set_contributes_to_parent_bounds(false);
+  hit_plane_ = hit_plane.get();
+  AddChild(std::move(hit_plane));
+
+  EventHandlers event_handlers;
+  event_handlers.hover_enter =
+      base::BindRepeating(&Button::HandleHoverEnter, base::Unretained(this));
+  event_handlers.hover_move =
+      base::BindRepeating(&Button::HandleHoverMove, base::Unretained(this));
+  event_handlers.hover_leave =
+      base::BindRepeating(&Button::HandleHoverLeave, base::Unretained(this));
+  event_handlers.button_down =
+      base::BindRepeating(&Button::HandleButtonDown, base::Unretained(this));
+  event_handlers.button_up =
+      base::BindRepeating(&Button::HandleButtonUp, base::Unretained(this));
+  set_event_handlers(event_handlers);
+}
 
 Button::~Button() = default;
 
-void Button::OnHoverEnter(const gfx::PointF& position) {
-  OnStateUpdated(position);
+void Button::Render(UiElementRenderer* renderer,
+                    const CameraModel& model) const {}
+
+void Button::SetButtonColors(const ButtonColors& colors) {
+  colors_ = colors;
+  OnStateUpdated();
 }
 
-void Button::OnHoverLeave() {
-  OnStateUpdated(gfx::PointF(std::numeric_limits<float>::max(),
-                             std::numeric_limits<float>::max()));
+void Button::HandleHoverEnter() {
+  hovered_ = enabled_;
+  OnStateUpdated();
 }
 
-void Button::OnMove(const gfx::PointF& position) {
-  OnStateUpdated(position);
+void Button::HandleHoverMove(const gfx::PointF& position) {
+  hovered_ = hit_plane_->LocalHitTest(position) && enabled_;
+  OnStateUpdated();
 }
 
-void Button::OnButtonDown(const gfx::PointF& position) {
-  down_ = true;
-  OnStateUpdated(position);
+void Button::HandleHoverLeave() {
+  hovered_ = false;
+  OnStateUpdated();
 }
 
-void Button::OnButtonUp(const gfx::PointF& position) {
+void Button::HandleButtonDown() {
+  down_ = enabled_;
+  OnStateUpdated();
+}
+
+void Button::HandleButtonUp() {
   down_ = false;
-  OnStateUpdated(position);
-  if (HitTest(position))
+  OnStateUpdated();
+  if (hovered() && click_handler_)
     click_handler_.Run();
 }
 
-bool Button::HitTest(const gfx::PointF& point) const {
-  return texture_->HitTest(point);
+void Button::OnStateUpdated() {
+  pressed_ = hovered_ ? down_ : false;
+  background_->SetColor(colors_.GetBackgroundColor(hovered_, pressed_));
+
+  if (hover_offset_ == 0.0f)
+    return;
+
+  if (hovered()) {
+    background_->SetTranslate(0.0, 0.0, hover_offset_);
+    hit_plane_->SetScale(kHitPlaneScaleFactorHovered,
+                         kHitPlaneScaleFactorHovered, 1.0f);
+  } else {
+    background_->SetTranslate(0.0, 0.0, 0.0);
+    hit_plane_->SetScale(1.0f, 1.0f, 1.0f);
+  }
 }
 
-UiTexture* Button::GetTexture() const {
-  return texture_.get();
+void Button::OnSetDrawPhase() {
+  background_->SetDrawPhase(draw_phase());
+  hit_plane_->SetDrawPhase(draw_phase());
 }
 
-void Button::OnStateUpdated(const gfx::PointF& position) {
-  const bool hovered = HitTest(position);
-  const bool pressed = hovered ? down_ : false;
+void Button::OnSetName() {
+  background_->set_owner_name_for_test(name());
+  hit_plane_->set_owner_name_for_test(name());
+}
 
-  texture_->SetHovered(hovered);
-  texture_->SetPressed(pressed);
-  UpdateTexture();
+void Button::OnSetSize(const gfx::SizeF& size) {
+  background_->SetSize(size.width(), size.height());
+  hit_plane_->SetSize(size.width(), size.height());
+}
+
+void Button::OnSetCornerRadii(const CornerRadii& radii) {
+  background_->SetCornerRadii(radii);
+  hit_plane_->SetCornerRadii(radii);
+}
+
+void Button::NotifyClientSizeAnimated(const gfx::SizeF& size,
+                                      int target_property_id,
+                                      cc::KeyframeModel* animation) {
+  if (target_property_id == BOUNDS) {
+    background_->SetSize(size.width(), size.height());
+    hit_plane_->SetSize(size.width(), size.height());
+  }
+  UiElement::NotifyClientSizeAnimated(size, target_property_id, animation);
 }
 
 }  // namespace vr

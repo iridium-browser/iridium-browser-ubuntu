@@ -33,7 +33,7 @@
 
 #include "core/CoreExport.h"
 #include "core/animation/AnimationEffectTiming.h"
-#include "core/animation/EffectModel.h"
+#include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/KeyframeEffectReadOnly.h"
 
 namespace blink {
@@ -49,25 +49,33 @@ class CORE_EXPORT KeyframeEffect final : public KeyframeEffectReadOnly {
 
  public:
   static KeyframeEffect* Create(Element*,
-                                EffectModel*,
+                                KeyframeEffectModelBase*,
                                 const Timing&,
                                 KeyframeEffectReadOnly::Priority =
                                     KeyframeEffectReadOnly::kDefaultPriority,
                                 EventDelegate* = nullptr);
   // Web Animations API Bindings constructors.
   static KeyframeEffect* Create(
-      ExecutionContext*,
+      ScriptState*,
       Element*,
-      const DictionarySequenceOrDictionary& effect_input,
+      const ScriptValue&,
       const UnrestrictedDoubleOrKeyframeEffectOptions&,
       ExceptionState&);
-  static KeyframeEffect* Create(
-      ExecutionContext*,
-      Element*,
-      const DictionarySequenceOrDictionary& effect_input,
-      ExceptionState&);
+  static KeyframeEffect* Create(ScriptState*,
+                                Element*,
+                                const ScriptValue&,
+                                ExceptionState&);
+  static KeyframeEffect* Create(ScriptState*,
+                                KeyframeEffectReadOnly*,
+                                ExceptionState&);
 
   ~KeyframeEffect() override;
+
+  // IDL implementation.
+  void setComposite(String);
+  void setKeyframes(ScriptState*,
+                    const ScriptValue& keyframes,
+                    ExceptionState&);
 
   bool IsKeyframeEffect() const override { return true; }
 
@@ -75,7 +83,7 @@ class CORE_EXPORT KeyframeEffect final : public KeyframeEffectReadOnly {
 
  private:
   KeyframeEffect(Element*,
-                 EffectModel*,
+                 KeyframeEffectModelBase*,
                  const Timing&,
                  KeyframeEffectReadOnly::Priority,
                  EventDelegate*);

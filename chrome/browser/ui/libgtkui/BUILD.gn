@@ -47,6 +47,7 @@ template("libgtkui") {
                 "libgtkui_export.h",
                 "menu_util.cc",
                 "menu_util.h",
+                "settings_provider.h",
                 "print_dialog_gtk.cc",
                 "print_dialog_gtk.h",
                 "printing_gtk_util.cc",
@@ -64,14 +65,17 @@ template("libgtkui") {
                 "x11_input_method_context_impl_gtk.h",
               ]
 
-    configs += [ "//build/config/linux:x11" ]
+    configs += [
+      "//build/config/linux/pangocairo",
+      "//build/config/linux:x11",
+    ]
 
-    if (use_gconf) {
+    if (use_gio) {
       sources += [
-        "gconf_listener.cc",
-        "gconf_listener.h",
+        "settings_provider_gsettings.cc",
+        "settings_provider_gsettings.h",
       ]
-      configs += [ "//build/config/linux/gconf" ]
+      configs += [ "//build/linux:gio_config" ]
     }
 
     if (use_cups) {
@@ -81,11 +85,12 @@ template("libgtkui") {
     defines = [ "LIBGTKUI_IMPLEMENTATION" ]
 
     deps = invoker.deps + [
+             "//chrome/browser/ui/views",
              "//base",
              "//base:i18n",
              "//base/third_party/dynamic_annotations",
              "//cc/paint",
-             "//chrome/common:features",
+             "//chrome/common:buildflags",
              "//chrome:extra_resources",
              "//chrome:resources",
              "//chrome:strings",
@@ -96,10 +101,10 @@ template("libgtkui") {
              "//printing",
              "//skia",
 
-             # GTK pulls pangoft2, which requires HarfBuzz symbols. Since we
-             # link our own HarfBuzz, avoid mixing symbols from system HarfBuzz
-             # and own ones, hence the dependency to harfbuzz-ng here.
-             "//third_party/harfbuzz-ng",
+             # GTK pulls pangoft2, which requires HarfBuzz symbols. When linking
+             # our own HarfBuzz avoid mixing symbols from system HarfBuzz and
+             # our own through the indirect dependency to harfbuzz-ng here.
+             "//third_party:freetype_harfbuzz",
              "//ui/aura",
              "//ui/base",
              "//ui/base/ime",
@@ -125,8 +130,14 @@ template("libgtkui") {
 if (use_gtk3) {
   libgtkui("libgtk3ui") {
     sources = [
+      "gtk3_background_painter.cc",
+      "gtk3_background_painter.h",
       "native_theme_gtk3.cc",
       "native_theme_gtk3.h",
+      "nav_button_provider_gtk3.cc",
+      "nav_button_provider_gtk3.h",
+      "settings_provider_gtk3.cc",
+      "settings_provider_gtk3.h",
     ]
     deps = [
       "//build/config/linux/gtk3",

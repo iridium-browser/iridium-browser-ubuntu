@@ -30,14 +30,15 @@
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
 #include "core/loader/resource/FontResource.h"
+#include "core/workers/WorkerGlobalScope.h"
 #include "platform/CrossOriginAttributeValue.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/fonts/FontCustomPlatformData.h"
-#include "platform/loader/fetch/FetchInitiatorTypeNames.h"
 #include "platform/loader/fetch/FetchParameters.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
 #include "platform/loader/fetch/ResourceLoaderOptions.h"
+#include "platform/loader/fetch/fetch_initiator_type_names.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/weborigin/SecurityPolicy.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "public/platform/WebURLRequest.h"
@@ -78,7 +79,8 @@ bool CSSFontFaceSrcValue::HasFailedOrCanceledSubresources() const {
   return fetched_ && fetched_->GetResource()->LoadFailedOrCanceled();
 }
 
-FontResource* CSSFontFaceSrcValue::Fetch(Document* document) const {
+FontResource& CSSFontFaceSrcValue::Fetch(ExecutionContext* context,
+                                         FontResourceClient* client) const {
   if (!fetched_) {
     ResourceRequest resource_request(absolute_resource_);
     resource_request.SetHTTPReferrer(SecurityPolicy::GenerateReferrer(
@@ -89,7 +91,7 @@ FontResource* CSSFontFaceSrcValue::Fetch(Document* document) const {
     if (RuntimeEnabledFeatures::WebFontsCacheAwareTimeoutAdaptationEnabled())
       params.SetCacheAwareLoadingEnabled(kIsCacheAwareLoadingEnabled);
     params.SetContentSecurityCheck(should_check_content_security_policy_);
-    SecurityOrigin* security_origin = document->GetSecurityOrigin();
+    const SecurityOrigin* security_origin = context->GetSecurityOrigin();
 
     // Local fonts are accessible from file: URLs even when
     // allowFileAccessFromFileURLs is false.
@@ -97,30 +99,38 @@ FontResource* CSSFontFaceSrcValue::Fetch(Document* document) const {
       params.SetCrossOriginAccessControl(security_origin,
                                          kCrossOriginAttributeAnonymous);
     }
-
-    FontResource* resource = FontResource::Fetch(params, document->Fetcher());
-    if (!resource)
-      return nullptr;
-    fetched_ = FontResourceHelper::Create(resource);
+    // For Workers, Fetcher is lazily loaded, so we must ensure it's available
+    // here.
+    if (context->IsWorkerGlobalScope()) {
+      ToWorkerGlobalScope(context)->EnsureFetcher();
+    }
+    fetched_ = FontResourceHelper::Create(
+        FontResource::Fetch(params, context->Fetcher(), client),
+        context->GetTaskRunner(TaskType::kUnspecedLoading).get());
   } else {
     // FIXME: CSSFontFaceSrcValue::Fetch is invoked when @font-face rule
     // is processed by StyleResolver / StyleEngine.
-    RestoreCachedResourceIfNeeded(document);
+    RestoreCachedResourceIfNeeded(context);
+    if (client) {
+      client->SetResource(
+          fetched_->GetResource(),
+          context->GetTaskRunner(TaskType::kUnspecedLoading).get());
+    }
   }
-  return fetched_->GetResource();
+  return *ToFontResource(fetched_->GetResource());
 }
 
 void CSSFontFaceSrcValue::RestoreCachedResourceIfNeeded(
-    Document* document) const {
+    ExecutionContext* context) const {
   DCHECK(fetched_);
-  DCHECK(document);
-  DCHECK(document->Fetcher());
+  DCHECK(context);
+  DCHECK(context->Fetcher());
 
-  const String resource_url = document->CompleteURL(absolute_resource_);
+  const String resource_url = context->CompleteURL(absolute_resource_);
   DCHECK_EQ(should_check_content_security_policy_,
             fetched_->GetResource()->Options().content_security_policy_option);
-  document->Fetcher()->EmulateLoadStartedForInspector(
-      fetched_->GetResource(), KURL(kParsedURLString, resource_url),
+  context->Fetcher()->EmulateLoadStartedForInspector(
+      fetched_->GetResource(), KURL(resource_url),
       WebURLRequest::kRequestContextFont, FetchInitiatorTypeNames::css);
 }
 

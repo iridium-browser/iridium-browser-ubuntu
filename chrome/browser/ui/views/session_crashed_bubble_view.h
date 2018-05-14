@@ -49,7 +49,6 @@ class SessionCrashedBubbleView : public SessionCrashedBubble,
   bool ShouldShowWindowTitle() const override;
   bool ShouldShowCloseButton() const override;
   void OnWidgetDestroying(views::Widget* widget) override;
-  views::View* CreateFootnoteView() override;
   bool Accept() override;
   bool Cancel() override;
   bool Close() override;
@@ -64,6 +63,10 @@ class SessionCrashedBubbleView : public SessionCrashedBubble,
                               const gfx::Range& range,
                               int event_flags) override;
 
+  // Creates a view allowing the user to opt-in to reporting information to UMA.
+  // Returns nullptr if offer is unavailable.
+  views::View* CreateUmaOptInView();
+
   // Restore previous session after user selects so.
   void RestorePreviousSession();
 
@@ -71,13 +74,13 @@ class SessionCrashedBubbleView : public SessionCrashedBubble,
   void OpenStartupPages();
 
   // Enable UMA if the user accepted the offer.
-  void MaybeEnableUMA();
+  void MaybeEnableUma();
 
   // Close and destroy the bubble.
   void CloseBubble();
 
   // Used for opening the question mark link as well as access the tab strip.
-  Browser* browser_;
+  Browser* const browser_;
 
   // Checkbox for the user to opt-in to UMA reporting.
   views::Checkbox* uma_option_;

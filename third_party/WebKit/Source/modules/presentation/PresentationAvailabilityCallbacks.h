@@ -5,30 +5,27 @@
 #ifndef PresentationAvailabilityCallbacks_h
 #define PresentationAvailabilityCallbacks_h
 
+#include "modules/ModulesExport.h"
 #include "modules/presentation/PresentationPromiseProperty.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Vector.h"
-#include "public/platform/WebCallbacks.h"
 
 namespace blink {
 
-struct WebPresentationError;
-
-// PresentationAvailabilityCallback extends WebCallbacks to resolve the
-// underlying promise depending on the result passed to the callback. It takes a
-// WTF::Vector<KURL> in its constructor and will pass it to the
-// WebAvailabilityObserver.
-class PresentationAvailabilityCallbacks final
-    : public WebCallbacks<bool, const WebPresentationError&> {
+// PresentationAvailabilityCallback resolves or rejects underlying promise
+// depending on the availability result.
+// TODO(crbug.com/749327): Consider removing this class and have
+// PresentationAvailabilityState use PresentationAvailabilityProperty directly.
+class MODULES_EXPORT PresentationAvailabilityCallbacks {
  public:
   PresentationAvailabilityCallbacks(PresentationAvailabilityProperty*,
                                     const WTF::Vector<KURL>&);
-  ~PresentationAvailabilityCallbacks() override;
+  virtual ~PresentationAvailabilityCallbacks();
 
-  void OnSuccess(bool value) override;
-  void OnError(const WebPresentationError&) override;
+  virtual void Resolve(bool value);
+  virtual void RejectAvailabilityNotSupported();
 
  private:
   Persistent<PresentationAvailabilityProperty> resolver_;

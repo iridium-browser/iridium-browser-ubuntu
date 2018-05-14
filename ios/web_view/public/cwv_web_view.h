@@ -8,6 +8,9 @@
 
 #import "cwv_export.h"
 
+NS_ASSUME_NONNULL_BEGIN
+
+@class CWVAutofillController;
 @class CWVScrollView;
 @class CWVTranslationController;
 @class CWVWebViewConfiguration;
@@ -28,13 +31,17 @@ CWV_EXPORT
 @property(nonatomic, readonly) CWVWebViewConfiguration* configuration;
 
 // This web view's navigation delegate.
-@property(nonatomic, weak) id<CWVNavigationDelegate> navigationDelegate;
+@property(nonatomic, weak, nullable) id<CWVNavigationDelegate>
+    navigationDelegate;
 
 // This web view's translation controller.
 @property(nonatomic, readonly) CWVTranslationController* translationController;
 
+// This web view's autofill controller.
+@property(nonatomic, readonly) CWVAutofillController* autofillController;
+
 // This web view's UI delegate
-@property(nonatomic, weak) id<CWVUIDelegate> UIDelegate;
+@property(nonatomic, weak, nullable) id<CWVUIDelegate> UIDelegate;
 
 // Whether or not this web view can go backwards or forwards. KVO Compliant.
 @property(nonatomic, readonly) BOOL canGoBack;
@@ -43,10 +50,30 @@ CWV_EXPORT
 // Whether or not this web view is loading a page. KVO compliant.
 @property(nonatomic, readonly, getter=isLoading) BOOL loading;
 
-// The URL displayed in the url bar. KVO Compliant.
+// The URL displayed in the URL bar. KVO Compliant.
+//
+// You should use |lastCommittedURL| instead for most of purposes other than
+// rendering the URL bar.
+//
+// |visibleURL| and |lastCommittedURL| are the same in most cases, but with
+// these exceptions:
+//
+// - The request was made by -loadRequest: method.
+//   |visibleURL| changes to the requested URL immediately when -loadRequest:
+//   was called. |lastCommittedURL| changes only after the navigation is
+//   committed (i.e., the server started to respond with data and the displayed
+//   page has actually changed.)
+//
+// - It has navigated to a page with a bad SSL certificate.
+//   (not implemented for CWVWebView)
+//   |visibleURL| is the bad cert page URL. |lastCommittedURL| is the previous
+//   page URL.
 @property(nonatomic, readonly) NSURL* visibleURL;
 
 // The URL of the current document. KVO Compliant.
+//
+// See the comment of |visibleURL| above for the difference between |visibleURL|
+// and |lastCommittedURL|.
 @property(nonatomic, readonly) NSURL* lastCommittedURL;
 
 // The current page title. KVO compliant.
@@ -86,7 +113,6 @@ CWV_EXPORT
                clientID:(NSString*)clientID
            clientSecret:(NSString*)clientSecret;
 
-// |configuration| must not be null
 - (instancetype)initWithFrame:(CGRect)frame
                 configuration:(CWVWebViewConfiguration*)configuration
     NS_DESIGNATED_INITIALIZER;
@@ -115,5 +141,7 @@ CWV_EXPORT
          completionHandler:(void (^)(id, NSError*))completionHandler;
 
 @end
+
+NS_ASSUME_NONNULL_END
 
 #endif  // IOS_WEB_VIEW_PUBLIC_CWV_WEB_VIEW_H_

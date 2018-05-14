@@ -7,14 +7,14 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -121,7 +121,7 @@ void RecordUmaEvent(SimpleGeolocationRequestEvent event) {
 }
 
 void RecordUmaResponseCode(int code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SimpleGeolocation.Request.ResponseCode", code);
+  base::UmaHistogramSparse("SimpleGeolocation.Request.ResponseCode", code);
 }
 
 // Slow geolocation resolve leads to bad user experience.
@@ -139,8 +139,8 @@ void RecordUmaResult(SimpleGeolocationRequestResult result, size_t retries) {
   UMA_HISTOGRAM_ENUMERATION("SimpleGeolocation.Request.Result",
                             result,
                             SIMPLE_GEOLOCATION_REQUEST_RESULT_COUNT);
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SimpleGeolocation.Request.Retries",
-                              std::min(retries, kMaxRetriesValueInHistograms));
+  base::UmaHistogramSparse("SimpleGeolocation.Request.Retries",
+                           std::min(retries, kMaxRetriesValueInHistograms));
 }
 
 // Creates the request url to send to the server.
@@ -208,7 +208,7 @@ bool ParseServerResponse(const GURL& server_url,
         server_url,
         "Unexpected response type : " +
             base::StringPrintf(
-                "%u", static_cast<unsigned int>(response_value->GetType())),
+                "%u", static_cast<unsigned int>(response_value->type())),
         position);
     RecordUmaEvent(SIMPLE_GEOLOCATION_REQUEST_EVENT_RESPONSE_MALFORMED);
     return false;
@@ -306,42 +306,41 @@ void ReportUmaHasCellTowers(bool value) {
 // Helpers to reformat data into dictionaries for conversion to request JSON
 std::unique_ptr<base::DictionaryValue> CreateAccessPointDictionary(
     WifiAccessPoint access_point) {
-  auto access_point_dictionary = base::MakeUnique<base::DictionaryValue>();
+  auto access_point_dictionary = std::make_unique<base::DictionaryValue>();
 
-  access_point_dictionary->SetStringWithoutPathExpansion(
-      kMacAddress, access_point.mac_address);
-  access_point_dictionary->SetIntegerWithoutPathExpansion(
-      kSignalStrength, access_point.signal_strength);
+  access_point_dictionary->SetKey(kMacAddress,
+                                  base::Value(access_point.mac_address));
+  access_point_dictionary->SetKey(kSignalStrength,
+                                  base::Value(access_point.signal_strength));
   if (!access_point.timestamp.is_null()) {
-    access_point_dictionary->SetStringWithoutPathExpansion(
+    access_point_dictionary->SetKey(
         kAge,
-        base::Int64ToString(
-            (base::Time::Now() - access_point.timestamp).InMilliseconds()));
+        base::Value(base::Int64ToString(
+            (base::Time::Now() - access_point.timestamp).InMilliseconds())));
   }
 
-  access_point_dictionary->SetIntegerWithoutPathExpansion(kChannel,
-                                                          access_point.channel);
-  access_point_dictionary->SetIntegerWithoutPathExpansion(
-      kSignalToNoiseRatio, access_point.signal_to_noise);
+  access_point_dictionary->SetKey(kChannel, base::Value(access_point.channel));
+  access_point_dictionary->SetKey(kSignalToNoiseRatio,
+                                  base::Value(access_point.signal_to_noise));
 
   return access_point_dictionary;
 }
 
 std::unique_ptr<base::DictionaryValue> CreateCellTowerDictionary(
     CellTower cell_tower) {
-  auto cell_tower_dictionary = base::MakeUnique<base::DictionaryValue>();
-  cell_tower_dictionary->SetStringWithoutPathExpansion(kCellId, cell_tower.ci);
-  cell_tower_dictionary->SetStringWithoutPathExpansion(kLocationAreaCode,
-                                                       cell_tower.lac);
-  cell_tower_dictionary->SetStringWithoutPathExpansion(kMobileCountryCode,
-                                                       cell_tower.mcc);
-  cell_tower_dictionary->SetStringWithoutPathExpansion(kMobileNetworkCode,
-                                                       cell_tower.mnc);
+  auto cell_tower_dictionary = std::make_unique<base::DictionaryValue>();
+  cell_tower_dictionary->SetKey(kCellId, base::Value(cell_tower.ci));
+  cell_tower_dictionary->SetKey(kLocationAreaCode, base::Value(cell_tower.lac));
+  cell_tower_dictionary->SetKey(kMobileCountryCode,
+                                base::Value(cell_tower.mcc));
+  cell_tower_dictionary->SetKey(kMobileNetworkCode,
+                                base::Value(cell_tower.mnc));
 
   if (!cell_tower.timestamp.is_null()) {
-    cell_tower_dictionary->SetStringWithoutPathExpansion(
-        kAge, base::Int64ToString(
-                  (base::Time::Now() - cell_tower.timestamp).InMilliseconds()));
+    cell_tower_dictionary->SetKey(
+        kAge,
+        base::Value(base::Int64ToString(
+            (base::Time::Now() - cell_tower.timestamp).InMilliseconds())));
   }
   return cell_tower_dictionary;
 }
@@ -389,10 +388,10 @@ std::string SimpleGeolocationRequest::FormatRequestBody() const {
     return std::string(kSimpleGeolocationRequestBody);
 
   std::unique_ptr<base::DictionaryValue> request(new base::DictionaryValue);
-  request->SetBooleanWithoutPathExpansion(kConsiderIp, true);
+  request->SetKey(kConsiderIp, base::Value(true));
 
   if (wifi_data_) {
-    auto wifi_access_points = base::MakeUnique<base::ListValue>();
+    auto wifi_access_points = std::make_unique<base::ListValue>();
     for (const WifiAccessPoint& access_point : *wifi_data_) {
       wifi_access_points->Append(CreateAccessPointDictionary(access_point));
     }
@@ -401,7 +400,7 @@ std::string SimpleGeolocationRequest::FormatRequestBody() const {
   }
 
   if (cell_tower_data_) {
-    auto cell_towers = base::MakeUnique<base::ListValue>();
+    auto cell_towers = std::make_unique<base::ListValue>();
     for (const CellTower& cell_tower : *cell_tower_data_) {
       cell_towers->Append(CreateCellTowerDictionary(cell_tower));
     }

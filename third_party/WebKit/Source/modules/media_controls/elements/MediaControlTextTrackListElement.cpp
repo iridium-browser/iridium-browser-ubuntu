@@ -4,14 +4,14 @@
 
 #include "modules/media_controls/elements/MediaControlTextTrackListElement.h"
 
-#include "core/InputTypeNames.h"
-#include "core/events/Event.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLLabelElement.h"
-#include "core/html/HTMLMediaElement.h"
+#include "core/dom/events/Event.h"
 #include "core/html/HTMLSpanElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLLabelElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "core/html/track/TextTrack.h"
 #include "core/html/track/TextTrackList.h"
+#include "core/input_type_names.h"
 #include "modules/media_controls/MediaControlsImpl.h"
 #include "platform/EventDispatchForbiddenScope.h"
 #include "platform/text/PlatformLocale.h"
@@ -68,7 +68,12 @@ void MediaControlTextTrackListElement::SetVisible(bool visible) {
 }
 
 void MediaControlTextTrackListElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::change) {
+  if (event->type() == EventTypeNames::click) {
+    // This handles the back button click. Clicking on a menu item triggers the
+    // change event instead.
+    GetMediaControls().ToggleOverflowMenu();
+    event->SetDefaultHandled();
+  } else if (event->type() == EventTypeNames::change) {
     // Identify which input element was selected and set track to showing
     Node* target = event->target()->ToNode();
     if (!target || !target->IsElementNode())
@@ -88,26 +93,6 @@ void MediaControlTextTrackListElement::DefaultEventHandler(Event* event) {
   MediaControlDivElement::DefaultEventHandler(event);
 }
 
-String MediaControlTextTrackListElement::GetTextTrackLabel(TextTrack* track) {
-  if (!track) {
-    return MediaElement().GetLocale().QueryString(
-        WebLocalizedString::kTextTracksOff);
-  }
-
-  String track_label = track->label();
-
-  if (track_label.IsEmpty())
-    track_label = track->language();
-
-  if (track_label.IsEmpty()) {
-    track_label = String(MediaElement().GetLocale().QueryString(
-        WebLocalizedString::kTextTracksNoLabel,
-        String::Number(track->TrackIndex() + 1)));
-  }
-
-  return track_label;
-}
-
 // TextTrack parameter when passed in as a nullptr, creates the "Off" list item
 // in the track list.
 Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
@@ -116,8 +101,8 @@ Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
   HTMLLabelElement* track_item = HTMLLabelElement::Create(GetDocument());
   track_item->SetShadowPseudoId(
       AtomicString("-internal-media-controls-text-track-list-item"));
-  HTMLInputElement* track_item_input =
-      HTMLInputElement::Create(GetDocument(), false);
+  auto* track_item_input =
+      HTMLInputElement::Create(GetDocument(), CreateElementFlags());
   track_item_input->SetShadowPseudoId(
       AtomicString("-internal-media-controls-text-track-list-item-input"));
   track_item_input->setType(InputTypeNames::checkbox);
@@ -132,9 +117,15 @@ Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
       track_item_input->setChecked(true);
   }
 
-  track_item->AppendChild(track_item_input);
-  String track_label = GetTextTrackLabel(track);
+  // Modern media controls should have the checkbox after the text instead of
+  // the other way around.
+  if (!MediaControlsImpl::IsModern())
+    track_item->AppendChild(track_item_input);
+  String track_label = GetMediaControls().GetTextTrackLabel(track);
   track_item->AppendChild(Text::Create(GetDocument(), track_label));
+  if (MediaControlsImpl::IsModern())
+    track_item->AppendChild(track_item_input);
+
   // Add a track kind marker icon if there are multiple tracks with the same
   // label or if the track has no label.
   if (track && (track->label().IsEmpty() || HasDuplicateLabel(track))) {
@@ -152,6 +143,17 @@ Element* MediaControlTextTrackListElement::CreateTextTrackListItem(
   return track_item;
 }
 
+Element* MediaControlTextTrackListElement::CreateTextTrackHeaderItem() {
+  HTMLLabelElement* header_item = HTMLLabelElement::Create(GetDocument());
+  header_item->SetShadowPseudoId(
+      "-internal-media-controls-text-track-list-header");
+  header_item->AppendChild(
+      Text::Create(GetDocument(),
+                   GetLocale().QueryString(
+                       WebLocalizedString::kOverflowMenuCaptionsSubmenuTitle)));
+  return header_item;
+}
+
 void MediaControlTextTrackListElement::RefreshTextTrackListMenu() {
   if (!MediaElement().HasClosedCaptions() ||
       !MediaElement().TextTracksAreReady()) {
@@ -160,6 +162,9 @@ void MediaControlTextTrackListElement::RefreshTextTrackListMenu() {
 
   EventDispatchForbiddenScope::AllowUserAgentEvents allow_events;
   RemoveChildren(kOmitSubtreeModifiedEvent);
+
+  if (MediaControlsImpl::IsModern())
+    AppendChild(CreateTextTrackHeaderItem());
 
   // Construct a menu for subtitles and captions.  Pass in a nullptr to
   // createTextTrackListItem to create the "Off" track item.

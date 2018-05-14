@@ -369,22 +369,12 @@ def typed_ptr(ptr):
     return '((%s)%s)' % (ptr.dynamic_type, ptr)
 
 
-class WTFRefOrOwnPtrPrinter:
-    def __init__(self, val):
-        self.val = val
-
-    def to_string(self):
-        type_without_param = re.sub(r'<.*>', '', self.val.type.name)
-        return '%s%s' % (type_without_param, typed_ptr(self.val['ptr_']))
-
-
 class BlinkDataRefPrinter:
     def __init__(self, val):
         self.val = val
 
     def to_string(self):
-        return 'DataRef(%s)' % (
-            WTFRefOrOwnPtrPrinter(self.val['data_']).to_string())
+        return 'DataRef(%s)' % (str(self.val['data_']))
 
 
 def add_pretty_printers():
@@ -401,7 +391,6 @@ def add_pretty_printers():
         (re.compile("^blink::QualifiedName$"), blinkQualifiedNamePrinter),
         (re.compile("^blink::PixelsAndPercent$"), BlinkPixelsAndPercentPrinter),
         (re.compile("^blink::Length$"), BlinkLengthPrinter),
-        (re.compile("^WTF::(Ref|Own)Ptr<.*>$"), WTFRefOrOwnPtrPrinter),
         (re.compile("^blink::DataRef<.*>$"), BlinkDataRefPrinter),
     )
 

@@ -9,7 +9,6 @@
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_task_scheduler.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/toolbar/test_toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
@@ -221,7 +220,8 @@ TEST_F(ToolbarActionViewUnitTest, BasicToolbarActionViewTest) {
   EXPECT_EQ(tooltip, tooltip_test);
   ui::AXNodeData ax_node_data;
   view.GetAccessibleNodeData(&ax_node_data);
-  EXPECT_EQ(name, ax_node_data.GetString16Attribute(ui::AX_ATTR_NAME));
+  EXPECT_EQ(name, ax_node_data.GetString16Attribute(
+                      ax::mojom::StringAttribute::kName));
 
   // The button should start in normal state, with no actions executed.
   EXPECT_EQ(views::Button::STATE_NORMAL, view.state());

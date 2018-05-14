@@ -16,7 +16,7 @@ from telemetry.page import shared_page_state
 from telemetry import story as story_module
 from telemetry.web_perf import timeline_based_measurement
 
-from tracing.value import histogram
+from tracing.value.diagnostics import generic_set
 
 
 class DummyPageTest(legacy_page_test.LegacyPageTest):
@@ -103,20 +103,21 @@ class BenchmarkTest(unittest.TestCase):
     with self.assertRaisesRegexp(TypeError, type_error_regex):
       UnknownTestTypeBenchmark().CreatePageTest(options=None)
 
-  def testBenchmarkPredicate(self):
-    class PredicateBenchmark(TestBenchmark):
+  def testBenchmarkWithOverridenShouldAddValue(self):
+    class ShouldNotAddValueBenchmark(TestBenchmark):
+
       @classmethod
-      def ValueCanBeAddedPredicate(cls, value, is_first_result):
+      def ShouldAddValue(cls, unused_value, unused_is_first_result):
         return False
 
     original_run_fn = story_runner.Run
-    validPredicate = [False]
+    valid_should_add_value = [False]
 
     def RunStub(test, story_set_module, finder_options, results,
                 *args, **kwargs): # pylint: disable=unused-argument
-      predicate = results._value_can_be_added_predicate
-      valid = predicate == PredicateBenchmark.ValueCanBeAddedPredicate
-      validPredicate[0] = valid
+      should_add_value = results._should_add_value
+      valid = should_add_value == ShouldNotAddValueBenchmark.ShouldAddValue
+      valid_should_add_value[0] = valid
 
     story_runner.Run = RunStub
 
@@ -128,21 +129,56 @@ class BenchmarkTest(unittest.TestCase):
       benchmark.AddCommandLineArgs(parser)
       options.MergeDefaultValues(parser.get_default_values())
 
-      b = PredicateBenchmark(page.Page(url='about:blank', name='about:blank'))
+      b = ShouldNotAddValueBenchmark(
+          page.Page(url='about:blank', name='about:blank'))
       b.Run(options)
     finally:
       story_runner.Run = original_run_fn
 
-    self.assertTrue(validPredicate[0])
+    self.assertTrue(valid_should_add_value[0])
 
-  def testBenchmarkExpectations(self):
+  def testBenchmarkExpectationsEmpty(self):
     b = TestBenchmark(story_module.Story(
         name='test name',
         shared_state_class=shared_page_state.SharedPageState))
     self.assertIsInstance(
-        b.GetExpectations(), story_module.expectations.StoryExpectations)
+        b.expectations, story_module.expectations.StoryExpectations)
 
-  def testBenchmarkOwnership(self):
+  def testGetOwners(self):
+    @benchmark.Owner(emails=['alice@chromium.org'])
+    class FooBenchmark(benchmark.Benchmark):
+      @classmethod
+      def Name(cls):
+        return "foo"
+
+    @benchmark.Owner(emails=['bob@chromium.org', 'ben@chromium.org'],
+                     component='xyzzyx')
+    class BarBenchmark(benchmark.Benchmark):
+      @classmethod
+      def Name(cls):
+        return "bar"
+
+    @benchmark.Owner(component='xyzzyx')
+    class BazBenchmark(benchmark.Benchmark):
+      @classmethod
+      def Name(cls):
+        return "baz"
+
+    foo_owners_diagnostic = FooBenchmark(None).GetOwners()
+    bar_owners_diagnostic = BarBenchmark(None).GetOwners()
+    baz_owners_diagnostic = BazBenchmark(None).GetOwners()
+
+    self.assertIsInstance(foo_owners_diagnostic, generic_set.GenericSet)
+    self.assertIsInstance(bar_owners_diagnostic, generic_set.GenericSet)
+    self.assertIsInstance(baz_owners_diagnostic, generic_set.GenericSet)
+
+    self.assertEqual(foo_owners_diagnostic.AsDict()['values'],
+                     ['alice@chromium.org'])
+    self.assertEqual(bar_owners_diagnostic.AsDict()['values'],
+                     ['bob@chromium.org', 'ben@chromium.org'])
+    self.assertEqual(baz_owners_diagnostic.AsDict()['values'], [])
+
+  def testGetBugComponents(self):
     @benchmark.Owner(emails=['alice@chromium.org'])
     class FooBenchmark(benchmark.Benchmark):
       @classmethod
@@ -155,16 +191,14 @@ class BenchmarkTest(unittest.TestCase):
       def Name(cls):
         return "bar"
 
-    fooOwnerDiangostic = FooBenchmark(None).GetOwnership()
-    barOwnerDiangostic = BarBenchmark(None).GetOwnership()
+    foo_bug_components_diagnostic = FooBenchmark(None).GetBugComponents()
+    bar_bug_components_diagnostic = BarBenchmark(None).GetBugComponents()
 
-    self.assertIsInstance(fooOwnerDiangostic, histogram.Ownership)
-    self.assertItemsEqual(fooOwnerDiangostic.emails, ['alice@chromium.org'])
-    self.assertIsNone(fooOwnerDiangostic.component)
+    self.assertIsInstance(foo_bug_components_diagnostic, generic_set.GenericSet)
+    self.assertIsInstance(bar_bug_components_diagnostic, generic_set.GenericSet)
 
-    self.assertIsInstance(barOwnerDiangostic, histogram.Ownership)
-    self.assertItemsEqual(barOwnerDiangostic.emails, ['bob@chromium.org'])
-    self.assertEqual(barOwnerDiangostic.component, 'xyzzyx')
+    self.assertEqual(list(foo_bug_components_diagnostic), [])
+    self.assertEqual(list(bar_bug_components_diagnostic), ['xyzzyx'])
 
   def testGetTBMOptionsSupportsLegacyName(self):
     class TbmBenchmark(benchmark.Benchmark):
@@ -215,7 +249,7 @@ class BenchmarkTest(unittest.TestCase):
     tbm = b.CreatePageTest(options)
     self.assertEqual(
         'net,rail,toplevel',
-        tbm._tbm_options.category_filter.stable_filter_string)
+        tbm.tbm_options.category_filter.stable_filter_string)
 
   def testAtraceOptionsTurnsOnAtrace(self):
     class TbmBenchmark(benchmark.Benchmark):
@@ -232,10 +266,10 @@ class BenchmarkTest(unittest.TestCase):
 
     b = TbmBenchmark(None)
     tbm = b.CreatePageTest(options)
-    self.assertTrue(tbm._tbm_options.config.enable_atrace_trace)
+    self.assertTrue(tbm.tbm_options.config.enable_atrace_trace)
     self.assertEqual(
         ['foo', 'bar'],
-        tbm._tbm_options.config.atrace_config.categories)
+        tbm.tbm_options.config.atrace_config.categories)
 
   def testAdditionalAtraceCategories(self):
     class TbmBenchmark(benchmark.Benchmark):
@@ -253,8 +287,57 @@ class BenchmarkTest(unittest.TestCase):
 
     b = TbmBenchmark(None)
     tbm = b.CreatePageTest(options)
-    self.assertTrue(tbm._tbm_options.config.enable_atrace_trace)
+    self.assertTrue(tbm.tbm_options.config.enable_atrace_trace)
     self.assertEqual(
         ['string', 'foo', 'stuff', 'bar'],
-        tbm._tbm_options.config.atrace_config.categories)
+        tbm.tbm_options.config.atrace_config.categories)
 
+  def testEnableSystrace(self):
+    class TbmBenchmark(benchmark.Benchmark):
+      def CreateCoreTimelineBasedMeasurementOptions(self):
+        return timeline_based_measurement.Options()
+
+    options = options_for_unittests.GetCopy()
+    options.enable_systrace = True
+    parser = optparse.OptionParser()
+    benchmark.AddCommandLineArgs(parser)
+    options.MergeDefaultValues(parser.get_default_values())
+
+    b = TbmBenchmark(None)
+    tbm = b.CreatePageTest(options)
+    self.assertTrue(
+        tbm.tbm_options.config.chrome_trace_config.enable_systrace)
+
+  def testCanRunOnPlatformReturnTrue(self):
+    b = TestBenchmark(story_module.Story(
+        name='test name',
+        shared_state_class=shared_page_state.SharedPageState))
+    # We can pass None for both arguments because it defaults to ALL for
+    # supported platforms, which always returns true.
+    self.assertTrue(b._CanRunOnPlatform(None, None))
+
+  def testCanRunOnPlatformReturnFalse(self):
+    b = TestBenchmark(story_module.Story(
+        name='test name',
+        shared_state_class=shared_page_state.SharedPageState))
+    b.SUPPORTED_PLATFORMS = [] # pylint: disable=invalid-name
+    # We can pass None for both arguments because we select no platforms as
+    # supported, which always returns false.
+    self.assertFalse(b._CanRunOnPlatform(None, None))
+
+  def testAugmentExpectationsWithParserNoData(self):
+    b = TestBenchmark(story_module.Story(
+        name='test_name',
+        shared_state_class=shared_page_state.SharedPageState))
+    b.AugmentExpectationsWithParser('')
+    expectations = b.expectations.AsDict()
+    self.assertFalse(expectations.get('test_name'))
+
+  def testAugmentExpectationsWithParserData(self):
+    b = TestBenchmark(story_module.Story(
+        name='test_name',
+        shared_state_class=shared_page_state.SharedPageState))
+    data = 'crbug.com/123 benchmark_unittest.TestBenchmark/test_name [ Skip ]'
+    b.AugmentExpectationsWithParser(data)
+    expectations = b.expectations.AsDict()
+    self.assertTrue(expectations['stories'].get('test_name'))

@@ -7,7 +7,6 @@
 
 #include "ios/public/provider/chrome/browser/signin/chrome_identity_service.h"
 
-#include "base/mac/scoped_nsobject.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 @class NSMutableArray;
@@ -78,8 +77,14 @@ class FakeChromeIdentityService : public ChromeIdentityService {
   // is unknown.
   void RemoveIdentity(ChromeIdentity* identity);
 
+  // When set to true, call to GetAccessToken() fakes a MDM error.
+  void SetFakeMDMError(bool fakeMDMError);
+
  private:
-  base::scoped_nsobject<NSMutableArray> identities_;
+  NSMutableArray* identities_;
+
+  // If true, call to GetAccessToken() fakes a MDM error.
+  bool _fakeMDMError;
 };
 
 }  // namespace ios

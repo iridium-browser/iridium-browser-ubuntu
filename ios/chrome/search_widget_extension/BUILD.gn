@@ -14,11 +14,10 @@ tweak_info_plist("tweak_info_plist") {
   info_plist = "Info.plist"
 }
 
-compile_plist("entitlements") {
-  format = "xml1"
+compile_entitlements("entitlements") {
   substitutions = [ "IOS_BUNDLE_ID_PREFIX=$ios_app_bundle_id_prefix" ]
   output_name = "$target_gen_dir/search_widget_extension.appex.entitlements"
-  plist_templates =
+  entitlements_templates =
       [ "entitlements/external/search_widget_extension.appex.entitlements" ]
 }
 
@@ -26,8 +25,8 @@ ios_appex_bundle("search_widget_extension") {
   deps = [
     ":search_widget",
     ":system_strings",
-    "resources:quick_action_camera_search",
     "resources:quick_action_incognito_search",
+    "resources:quick_action_scan_qr_code",
     "resources:quick_action_search",
     "resources:quick_action_voice_search",
   ]
@@ -35,7 +34,7 @@ ios_appex_bundle("search_widget_extension") {
   extra_substitutions = [
     "CHROME_CHANNEL_SCHEME=$url_channel_scheme",
     "CHROMIUM_SHORT_NAME=$chromium_short_name",
-    "WIDGET_EXTENSION_BUNDLE_ID=$chromium_bundle_id.SearchTodayExtension",
+    "WIDGET_EXTENSION_BUNDLE_ID=$chromium_bundle_id.TodayExtension",
   ]
 
   entitlements_target = ":entitlements"
@@ -59,6 +58,8 @@ source_set("search_widget") {
   deps = [
     "//base",
     "//components/open_from_clipboard:open_from_clipboard_impl",
+    "//ios/chrome/browser/ui/util:constraints_ui",
+    "//ios/chrome/common:common_extension",
     "//ios/chrome/common/app_group",
   ]
 

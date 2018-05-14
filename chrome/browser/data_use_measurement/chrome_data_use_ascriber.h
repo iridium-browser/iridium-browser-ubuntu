@@ -10,8 +10,10 @@
 #include <memory>
 #include <string>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/hash.h"
 #include "base/macros.h"
 #include "base/supports_user_data.h"
@@ -26,6 +28,9 @@ class RenderFrameHost;
 }
 
 namespace data_use_measurement {
+
+// Disables data use ascriber if data saver is disabled.
+extern const base::Feature kDisableAscriberIfDataSaverDisabled;
 
 class URLRequestClassifier;
 
@@ -59,8 +64,9 @@ class ChromeDataUseAscriber : public DataUseAscriber {
       net::URLRequest* request) override;
   ChromeDataUseRecorder* GetDataUseRecorder(
       const net::URLRequest& request) override;
-  void OnUrlRequestCompleted(const net::URLRequest& request,
-                             bool started) override;
+
+  void OnBeforeUrlRequest(net::URLRequest* request) override;
+  void OnUrlRequestCompleted(net::URLRequest* request, bool started) override;
   void OnUrlRequestDestroyed(net::URLRequest* request) override;
   std::unique_ptr<URLRequestClassifier> CreateURLRequestClassifier()
       const override;
@@ -79,12 +85,6 @@ class ChromeDataUseAscriber : public DataUseAscriber {
                           int main_render_process_id,
                           int main_render_frame_id);
 
-  // Called when a main frame navigation is started.
-  void DidStartMainFrameNavigation(const GURL& gurl,
-                                   int render_process_id,
-                                   int render_frame_id,
-                                   void* navigation_handle);
-
   // Called when a main frame navigation is ready to be committed in a
   // renderer.
   void ReadyToCommitMainFrameNavigation(
@@ -96,7 +96,7 @@ class ChromeDataUseAscriber : public DataUseAscriber {
   void DidFinishMainFrameNavigation(int render_process_id,
                                     int render_frame_id,
                                     const GURL& gurl,
-                                    bool is_same_page_navigation,
+                                    bool is_same_document_navigation,
                                     uint32_t page_transition,
                                     base::TimeTicks time);
 
@@ -111,8 +111,15 @@ class ChromeDataUseAscriber : public DataUseAscriber {
                               int new_render_process_id,
                               int new_render_frame_id);
 
+  // Called when the load is finished.
+  void DidFinishLoad(int render_process_id,
+                     int render_frame_id,
+                     const GURL& validated_url);
+
  private:
   friend class ChromeDataUseAscriberTest;
+
+  void OnUrlRequestCompletedOrDestroyed(net::URLRequest* request);
 
   // Entry in the |data_use_recorders_| list which owns all instances of
   // DataUseRecorder. std::list is used so that iterators remain valid until the
@@ -161,11 +168,17 @@ class ChromeDataUseAscriber : public DataUseAscriber {
     DISALLOW_COPY_AND_ASSIGN(MainRenderFrameEntry);
   };
 
+  DataUseRecorderEntry GetDataUseRecorderEntry(const net::URLRequest* request);
+
+  // Validate and cleanup the URL requests that point to |entry|.
+  void ValidateAndCleanUp(DataUseRecorderEntry entry);
+
   DataUseRecorderEntry GetOrCreateDataUseRecorderEntry(
       net::URLRequest* request);
 
   void NotifyPageLoadCommit(DataUseRecorderEntry entry);
-  void NotifyDataUseCompleted(DataUseRecorderEntry entry);
+  void NotifyDidFinishLoad(DataUseRecorderEntry entry);
+  void NotifyPageLoadConcluded(DataUseRecorderEntry entry);
 
   DataUseRecorderEntry CreateNewDataUseRecorder(
       net::URLRequest* request,
@@ -177,6 +190,11 @@ class ChromeDataUseAscriber : public DataUseAscriber {
 
   void AscribeRecorderWithRequest(net::URLRequest* request,
                                   DataUseRecorderEntry entry);
+
+  void DisableAscriber() override;
+
+  // Returns true if data use ascriber is disabled.
+  bool IsDisabled() const;
 
   // Owner for all instances of DataUseRecorder. An instance is kept in this
   // list if any entity (render frame hosts, URLRequests, pending navigations)
@@ -199,6 +217,16 @@ class ChromeDataUseAscriber : public DataUseAscriber {
   // |data_use_recorders_| that the navigation ascribes data use to.
   std::map<content::GlobalRequestID, DataUseRecorderEntry>
       pending_navigation_data_use_map_;
+
+  // Detects heavy pages. Can be null when the feature is disabled.
+  std::unique_ptr<DataUseAscriber::PageLoadObserver> page_capping_observer_;
+
+  // True if the dtaa use ascriber should be disabled. The ascriber is enabled
+  // by default.
+  bool disable_ascriber_ = false;
+
+  // Set of requests that are currently in-flight.
+  std::unordered_set<const net::URLRequest*> requests_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDataUseAscriber);
 };

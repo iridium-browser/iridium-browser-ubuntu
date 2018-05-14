@@ -5,8 +5,8 @@
 #ifndef CompositorKeyframe_h
 #define CompositorKeyframe_h
 
+#include "base/memory/scoped_refptr.h"
 #include "platform/PlatformExport.h"
-#include "platform/wtf/PassRefPtr.h"
 
 namespace cc {
 class TimingFunction;
@@ -18,11 +18,11 @@ class TimingFunction;
 
 class PLATFORM_EXPORT CompositorKeyframe {
  public:
-  virtual ~CompositorKeyframe() {}
+  virtual ~CompositorKeyframe() = default;
 
   virtual double Time() const = 0;
 
-  PassRefPtr<TimingFunction> GetTimingFunctionForTesting() const;
+  scoped_refptr<TimingFunction> GetTimingFunctionForTesting() const;
 
  private:
   virtual const cc::TimingFunction* CcTimingFunction() const = 0;

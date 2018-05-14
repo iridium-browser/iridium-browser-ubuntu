@@ -30,12 +30,9 @@ the bisect process after the user clicks on the bisect button.
         position: absolute;
         left: 0;
         top: 0;
-        display: -webkit-flex;
         display: flex;
-        -webkit-align-items: center;
         align-items: center;
         justify-content: center;
-        -webkit-justify-content: center;
       }
 
       select, input[type=text], input[type=number] {
@@ -180,7 +177,7 @@ the bisect process after the user clicks on the bisect button.
           return false;
         }
         rev = Number(rev);
-        return rev > 200000 && rev < 500000;
+        return rev > 200000 && rev < 700000;
       }
 
       Polymer({
@@ -200,6 +197,7 @@ the bisect process after the user clicks on the bisect button.
             type: Number,
             value: 20
           },
+          alerts: {},
           bugId: { notify: true },
           earlierRevision: {
             notify: true,
@@ -266,10 +264,18 @@ the bisect process after the user clicks on the bisect button.
          * Makes a request to /start_try_job to perform a bisect.
          */
         onSendToTrybot(event) {
+          const alerts = [];
+          if (this.alerts) {
+            for (const a of this.alerts) {
+              alerts.push(a.key);
+            }
+          }
+
           event.preventDefault();
           this.loading = true;
           const params = {
             'step': 'perform-bisect',
+            'alerts': JSON.stringify(alerts),
             'bisect_bot': this.bot,
             'suite': this.suite,
             'metric': this.metric,

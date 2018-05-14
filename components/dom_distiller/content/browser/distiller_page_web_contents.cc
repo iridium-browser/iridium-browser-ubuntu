@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
@@ -163,13 +162,12 @@ void DistillerPageWebContents::DidFailLoad(
     content::RenderFrameHost* render_frame_host,
     const GURL& validated_url,
     int error_code,
-    const base::string16& error_description,
-    bool was_ignored_by_handler) {
+    const base::string16& error_description) {
   if (!render_frame_host->GetParent()) {
-    content::WebContentsObserver::Observe(NULL);
+    content::WebContentsObserver::Observe(nullptr);
     DCHECK(state_ == LOADING_PAGE || state_ == EXECUTING_JAVASCRIPT);
     state_ = PAGELOAD_FAILED;
-    auto empty = base::MakeUnique<base::Value>();
+    auto empty = std::make_unique<base::Value>();
     OnWebContentsDistillationDone(GURL(), base::TimeTicks(), empty.get());
   }
 }
@@ -180,7 +178,7 @@ void DistillerPageWebContents::ExecuteJavaScript() {
   DCHECK(frame);
   DCHECK_EQ(LOADING_PAGE, state_);
   state_ = EXECUTING_JAVASCRIPT;
-  content::WebContentsObserver::Observe(NULL);
+  content::WebContentsObserver::Observe(nullptr);
   // Stop any pending navigation since the intent is to distill the current
   // page.
   source_page_handle_->web_contents()->Stop();

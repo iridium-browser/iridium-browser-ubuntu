@@ -4,16 +4,31 @@
 
 #include "core/dom/SlotAssignment.h"
 
-#include "core/HTMLNames.h"
 #include "core/dom/ElementShadow.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/ShadowRoot.h"
 #include "core/dom/V0InsertionPoint.h"
+#include "core/html/HTMLDetailsElement.h"
 #include "core/html/HTMLSlotElement.h"
+#include "core/html/forms/HTMLOptGroupElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
+#include "core/html_names.h"
 
 namespace blink {
+
+namespace {
+bool ShouldAssignToCustomSlot(const Node& node) {
+  if (IsHTMLDetailsElement(node.parentElement()))
+    return HTMLDetailsElement::IsFirstSummary(node);
+  if (IsHTMLSelectElement(node.parentElement()))
+    return HTMLSelectElement::CanAssignToSelectSlot(node);
+  if (IsHTMLOptGroupElement(node.parentElement()))
+    return HTMLOptGroupElement::CanAssignToOptGroupSlot(node);
+  return false;
+}
+}  // anonymous namespace
 
 void SlotAssignment::DidAddSlot(HTMLSlotElement& slot) {
   // Relevant DOM Standard:
@@ -189,16 +204,81 @@ SlotAssignment::SlotAssignment(ShadowRoot& owner)
   DCHECK(owner.IsV1());
 }
 
-void SlotAssignment::ResolveAssignment() {
+void SlotAssignment::RecalcAssignmentNg() {
+  DCHECK(RuntimeEnabledFeatures::IncrementalShadowDOMEnabled());
+
+  if (!needs_assignment_recalc_)
+    return;
+  needs_assignment_recalc_ = false;
+
+  for (Member<HTMLSlotElement> slot : Slots())
+    slot->ClearAssignedNodes();
+
+  const bool is_user_agent = owner_->IsUserAgent();
+
+  HTMLSlotElement* user_agent_default_slot = nullptr;
+  HTMLSlotElement* user_agent_custom_assign_slot = nullptr;
+  if (is_user_agent) {
+    user_agent_default_slot =
+        FindSlotByName(HTMLSlotElement::UserAgentDefaultSlotName());
+    user_agent_custom_assign_slot =
+        FindSlotByName(HTMLSlotElement::UserAgentCustomAssignSlotName());
+  }
+
+  for (Node& child : NodeTraversal::ChildrenOf(owner_->host())) {
+    if (!child.IsSlotable())
+      continue;
+
+    HTMLSlotElement* slot = nullptr;
+    if (!is_user_agent) {
+      slot = FindSlotByName(child.SlotName());
+    } else {
+      if (user_agent_custom_assign_slot && ShouldAssignToCustomSlot(child)) {
+        slot = user_agent_custom_assign_slot;
+      } else {
+        slot = user_agent_default_slot;
+      }
+    }
+
+    if (slot)
+      slot->AppendAssignedNode(child);
+  }
+}
+
+void SlotAssignment::RecalcAssignment() {
+  DCHECK(!RuntimeEnabledFeatures::IncrementalShadowDOMEnabled());
+
   for (Member<HTMLSlotElement> slot : Slots())
     slot->SaveAndClearDistribution();
+
+  const bool is_user_agent = owner_->IsUserAgent();
+
+  HTMLSlotElement* user_agent_default_slot = nullptr;
+  HTMLSlotElement* user_agent_custom_assign_slot = nullptr;
+  if (is_user_agent) {
+    user_agent_default_slot =
+        FindSlotByName(HTMLSlotElement::UserAgentDefaultSlotName());
+    user_agent_custom_assign_slot =
+        FindSlotByName(HTMLSlotElement::UserAgentCustomAssignSlotName());
+  }
 
   for (Node& child : NodeTraversal::ChildrenOf(owner_->host())) {
     if (!child.IsSlotable()) {
       child.LazyReattachIfAttached();
       continue;
     }
-    HTMLSlotElement* slot = FindSlotByName(child.SlotName());
+
+    HTMLSlotElement* slot = nullptr;
+    if (!is_user_agent) {
+      slot = FindSlotByName(child.SlotName());
+    } else {
+      if (user_agent_custom_assign_slot && ShouldAssignToCustomSlot(child)) {
+        slot = user_agent_custom_assign_slot;
+      } else {
+        slot = user_agent_default_slot;
+      }
+    }
+
     if (slot)
       slot->AppendAssignedNode(child);
     else
@@ -206,12 +286,14 @@ void SlotAssignment::ResolveAssignment() {
   }
 }
 
-void SlotAssignment::ResolveDistribution() {
-  ResolveAssignment();
-  const HeapVector<Member<HTMLSlotElement>>& slots = this->Slots();
+void SlotAssignment::RecalcDistribution() {
+  DCHECK(!RuntimeEnabledFeatures::IncrementalShadowDOMEnabled());
+
+  RecalcAssignment();
+  const HeapVector<Member<HTMLSlotElement>>& slots = Slots();
 
   for (auto slot : slots)
-    slot->ResolveDistributedNodes();
+    slot->RecalcDistributedNodes();
 
   // Update each slot's distribution in reverse tree order so that a child slot
   // is visited before its parent slot.
@@ -227,12 +309,28 @@ const HeapVector<Member<HTMLSlotElement>>& SlotAssignment::Slots() {
   return slots_;
 }
 
-HTMLSlotElement* SlotAssignment::FindSlot(const Node& node) {
-  return node.IsSlotable() ? FindSlotByName(node.SlotName()) : nullptr;
+HTMLSlotElement* SlotAssignment::FindSlot(const Node& node) const {
+  if (!node.IsSlotable())
+    return nullptr;
+  if (owner_->IsUserAgent())
+    return FindSlotInUserAgentShadow(node);
+  return FindSlotByName(node.SlotName());
 }
 
-HTMLSlotElement* SlotAssignment::FindSlotByName(const AtomicString& slot_name) {
+HTMLSlotElement* SlotAssignment::FindSlotByName(
+    const AtomicString& slot_name) const {
   return slot_map_->GetSlotByName(slot_name, *owner_);
+}
+
+HTMLSlotElement* SlotAssignment::FindSlotInUserAgentShadow(
+    const Node& node) const {
+  HTMLSlotElement* user_agent_custom_assign_slot =
+      FindSlotByName(HTMLSlotElement::UserAgentCustomAssignSlotName());
+  if (user_agent_custom_assign_slot && ShouldAssignToCustomSlot(node))
+    return user_agent_custom_assign_slot;
+  HTMLSlotElement* user_agent_default_slot =
+      FindSlotByName(HTMLSlotElement::UserAgentDefaultSlotName());
+  return user_agent_default_slot;
 }
 
 void SlotAssignment::CollectSlots() {
@@ -252,12 +350,12 @@ HTMLSlotElement* SlotAssignment::GetCachedFirstSlotWithoutAccessingNodeTree(
     const AtomicString& slot_name) {
   if (Element* slot =
           slot_map_->GetCachedFirstElementWithoutAccessingNodeTree(slot_name)) {
-    return toHTMLSlotElement(slot);
+    return ToHTMLSlotElement(slot);
   }
   return nullptr;
 }
 
-DEFINE_TRACE(SlotAssignment) {
+void SlotAssignment::Trace(blink::Visitor* visitor) {
   visitor->Trace(slots_);
   visitor->Trace(slot_map_);
   visitor->Trace(owner_);

@@ -13,8 +13,10 @@
 // Note that this API is currently lazy initialized.  Any function that is
 // NOT merely a wrapper function (i.e. any function that directly interacts with
 // NTDLL) will immediately check:
-//  if (!g_initialized)
-//    InitNativeRegApi();
+//
+// if (!g_initialized && !InitNativeRegApi())
+//   return false;
+//
 // There is currently no multi-threading lock around the lazy initialization,
 // as the main client for this API (chrome_elf) does not introduce
 // a multi-threading concern.  This can easily be changed if needed.
@@ -73,11 +75,13 @@ bool OpenRegKey(ROOT_KEY root,
 
 // Delete a registry key.
 // - Caller must still call CloseRegKey after the delete.
+// - Non-recursive.  Must have no subkeys.
 bool DeleteRegKey(HANDLE key);
 
 // Delete a registry key.
 // - WRAPPER: Function opens and closes the target key for caller.
 // - Use |wow64_override| to force redirection behaviour, or pass nt::NONE.
+// - Non-recursive.  Must have no subkeys.
 bool DeleteRegKey(ROOT_KEY root,
                   WOW64_OVERRIDE wow64_override,
                   const wchar_t* key_path);
@@ -92,12 +96,10 @@ void CloseRegKey(HANDLE key);
 // Main function to query a registry value.
 // - Key handle should have been opened with CreateRegKey or OpenRegKey.
 // - Types defined in winnt.h.  E.g.: REG_DWORD, REG_SZ.
-// - Caller is responsible for calling "delete[] *out_buffer" (on success).
 bool QueryRegKeyValue(HANDLE key,
                       const wchar_t* value_name,
                       ULONG* out_type,
-                      BYTE** out_buffer,
-                      DWORD* out_size);
+                      std::vector<BYTE>* out_buffer);
 
 // Query DWORD value.
 // - WRAPPER: Function works with DWORD data type.
@@ -118,17 +120,23 @@ bool QueryRegValueDWORD(ROOT_KEY root,
                         DWORD* out_dword);
 
 // Query SZ (string) value.
-// - WRAPPER: Function works with SZ data type.
+// - WRAPPER: Function works with SZ or EXPAND_SZ data type.
 // - Key handle should have been opened with CreateRegKey or OpenRegKey.
 // - Handle will be left open.  Caller must still call CloseRegKey when done.
+// - Note: this function only returns the string up to the first end-of-string.
+//   Any string packed with embedded nulls can be accessed via the raw
+//   QueryRegKeyValue function.
 bool QueryRegValueSZ(HANDLE key,
                      const wchar_t* value_name,
                      std::wstring* out_sz);
 
 // Query SZ (string) value.
 // - WRAPPER: Function opens and closes the target key for caller, and works
-// with SZ data type.
+// with SZ or EXPAND_SZ data type.
 // - Use |wow64_override| to force redirection behaviour, or pass nt::NONE.
+// - Note: this function only returns the string up to the first end-of-string.
+//   Any string packed with embedded nulls can be accessed via the raw
+//   QueryRegKeyValue function.
 bool QueryRegValueSZ(ROOT_KEY root,
                      WOW64_OVERRIDE wow64_override,
                      const wchar_t* key_path,
@@ -217,6 +225,25 @@ bool SetRegValueMULTISZ(ROOT_KEY root,
                         const wchar_t* key_path,
                         const wchar_t* value_name,
                         const std::vector<std::wstring>& values);
+
+//------------------------------------------------------------------------------
+// Enumeration Support
+//------------------------------------------------------------------------------
+
+// Query key information for subkey enumeration.
+// - Key handle should have been opened with OpenRegKey (with at least
+//   KEY_ENUMERATE_SUB_KEYS access rights).
+// - Currently only returns the number of subkeys.  Use |subkey_count|
+//   in a loop for calling QueryRegSubkey.
+bool QueryRegEnumerationInfo(HANDLE key, ULONG* out_subkey_count);
+
+// Enumerate subkeys by index.
+// - Key handle should have been opened with OpenRegKey (with at least
+//   KEY_ENUMERATE_SUB_KEYS access rights).
+// - Get subkey count by calling QueryRegEnumerationInfo.
+bool QueryRegSubkey(HANDLE key,
+                    ULONG subkey_index,
+                    std::wstring* out_subkey_name);
 
 //------------------------------------------------------------------------------
 // Utils

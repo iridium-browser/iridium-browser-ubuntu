@@ -6,7 +6,6 @@
 #include <memory>
 #include <string>
 
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/policy/core/common/policy_details.h"
@@ -136,22 +135,18 @@ TEST(GeneratePolicySource, ChromeSchemaData) {
 
   // The properties are iterated in order.
   const char* kExpectedProperties[] = {
-    key::kProxyBypassList,
-    key::kProxyMode,
-    key::kProxyPacUrl,
-    key::kProxyServer,
-    key::kProxyServerMode,
-    NULL,
+      key::kProxyBypassList, key::kProxyMode,       key::kProxyPacUrl,
+      key::kProxyServer,     key::kProxyServerMode, nullptr,
   };
   const char** next = kExpectedProperties;
   for (Schema::Iterator it(subschema.GetPropertiesIterator());
        !it.IsAtEnd(); it.Advance(), ++next) {
-    ASSERT_TRUE(*next != NULL);
+    ASSERT_TRUE(*next != nullptr);
     EXPECT_STREQ(*next, it.key());
     ASSERT_TRUE(it.schema().valid());
     EXPECT_EQ(base::Value::Type::STRING, it.schema().type());
   }
-  EXPECT_TRUE(*next == NULL);
+  EXPECT_TRUE(*next == nullptr);
 
 #if defined(OS_CHROMEOS)
   subschema = schema.GetKnownProperty(key::kPowerManagementIdleSettings);
@@ -220,7 +215,7 @@ TEST(GeneratePolicySource, SetEnterpriseDefaults) {
   // If policy already configured, it's not changed to enterprise defaults.
   policy_map.Set(key::kChromeOsMultiProfileUserBehavior, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-                 base::MakeUnique<base::Value>("test_value"), nullptr);
+                 std::make_unique<base::Value>("test_value"), nullptr);
   SetEnterpriseUsersDefaults(&policy_map);
   multiprof_behavior =
       policy_map.GetValue(key::kChromeOsMultiProfileUserBehavior);

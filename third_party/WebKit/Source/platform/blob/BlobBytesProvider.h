@@ -6,7 +6,7 @@
 #define BlobBytesProvider_h
 
 #include "platform/blob/BlobData.h"
-#include "storage/public/interfaces/blobs.mojom-blink.h"
+#include "third_party/WebKit/public/mojom/blob/blob_registry.mojom-blink.h"
 
 namespace blink {
 
@@ -17,13 +17,18 @@ namespace blink {
 // then transfers ownership of the class to a different thread where it will be
 // bound to a mojo pipe, such that the various Request* methods are called on a
 // thread that is allowed to do File IO.
-class PLATFORM_EXPORT BlobBytesProvider
-    : public storage::mojom::blink::BytesProvider {
+class PLATFORM_EXPORT BlobBytesProvider : public mojom::blink::BytesProvider {
  public:
-  explicit BlobBytesProvider(RefPtr<RawData>);
+  // All consecutive items that are accumulate to < this number will have the
+  // data appended to the same item.
+  static constexpr size_t kMaxConsolidatedItemSizeInBytes = 15 * 1024;
+
+  BlobBytesProvider();
+  explicit BlobBytesProvider(scoped_refptr<RawData>);
   ~BlobBytesProvider() override;
 
-  void AppendData(RefPtr<RawData>);
+  void AppendData(scoped_refptr<RawData>);
+  void AppendData(base::span<const char>);
 
   // BytesProvider implementation:
   void RequestAsReply(RequestAsReplyCallback) override;
@@ -35,7 +40,9 @@ class PLATFORM_EXPORT BlobBytesProvider
                      RequestAsFileCallback) override;
 
  private:
-  Vector<RefPtr<RawData>> data_;
+  FRIEND_TEST_ALL_PREFIXES(BlobBytesProviderTest, Consolidation);
+
+  Vector<scoped_refptr<RawData>> data_;
 };
 
 }  // namespace blink

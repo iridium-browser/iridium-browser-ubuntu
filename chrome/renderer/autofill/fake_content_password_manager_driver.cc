@@ -35,21 +35,23 @@ void FakeContentPasswordManagerDriver::PasswordFormSubmitted(
   password_form_submitted_ = password_form;
 }
 
-void FakeContentPasswordManagerDriver::InPageNavigation(
+void FakeContentPasswordManagerDriver::SameDocumentNavigation(
     const autofill::PasswordForm& password_form) {
-  called_inpage_navigation_ = true;
-  password_form_inpage_navigation_ = password_form;
+  called_same_document_navigation_ = true;
+  password_form_same_document_navigation_ = password_form;
 }
 
 void FakeContentPasswordManagerDriver::PresaveGeneratedPassword(
     const autofill::PasswordForm& password_form) {
   called_presave_generated_password_ = true;
+  password_is_generated_ = true;
   EXPECT_EQ(autofill::PasswordForm::TYPE_GENERATED, password_form.type);
 }
 
 void FakeContentPasswordManagerDriver::PasswordNoLongerGenerated(
     const autofill::PasswordForm& password_form) {
   called_password_no_longer_generated_ = true;
+  password_is_generated_ = false;
   EXPECT_EQ(autofill::PasswordForm::TYPE_GENERATED, password_form.type);
 }
 
@@ -69,6 +71,12 @@ void FakeContentPasswordManagerDriver::ShowNotSecureWarning(
     base::i18n::TextDirection text_direction,
     const gfx::RectF& bounds) {
   called_show_not_secure_warning_ = true;
+}
+
+void FakeContentPasswordManagerDriver::ShowManualFallbackSuggestion(
+    base::i18n::TextDirection text_direction,
+    const gfx::RectF& bounds) {
+  called_manual_fallback_suggestion_ = true;
 }
 
 void FakeContentPasswordManagerDriver::RecordSavePasswordProgress(
@@ -91,4 +99,14 @@ void FakeContentPasswordManagerDriver::CheckSafeBrowsingReputation(
     const GURL& form_action,
     const GURL& frame_url) {
   called_check_safe_browsing_reputation_cnt_++;
+}
+
+void FakeContentPasswordManagerDriver::ShowManualFallbackForSaving(
+    const autofill::PasswordForm& password_form) {
+  called_show_manual_fallback_for_saving_count_++;
+  last_fallback_for_saving_was_for_generated_password_ = password_is_generated_;
+}
+
+void FakeContentPasswordManagerDriver::HideManualFallbackForSaving() {
+  called_show_manual_fallback_for_saving_count_ = 0;
 }

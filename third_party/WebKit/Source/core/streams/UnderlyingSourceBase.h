@@ -5,12 +5,12 @@
 #ifndef UnderlyingSourceBase_h
 #define UnderlyingSourceBase_h
 
+#include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/ExecutionContext.h"
-#include "platform/bindings/ActiveScriptWrappable.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/GarbageCollected.h"
@@ -18,19 +18,18 @@
 
 namespace blink {
 
-class ReadableStreamController;
+class ReadableStreamDefaultControllerWrapper;
 
 class CORE_EXPORT UnderlyingSourceBase
-    : public GarbageCollectedFinalized<UnderlyingSourceBase>,
-      public ScriptWrappable,
+    : public ScriptWrappable,
       public ActiveScriptWrappable<UnderlyingSourceBase>,
       public ContextLifecycleObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(UnderlyingSourceBase);
 
  public:
-  DECLARE_VIRTUAL_TRACE();
-  virtual ~UnderlyingSourceBase() {}
+  void Trace(blink::Visitor*) override;
+  virtual ~UnderlyingSourceBase() = default;
 
   ScriptPromise startWrapper(ScriptState*, ScriptValue stream);
   virtual ScriptPromise Start(ScriptState*);
@@ -39,6 +38,8 @@ class CORE_EXPORT UnderlyingSourceBase
 
   ScriptPromise cancelWrapper(ScriptState*, ScriptValue reason);
   virtual ScriptPromise Cancel(ScriptState*, ScriptValue reason);
+
+  ScriptValue type(ScriptState*) const;
 
   void notifyLockAcquired();
   void notifyLockReleased();
@@ -53,10 +54,12 @@ class CORE_EXPORT UnderlyingSourceBase
   explicit UnderlyingSourceBase(ScriptState* script_state)
       : ContextLifecycleObserver(ExecutionContext::From(script_state)) {}
 
-  ReadableStreamController* Controller() const { return controller_; }
+  ReadableStreamDefaultControllerWrapper* Controller() const {
+    return controller_;
+  }
 
  private:
-  Member<ReadableStreamController> controller_;
+  Member<ReadableStreamDefaultControllerWrapper> controller_;
   bool is_stream_locked_ = false;
 };
 

@@ -44,7 +44,7 @@ DecoderBuffer::DecoderBuffer(const uint8_t* data,
   memcpy(side_data_.get(), side_data, side_data_size_);
 }
 
-DecoderBuffer::~DecoderBuffer() {}
+DecoderBuffer::~DecoderBuffer() = default;
 
 void DecoderBuffer::Initialize() {
   data_.reset(AllocateFFmpegSafeBlock(size_));
@@ -57,7 +57,7 @@ scoped_refptr<DecoderBuffer> DecoderBuffer::CopyFrom(const uint8_t* data,
                                                      size_t data_size) {
   // If you hit this CHECK you likely have a bug in a demuxer. Go fix it.
   CHECK(data);
-  return make_scoped_refptr(new DecoderBuffer(data, data_size, NULL, 0));
+  return base::WrapRefCounted(new DecoderBuffer(data, data_size, NULL, 0));
 }
 
 // static
@@ -68,13 +68,13 @@ scoped_refptr<DecoderBuffer> DecoderBuffer::CopyFrom(const uint8_t* data,
   // If you hit this CHECK you likely have a bug in a demuxer. Go fix it.
   CHECK(data);
   CHECK(side_data);
-  return make_scoped_refptr(new DecoderBuffer(data, data_size,
-                                              side_data, side_data_size));
+  return base::WrapRefCounted(
+      new DecoderBuffer(data, data_size, side_data, side_data_size));
 }
 
 // static
 scoped_refptr<DecoderBuffer> DecoderBuffer::CreateEOSBuffer() {
-  return make_scoped_refptr(new DecoderBuffer(NULL, 0, NULL, 0));
+  return base::WrapRefCounted(new DecoderBuffer(NULL, 0, NULL, 0));
 }
 
 bool DecoderBuffer::MatchesForTesting(const DecoderBuffer& buffer) const {
@@ -106,22 +106,20 @@ bool DecoderBuffer::MatchesForTesting(const DecoderBuffer& buffer) const {
 }
 
 std::string DecoderBuffer::AsHumanReadableString() const {
-  if (end_of_stream()) {
-    return "end of stream";
-  }
+  if (end_of_stream())
+    return "EOS";
 
   std::ostringstream s;
-  s << "timestamp: " << timestamp_.InMicroseconds()
-    << " duration: " << duration_.InMicroseconds()
-    << " size: " << size_
-    << " side_data_size: " << side_data_size_
-    << " is_key_frame: " << is_key_frame_
-    << " encrypted: " << (decrypt_config_ != NULL)
-    << " discard_padding (ms): (" << discard_padding_.first.InMilliseconds()
-    << ", " << discard_padding_.second.InMilliseconds() << ")";
+  s << "timestamp=" << timestamp_.InMicroseconds()
+    << " duration=" << duration_.InMicroseconds() << " size=" << size_
+    << " side_data_size=" << side_data_size_
+    << " is_key_frame=" << is_key_frame_
+    << " encrypted=" << (decrypt_config_ != NULL) << " discard_padding (ms)=("
+    << discard_padding_.first.InMilliseconds() << ", "
+    << discard_padding_.second.InMilliseconds() << ")";
 
   if (decrypt_config_)
-    s << " decrypt:" << (*decrypt_config_);
+    s << " decrypt=" << (*decrypt_config_);
 
   return s.str();
 }

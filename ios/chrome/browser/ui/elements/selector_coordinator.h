@@ -5,7 +5,7 @@
 #ifndef IOS_CHROME_BROWSER_UI_ELEMENTS_SELECTOR_COORDINATOR_H_
 #define IOS_CHROME_BROWSER_UI_ELEMENTS_SELECTOR_COORDINATOR_H_
 
-#import "ios/chrome/browser/chrome_coordinator.h"
+#import "ios/chrome/browser/ui/coordinators/chrome_coordinator.h"
 
 @class SelectorCoordinator;
 
@@ -26,7 +26,7 @@
 // if the user performs a cancel action.
 @property(nonatomic, nullable, copy) NSString* defaultOption;
 
-@property(nonatomic, nullable, assign) id<SelectorCoordinatorDelegate> delegate;
+@property(nonatomic, nullable, weak) id<SelectorCoordinatorDelegate> delegate;
 
 @end
 

@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.searchwidget;
 
 import android.app.Activity;
+import android.app.SearchManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.support.v4.app.ActivityOptionsCompat;
@@ -149,8 +150,8 @@ public class SearchActivity extends AsyncInitializationActivity
         super.finishNativeInitialization();
 
         mTab = new Tab(TabIdManager.getInstance().generateValidId(Tab.INVALID_TAB_ID),
-                Tab.INVALID_TAB_ID, false, this, getWindowAndroid(),
-                TabLaunchType.FROM_EXTERNAL_APP, null, null);
+                Tab.INVALID_TAB_ID, false, getWindowAndroid(), TabLaunchType.FROM_EXTERNAL_APP,
+                null, null);
         mTab.initialize(WebContentsFactory.createWebContents(false, false), null,
                 new TabDelegateFactory(), false, false);
         mTab.loadUrl(new LoadUrlParams("about:blank"));
@@ -218,8 +219,12 @@ public class SearchActivity extends AsyncInitializationActivity
                 getIntent(), SearchWidgetProvider.EXTRA_START_VOICE_SEARCH, false);
     }
 
+    private String getOptionalIntentQuery() {
+        return IntentUtils.safeGetStringExtra(getIntent(), SearchManager.QUERY);
+    }
+
     private void beginQuery() {
-        mSearchBox.beginQuery(isVoiceSearchIntent());
+        mSearchBox.beginQuery(isVoiceSearchIntent(), getOptionalIntentQuery());
     }
 
     @Override

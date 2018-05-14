@@ -9,15 +9,15 @@
 #include <algorithm>
 #include <limits>
 #include <map>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/stl_util.h"
@@ -600,8 +600,8 @@ bool LoginDatabase::Init() {
     meta_table_.SetVersionNumber(kCurrentVersionNumber);
   } else {
     LogDatabaseInitError(MIGRATION_ERROR);
-    UMA_HISTOGRAM_SPARSE_SLOWLY("PasswordManager.LoginDatabaseFailedVersion",
-                                meta_table_.GetVersionNumber());
+    base::UmaHistogramSparse("PasswordManager.LoginDatabaseFailedVersion",
+                             meta_table_.GetVersionNumber());
     LOG(ERROR) << "Unable to migrate database from "
                << meta_table_.GetVersionNumber() << " to "
                << kCurrentVersionNumber;
@@ -1039,7 +1039,7 @@ LoginDatabase::EncryptionResult LoginDatabase::InitPasswordFormFromStatement(
   form->display_name = s.ColumnString16(COLUMN_DISPLAY_NAME);
   form->icon_url = GURL(s.ColumnString(COLUMN_ICON_URL));
   form->federation_origin =
-      url::Origin(GURL(s.ColumnString(COLUMN_FEDERATION_URL)));
+      url::Origin::Create(GURL(s.ColumnString(COLUMN_FEDERATION_URL)));
   form->skip_zero_click = (s.ColumnInt(COLUMN_SKIP_ZERO_CLICK) > 0);
   int generation_upload_status_int =
       s.ColumnInt(COLUMN_GENERATION_UPLOAD_STATUS);
@@ -1268,7 +1268,7 @@ bool LoginDatabase::StatementToForms(
 
   forms->clear();
   while (statement->Step()) {
-    auto new_form = base::MakeUnique<PasswordForm>();
+    auto new_form = std::make_unique<PasswordForm>();
     EncryptionResult result =
         InitPasswordFormFromStatement(new_form.get(), *statement);
     if (result == ENCRYPTION_RESULT_SERVICE_FAILURE)

@@ -8,12 +8,12 @@
 #include <stddef.h>
 
 #include <algorithm>
-#include <deque>
 #include <utility>
 #include <vector>
 
 #include "base/big_endian.h"
 #include "base/bind.h"
+#include "base/containers/circular_deque.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -133,7 +133,7 @@ class DependentIOBuffer : public WrappedIOBuffer {
       : WrappedIOBuffer(buffer->data() + offset), buffer_(std::move(buffer)) {}
 
  private:
-  ~DependentIOBuffer() override {}
+  ~DependentIOBuffer() override = default;
   scoped_refptr<net::IOBuffer> buffer_;
 };
 
@@ -251,11 +251,61 @@ class WebSocketChannel::HandshakeNotificationSender
   std::unique_ptr<WebSocketHandshakeResponseInfo> handshake_response_info_;
 };
 
+class WebSocketChannel::PendingReceivedFrame {
+ public:
+  PendingReceivedFrame(bool final,
+                       WebSocketFrameHeader::OpCode opcode,
+                       scoped_refptr<IOBuffer> data,
+                       uint64_t offset,
+                       uint64_t size)
+      : final_(final),
+        opcode_(opcode),
+        data_(std::move(data)),
+        offset_(offset),
+        size_(size) {}
+  PendingReceivedFrame(const PendingReceivedFrame& other) = default;
+  ~PendingReceivedFrame() = default;
+
+  bool final() const { return final_; }
+  WebSocketFrameHeader::OpCode opcode() const { return opcode_; }
+
+  // ResetOpcode() to Continuation.
+  void ResetOpcode() {
+    DCHECK(WebSocketFrameHeader::IsKnownDataOpCode(opcode_));
+    opcode_ = WebSocketFrameHeader::kOpCodeContinuation;
+  }
+  const scoped_refptr<IOBuffer>& data() const { return data_; }
+  uint64_t offset() const { return offset_; }
+  uint64_t size() const { return size_; }
+
+  // Increase |offset_| by |bytes|.
+  void DidConsume(uint64_t bytes) {
+    DCHECK_LE(offset_, size_);
+    DCHECK_LE(bytes, size_ - offset_);
+    offset_ += bytes;
+  }
+
+  // This object needs to be copyable and assignable, since it will be placed
+  // in a base::queue. The compiler-generated copy constructor and assignment
+  // operator will do the right thing.
+
+ private:
+  bool final_;
+  WebSocketFrameHeader::OpCode opcode_;
+  scoped_refptr<IOBuffer> data_;
+  // Where to start reading from data_. Everything prior to offset_ has
+  // already been sent to the browser.
+  uint64_t offset_;
+  // The size of data_.
+  uint64_t size_;
+};
+
 WebSocketChannel::HandshakeNotificationSender::HandshakeNotificationSender(
     WebSocketChannel* channel)
     : owner_(channel) {}
 
-WebSocketChannel::HandshakeNotificationSender::~HandshakeNotificationSender() {}
+WebSocketChannel::HandshakeNotificationSender::~HandshakeNotificationSender() =
+    default;
 
 void WebSocketChannel::HandshakeNotificationSender::Send(
     base::WeakPtr<HandshakeNotificationSender> sender) {
@@ -287,34 +337,6 @@ ChannelState WebSocketChannel::HandshakeNotificationSender::SendImmediately(
   }
 
   return CHANNEL_ALIVE;
-}
-
-WebSocketChannel::PendingReceivedFrame::PendingReceivedFrame(
-    bool final,
-    WebSocketFrameHeader::OpCode opcode,
-    scoped_refptr<IOBuffer> data,
-    uint64_t offset,
-    uint64_t size)
-    : final_(final),
-      opcode_(opcode),
-      data_(std::move(data)),
-      offset_(offset),
-      size_(size) {}
-
-WebSocketChannel::PendingReceivedFrame::PendingReceivedFrame(
-    const PendingReceivedFrame& other) = default;
-
-WebSocketChannel::PendingReceivedFrame::~PendingReceivedFrame() {}
-
-void WebSocketChannel::PendingReceivedFrame::ResetOpcode() {
-  DCHECK(WebSocketFrameHeader::IsKnownDataOpCode(opcode_));
-  opcode_ = WebSocketFrameHeader::kOpCodeContinuation;
-}
-
-void WebSocketChannel::PendingReceivedFrame::DidConsume(uint64_t bytes) {
-  DCHECK_LE(offset_, size_);
-  DCHECK_LE(bytes, size_ - offset_);
-  offset_ += bytes;
 }
 
 WebSocketChannel::WebSocketChannel(
@@ -352,10 +374,10 @@ void WebSocketChannel::SendAddChannelRequest(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
     const url::Origin& origin,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     const std::string& additional_headers) {
   SendAddChannelRequestWithSuppliedCallback(
-      socket_url, requested_subprotocols, origin, first_party_for_cookies,
+      socket_url, requested_subprotocols, origin, site_for_cookies,
       additional_headers, base::Bind(&WebSocketStream::CreateAndConnectStream));
 }
 
@@ -561,11 +583,11 @@ void WebSocketChannel::SendAddChannelRequestForTesting(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
     const url::Origin& origin,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     const std::string& additional_headers,
     const WebSocketStreamRequestCreationCallback& callback) {
   SendAddChannelRequestWithSuppliedCallback(socket_url, requested_subprotocols,
-                                            origin, first_party_for_cookies,
+                                            origin, site_for_cookies,
                                             additional_headers, callback);
 }
 
@@ -583,7 +605,7 @@ void WebSocketChannel::SendAddChannelRequestWithSuppliedCallback(
     const GURL& socket_url,
     const std::vector<std::string>& requested_subprotocols,
     const url::Origin& origin,
-    const GURL& first_party_for_cookies,
+    const GURL& site_for_cookies,
     const std::string& additional_headers,
     const WebSocketStreamRequestCreationCallback& callback) {
   DCHECK_EQ(FRESHLY_CONSTRUCTED, state_);
@@ -600,10 +622,10 @@ void WebSocketChannel::SendAddChannelRequestWithSuppliedCallback(
   std::unique_ptr<WebSocketHandshakeStreamCreateHelper> create_helper(
       new WebSocketHandshakeStreamCreateHelper(connect_delegate.get(),
                                                requested_subprotocols));
-  stream_request_ = callback.Run(socket_url_, std::move(create_helper), origin,
-                                 first_party_for_cookies, additional_headers,
-                                 url_request_context_, NetLogWithSource(),
-                                 std::move(connect_delegate));
+  stream_request_ =
+      callback.Run(socket_url_, std::move(create_helper), origin,
+                   site_for_cookies, additional_headers, url_request_context_,
+                   NetLogWithSource(), std::move(connect_delegate));
   SetState(CONNECTING);
 }
 

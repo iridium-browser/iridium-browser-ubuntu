@@ -9,6 +9,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace payments {
+namespace {
 
 struct TestCase {
   TestCase(const char* amount,
@@ -65,6 +66,14 @@ INSTANTIATE_TEST_CASE_P(
         TestCase("55.00", "USD", "fr_CA", "55,00 $", "USD"),
         TestCase("55.00", "USD", "fr_FR", "55,00 $", "USD"),
         TestCase("1234", "USD", "fr_FR", "1 234,00 $", "USD"),
+        // Known oddity about the en_AU formatting in ICU. It will strip the
+        // currency symbol in non-AUD currencies. Useful to document in tests.
+        // See crbug.com/739812.
+        TestCase("55.00", "AUD", "en_AU", "$55.00", "AUD"),
+        TestCase("55.00", "USD", "en_AU", "55.00", "USD"),
+        TestCase("55.00", "CAD", "en_AU", "55.00", "CAD"),
+        TestCase("55.00", "JPY", "en_AU", "55", "JPY"),
+        TestCase("55.00", "RUB", "en_AU", "55.00", "RUB"),
 
         TestCase("55.5", "USD", "en_US", "$55.50", "USD"),
         TestCase("55", "USD", "en_US", "$55.00", "USD"),
@@ -88,7 +97,7 @@ INSTANTIATE_TEST_CASE_P(
 
         TestCase("55.00", "BRL", "en_US", "R$55.00", "BRL"),
         TestCase("55.00", "BRL", "fr_CA", "55,00 R$", "BRL"),
-        TestCase("55.00", "BRL", "pt_BR", "R$55,00", "BRL"),
+        TestCase("55.00", "BRL", "pt_BR", "R$ 55,00", "BRL"),
 
         TestCase("55.00", "RUB", "en_US", "55.00", "RUB"),
         TestCase("55.00", "RUB", "fr_CA", "55,00", "RUB"),
@@ -182,4 +191,5 @@ INSTANTIATE_TEST_CASE_P(
                  "USD",
                  "http://currsystem.com")));
 
+}  // namespace
 }  // namespace payments

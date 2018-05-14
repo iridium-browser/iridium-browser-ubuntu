@@ -74,15 +74,15 @@ syncer::SyncService* AwAutofillClient::GetSyncService() {
   return nullptr;
 }
 
-IdentityProvider* AwAutofillClient::GetIdentityProvider() {
-  return nullptr;
-}
-
-rappor::RapporServiceImpl* AwAutofillClient::GetRapporServiceImpl() {
+identity::IdentityManager* AwAutofillClient::GetIdentityManager() {
   return nullptr;
 }
 
 ukm::UkmRecorder* AwAutofillClient::GetUkmRecorder() {
+  return nullptr;
+}
+
+autofill::AddressNormalizer* AwAutofillClient::GetAddressNormalizer() {
   return nullptr;
 }
 
@@ -190,6 +190,8 @@ void AwAutofillClient::DidFillOrPreviewField(
     const base::string16& autofilled_value,
     const base::string16& profile_full_name) {}
 
+void AwAutofillClient::DidInteractWithNonsecureCreditCardInput() {}
+
 bool AwAutofillClient::IsContextSecure() {
   content::SSLStatus ssl_status;
   content::NavigationEntry* navigation_entry =
@@ -213,9 +215,9 @@ bool AwAutofillClient::ShouldShowSigninPromo() {
   return false;
 }
 
-void AwAutofillClient::StartSigninFlow() {}
-
-void AwAutofillClient::ShowHttpNotSecureExplanation() {}
+void AwAutofillClient::ExecuteCommand(int id) {
+  NOTIMPLEMENTED();
+}
 
 bool AwAutofillClient::IsAutofillSupported() {
   return true;
@@ -282,10 +284,6 @@ bool AwAutofillClient::HasCreditCardScanFeature() {
 
 void AwAutofillClient::ScanCreditCard(const CreditCardScanCallback& callback) {
   NOTIMPLEMENTED();
-}
-
-bool RegisterAwAutofillClient(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android_webview

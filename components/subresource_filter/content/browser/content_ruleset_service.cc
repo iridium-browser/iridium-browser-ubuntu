@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/task_scheduler/post_task.h"
 #include "components/subresource_filter/content/common/subresource_filter_messages.h"
@@ -42,14 +41,14 @@ void CloseFileOnFileThread(base::File* file) {
     return;
   base::PostTaskWithTraits(FROM_HERE,
                            {base::TaskPriority::BACKGROUND, base::MayBlock()},
-                           base::Bind(&CloseFile, base::Passed(file)));
+                           base::BindOnce(&CloseFile, std::move(*file)));
 }
 
 }  // namespace
 
 ContentRulesetService::ContentRulesetService(
     scoped_refptr<base::SequencedTaskRunner> blocking_task_runner)
-    : ruleset_dealer_(base::MakeUnique<VerifiedRulesetDealer::Handle>(
+    : ruleset_dealer_(std::make_unique<VerifiedRulesetDealer::Handle>(
           std::move(blocking_task_runner))) {
   // Must rely on notifications as RenderProcessHostObserver::RenderProcessReady
   // would only be called after queued IPC messages (potentially triggering a
@@ -104,6 +103,11 @@ void ContentRulesetService::IndexAndStoreAndPublishRulesetIfNeeded(
   DCHECK(ruleset_service_);
   ruleset_service_->IndexAndStoreAndPublishRulesetIfNeeded(
       unindexed_ruleset_info);
+}
+
+void ContentRulesetService::SetIsAfterStartupForTesting() {
+  DCHECK(ruleset_service_);
+  ruleset_service_->set_is_after_startup_for_testing();
 }
 
 void ContentRulesetService::Observe(

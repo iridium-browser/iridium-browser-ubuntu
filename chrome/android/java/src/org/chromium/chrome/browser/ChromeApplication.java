@@ -5,64 +5,125 @@
 package org.chromium.chrome.browser;
 
 import android.app.Activity;
+import android.app.Application;
 import android.content.Context;
-import android.content.SharedPreferences;
-import android.os.SystemClock;
+import android.content.Intent;
+import android.os.Bundle;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.BuildConfig;
 import org.chromium.base.CommandLineInitUtil;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.DiscardableReferencePool;
+import org.chromium.base.Log;
+import org.chromium.base.Supplier;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.MainDex;
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.multidex.ChromiumMultiDexInstaller;
+import org.chromium.build.BuildHooks;
+import org.chromium.build.BuildHooksAndroid;
+import org.chromium.build.BuildHooksConfig;
+import org.chromium.chrome.browser.crash.PureJavaExceptionHandler;
+import org.chromium.chrome.browser.crash.PureJavaExceptionReporter;
 import org.chromium.chrome.browser.document.DocumentActivity;
 import org.chromium.chrome.browser.document.IncognitoDocumentActivity;
 import org.chromium.chrome.browser.init.InvalidStartupDialog;
 import org.chromium.chrome.browser.metrics.UmaUtils;
+import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
 import org.chromium.chrome.browser.tabmodel.document.ActivityDelegateImpl;
 import org.chromium.chrome.browser.tabmodel.document.DocumentTabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.StorageDelegate;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
-import org.chromium.content.app.ContentApplication;
+import org.chromium.chrome.browser.vr_shell.OnExitVrRequestListener;
+import org.chromium.chrome.browser.vr_shell.VrIntentUtils;
+import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
 
 /**
  * Basic application functionality that should be shared among all browser applications that use
  * chrome layer.
  */
 @MainDex
-public class ChromeApplication extends ContentApplication {
-    public static final String COMMAND_LINE_FILE = "chrome-command-line";
+public class ChromeApplication extends Application {
+    private static final String COMMAND_LINE_FILE = "chrome-command-line";
     private static final String TAG = "ChromiumApplication";
-    private static final String PREF_BOOT_TIMESTAMP =
-            "com.google.android.apps.chrome.ChromeMobileApplication.BOOT_TIMESTAMP";
-    private static final long BOOT_TIMESTAMP_MARGIN_MS = 1000;
 
     private static DocumentTabModelSelector sDocumentTabModelSelector;
+    private DiscardableReferencePool mReferencePool;
 
+    // Called by the framework for ALL processes. Runs before ContentProviders are created.
+    // Quirk: context.getApplicationContext() returns null during this method.
     @Override
-    protected void attachBaseContext(Context base) {
-        super.attachBaseContext(base);
+    protected void attachBaseContext(Context context) {
+        UmaUtils.recordMainEntryPointTime();
+        super.attachBaseContext(context);
+        checkAppBeingReplaced();
+        if (BuildConfig.isMultidexEnabled()) {
+            ChromiumMultiDexInstaller.install(this);
+        }
         ContextUtils.initApplicationContext(this);
+
+        if (ContextUtils.isMainProcess()) {
+            // Renderers and GPU process have command line passed to them via IPC
+            // (see ChildProcessService.java).
+            Supplier<Boolean> shouldUseDebugFlags = new Supplier<Boolean>() {
+                @Override
+                public Boolean get() {
+                    ChromePreferenceManager manager = ChromePreferenceManager.getInstance();
+                    return manager.getCommandLineOnNonRootedEnabled();
+                }
+            };
+            CommandLineInitUtil.initCommandLine(COMMAND_LINE_FILE, shouldUseDebugFlags);
+
+            // Requires command-line flags.
+            TraceEvent.maybeEnableEarlyTracing();
+            TraceEvent.begin("ChromeApplication.attachBaseContext");
+
+            // Register for activity lifecycle callbacks. Must be done before any activities are
+            // created and is needed only by processes that use the ApplicationStatus api (which for
+            // Chrome is just the browser process).
+            ApplicationStatus.initialize(this);
+
+            // Only browser process requires custom resources.
+            BuildHooksAndroid.initCustomResources(this);
+
+            // Not losing much to not cover the below conditional since it just has simple setters.
+            TraceEvent.end("ChromeApplication.attachBaseContext");
+        }
+
+        if (!ContextUtils.isIsolatedProcess()) {
+            // Incremental install disables process isolation, so things in this block will actually
+            // be run for incremental apks, but not normal apks.
+            PureJavaExceptionHandler.installHandler();
+            if (BuildHooksConfig.REPORT_JAVA_ASSERT) {
+                BuildHooks.setReportAssertionCallback(
+                        PureJavaExceptionReporter::reportJavaException);
+            }
+        }
     }
 
-    /**
-     * This is called once per ChromeApplication instance, which get created per process
-     * (browser OR renderer).  Don't stick anything in here that shouldn't be called multiple times
-     * during Chrome's lifetime.
-     */
+    /** Ensure this application object is not out-of-date. */
+    private void checkAppBeingReplaced() {
+        // During app update the old apk can still be triggered by broadcasts and spin up an
+        // out-of-date application. Kill old applications in this bad state. See
+        // http://crbug.com/658130 for more context and http://b.android.com/56296 for the bug.
+        if (getResources() == null) {
+            Log.e(TAG, "getResources() null, closing app.");
+            System.exit(0);
+        }
+    }
+
     @Override
-    public void onCreate() {
-        UmaUtils.recordMainEntryPointTime();
-        initCommandLine();
-        TraceEvent.maybeEnableEarlyTracing();
-        TraceEvent.begin("ChromeApplication.onCreate");
-
-        super.onCreate();
-
-        TraceEvent.end("ChromeApplication.onCreate");
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        // The conditions are expressed using ranges to capture intermediate levels possibly added
+        // to the API in the future.
+        if ((level >= TRIM_MEMORY_RUNNING_LOW && level < TRIM_MEMORY_UI_HIDDEN)
+                || level >= TRIM_MEMORY_MODERATE) {
+            if (mReferencePool != null) mReferencePool.drain();
+        }
     }
 
     /**
@@ -77,67 +138,12 @@ public class ChromeApplication extends ContentApplication {
         InvalidStartupDialog.show(activity, e.getErrorCode());
     }
 
-    @Override
-    public void initCommandLine() {
-        CommandLineInitUtil.initCommandLine(this, COMMAND_LINE_FILE);
-    }
-
-    /**
-     * @return The user agent string of Chrome.
-     */
-    public static String getBrowserUserAgent() {
-        return nativeGetBrowserUserAgent();
-    }
-
-    /**
-     * The host activity should call this during its onPause() handler to ensure
-     * all state is saved when the app is suspended.  Calling ChromiumApplication.onStop() does
-     * this for you.
-     */
-    public static void flushPersistentData() {
-        try {
-            TraceEvent.begin("ChromiumApplication.flushPersistentData");
-            nativeFlushPersistentData();
-        } finally {
-            TraceEvent.end("ChromiumApplication.flushPersistentData");
-        }
-    }
-
-    /**
-     * Removes all session cookies (cookies with no expiration date) after device reboots.
-     * This function will incorrectly clear cookies when Daylight Savings Time changes the clock.
-     * Without a way to get a monotonically increasing system clock, the boot timestamp will be off
-     * by one hour.  However, this should only happen at most once when the clock changes since the
-     * updated timestamp is immediately saved.
-     */
-    public static void removeSessionCookies() {
-        long lastKnownBootTimestamp =
-                ContextUtils.getAppSharedPreferences().getLong(PREF_BOOT_TIMESTAMP, 0);
-        long bootTimestamp = System.currentTimeMillis() - SystemClock.uptimeMillis();
-        long difference = bootTimestamp - lastKnownBootTimestamp;
-
-        // Allow some leeway to account for fractions of milliseconds.
-        if (Math.abs(difference) > BOOT_TIMESTAMP_MARGIN_MS) {
-            nativeRemoveSessionCookies();
-
-            SharedPreferences prefs = ContextUtils.getAppSharedPreferences();
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putLong(PREF_BOOT_TIMESTAMP, bootTimestamp);
-            editor.apply();
-        }
-    }
-
-    private static native void nativeRemoveSessionCookies();
-    private static native String nativeGetBrowserUserAgent();
-    private static native void nativeFlushPersistentData();
-
     /**
      * Returns the singleton instance of the DocumentTabModelSelector.
      * TODO(dfalcantara): Find a better place for this once we differentiate between activity and
      *                    application-level TabModelSelectors.
      * @return The DocumentTabModelSelector for the application.
      */
-    @SuppressFBWarnings("LI_LAZY_INIT_STATIC")
     public static DocumentTabModelSelector getDocumentTabModelSelector() {
         ThreadUtils.assertOnUiThread();
         if (sDocumentTabModelSelector == null) {
@@ -147,5 +153,42 @@ public class ChromeApplication extends ContentApplication {
                     new StorageDelegate(), new TabDelegate(false), new TabDelegate(true));
         }
         return sDocumentTabModelSelector;
+    }
+
+    /**
+     * @return The DiscardableReferencePool for the application.
+     */
+    public DiscardableReferencePool getReferencePool() {
+        ThreadUtils.assertOnUiThread();
+        if (mReferencePool == null) {
+            mReferencePool = new DiscardableReferencePool();
+        }
+        return mReferencePool;
+    }
+
+    @Override
+    public void startActivity(Intent intent) {
+        startActivity(intent, null);
+    }
+
+    @Override
+    public void startActivity(Intent intent, Bundle options) {
+        if (!VrShellDelegate.isInVr() || VrIntentUtils.isVrIntent(intent)) {
+            super.startActivity(intent, options);
+            return;
+        }
+
+        VrShellDelegate.requestToExitVr(new OnExitVrRequestListener() {
+            @Override
+            public void onSucceeded() {
+                if (VrShellDelegate.isInVr()) {
+                    throw new IllegalStateException("Still in VR after having exited VR.");
+                }
+                startActivity(intent, options);
+            }
+
+            @Override
+            public void onDenied() {}
+        });
     }
 }

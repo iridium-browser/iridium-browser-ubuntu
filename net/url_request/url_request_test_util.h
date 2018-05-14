@@ -26,7 +26,6 @@
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/base/request_priority.h"
-#include "net/base/sdch_manager.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/disk_cache/disk_cache.h"
@@ -36,7 +35,7 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
-#include "net/proxy/proxy_service.h"
+#include "net/proxy_resolution/proxy_service.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -84,10 +83,6 @@ class TestURLRequestContext : public URLRequestContext {
   void set_http_network_session_context(
       std::unique_ptr<HttpNetworkSession::Context> session_context) {
     http_network_session_context_ = std::move(session_context);
-  }
-
-  void SetSdchManager(std::unique_ptr<SdchManager> sdch_manager) {
-    context_storage_.set_sdch_manager(std::move(sdch_manager));
   }
 
   void SetCTPolicyEnforcer(
@@ -270,6 +265,12 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
     redirect_on_headers_received_url_ = redirect_on_headers_received_url;
   }
 
+  // Adds a X-Network-Delegate header to the first OnHeadersReceived call, but
+  // not subsequent ones.
+  void set_add_header_to_first_response(bool add_header_to_first_response) {
+    add_header_to_first_response_ = add_header_to_first_response;
+  }
+
   void set_allowed_unsafe_redirect_url(GURL allowed_unsafe_redirect_url) {
     allowed_unsafe_redirect_url_ = allowed_unsafe_redirect_url;
   }
@@ -359,7 +360,7 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   bool OnCanGetCookies(const URLRequest& request,
                        const CookieList& cookie_list) override;
   bool OnCanSetCookie(const URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       CookieOptions* options) override;
   bool OnCanAccessFile(const URLRequest& request,
                        const base::FilePath& original_path,
@@ -415,6 +416,7 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   bool cancel_request_with_policy_violating_referrer_;  // false by default
   bool will_be_intercepted_on_next_error_;
   bool before_start_transaction_fails_;
+  bool add_header_to_first_response_;
 };
 
 //-----------------------------------------------------------------------------

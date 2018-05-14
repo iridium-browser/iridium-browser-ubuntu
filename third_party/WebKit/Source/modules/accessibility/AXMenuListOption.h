@@ -26,7 +26,8 @@
 #ifndef AXMenuListOption_h
 #define AXMenuListOption_h
 
-#include "core/html/HTMLOptionElement.h"
+#include "base/macros.h"
+#include "core/html/forms/HTMLOptionElement.h"
 #include "modules/accessibility/AXMockObject.h"
 
 namespace blink {
@@ -34,8 +35,6 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class AXMenuListOption final : public AXMockObject {
-  WTF_MAKE_NONCOPYABLE(AXMenuListOption);
-
  public:
   static AXMenuListOption* Create(HTMLOptionElement* element,
                                   AXObjectCacheImpl& ax_object_cache) {
@@ -45,7 +44,7 @@ class AXMenuListOption final : public AXMockObject {
 
  private:
   AXMenuListOption(HTMLOptionElement*, AXObjectCacheImpl&);
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   bool IsMenuListOption() const override { return true; }
 
@@ -60,12 +59,13 @@ class AXMenuListOption final : public AXMockObject {
   Element* ActionElement() const override;
   bool IsVisible() const override;
   bool IsOffScreen() const override;
-  bool IsSelected() const override;
-  void SetSelected(bool) override;
+  AccessibilitySelectedState IsSelected() const override;
+  bool OnNativeSetSelectedAction(bool) override;
 
   void GetRelativeBounds(AXObject** out_container,
                          FloatRect& out_bounds_in_container,
-                         SkMatrix44& out_container_transform) const override;
+                         SkMatrix44& out_container_transform,
+                         bool* clips_children = nullptr) const override;
   String TextAlternative(bool recursive,
                          bool in_aria_labelled_by_traversal,
                          AXObjectSet& visited,
@@ -76,6 +76,8 @@ class AXMenuListOption final : public AXMockObject {
   HTMLSelectElement* ParentSelectNode() const;
 
   Member<HTMLOptionElement> element_;
+
+  DISALLOW_COPY_AND_ASSIGN(AXMenuListOption);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXMenuListOption, IsMenuListOption());

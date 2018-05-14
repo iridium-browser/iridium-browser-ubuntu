@@ -39,7 +39,7 @@ class Client : public GarbageCollectedFinalized<Client>,
   USING_GARBAGE_COLLECTED_MIXIN(Client);
 
  public:
-  ~Client() override {}
+  ~Client() override = default;
   const Vector<EventOrReconnectionTimeSetting>& Events() const {
     return events_;
   }
@@ -61,7 +61,7 @@ class StoppingClient : public GarbageCollectedFinalized<StoppingClient>,
   USING_GARBAGE_COLLECTED_MIXIN(StoppingClient);
 
  public:
-  ~StoppingClient() override {}
+  ~StoppingClient() override = default;
   const Vector<EventOrReconnectionTimeSetting>& Events() const {
     return events_;
   }
@@ -76,7 +76,7 @@ class StoppingClient : public GarbageCollectedFinalized<StoppingClient>,
     events_.push_back(EventOrReconnectionTimeSetting(reconnection_time));
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  virtual void Trace(blink::Visitor* visitor) {
     visitor->Trace(parser_);
     EventSourceParser::Client::Trace(visitor);
   }
@@ -92,7 +92,7 @@ class EventSourceParserTest : public ::testing::Test {
   EventSourceParserTest()
       : client_(new Client),
         parser_(new EventSourceParser(AtomicString(), client_)) {}
-  ~EventSourceParserTest() override {}
+  ~EventSourceParserTest() override = default;
 
   void Enqueue(const char* data) { parser_->AddBytes(data, strlen(data)); }
   void EnqueueOneByOne(const char* data) {
@@ -386,6 +386,26 @@ TEST(EventSourceParserStoppingTest, StopWhileParsing) {
   EXPECT_EQ("message", events[0].event);
   EXPECT_EQ("hello", events[0].data);
   EXPECT_EQ("99", parser->LastEventId());
+}
+
+TEST_F(EventSourceParserTest, IgnoreIdHavingNullCharacter) {
+  constexpr char input[] =
+      "id:99\ndata:hello\n\nid:4\x0"
+      "23\ndata:bye\n\n";
+  // We can't use Enqueue because it relies on strlen.
+  parser_->AddBytes(input, sizeof(input) - 1);
+
+  EXPECT_EQ("99", Parser()->LastEventId());
+  ASSERT_EQ(2u, Events().size());
+  ASSERT_EQ(Type::kEvent, Events()[0].type);
+  EXPECT_EQ("message", Events()[0].event);
+  EXPECT_EQ("hello", Events()[0].data);
+  EXPECT_EQ("99", Events()[0].id);
+
+  ASSERT_EQ(Type::kEvent, Events()[1].type);
+  EXPECT_EQ("message", Events()[1].event);
+  EXPECT_EQ("bye", Events()[1].data);
+  EXPECT_EQ("99", Events()[1].id);
 }
 
 }  // namespace

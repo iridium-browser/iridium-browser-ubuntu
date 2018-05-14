@@ -7,12 +7,14 @@
 #include "base/mac/bundle_locations.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_mac.h"
 #include "chrome/browser/ui/login/login_handler.h"
@@ -20,9 +22,7 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "net/url_request/url_request.h"
 #include "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "ui/base/material_design/material_design_controller.h"
 
 using autofill::PasswordForm;
 using content::BrowserThread;
@@ -38,9 +38,12 @@ using content::WebContents;
 class LoginHandlerMac : public LoginHandler,
                         public ConstrainedWindowMacDelegate {
  public:
-  LoginHandlerMac(net::AuthChallengeInfo* auth_info, net::URLRequest* request)
-      : LoginHandler(auth_info, request) {
-  }
+  LoginHandlerMac(
+      net::AuthChallengeInfo* auth_info,
+      content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+          auth_required_callback)
+      : LoginHandler(auth_info, web_contents_getter, auth_required_callback) {}
 
   // LoginModelObserver implementation.
   void OnAutofillDataAvailableInternal(
@@ -133,11 +136,17 @@ class LoginHandlerMac : public LoginHandler,
 };
 
 // static
-LoginHandler* LoginHandler::Create(net::AuthChallengeInfo* auth_info,
-                                   net::URLRequest* request) {
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-    return chrome::CreateLoginHandlerViews(auth_info, request);
-  return new LoginHandlerMac(auth_info, request);
+LoginHandler* LoginHandler::Create(
+    net::AuthChallengeInfo* auth_info,
+    content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
+        auth_required_callback) {
+  if (chrome::ShowPilotDialogsWithViewsToolkit()) {
+    return chrome::CreateLoginHandlerViews(auth_info, web_contents_getter,
+                                           auth_required_callback);
+  }
+  return new LoginHandlerMac(auth_info, web_contents_getter,
+                             auth_required_callback);
 }
 
 // ----------------------------------------------------------------------------

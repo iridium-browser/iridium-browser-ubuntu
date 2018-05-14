@@ -13,9 +13,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/strings/string_piece.h"
+#include "media/capture/video/chromeos/camera_buffer_factory.h"
 #include "media/capture/video/chromeos/camera_hal_dispatcher_impl.h"
 #include "media/capture/video/chromeos/camera_metadata_utils.h"
-#include "media/capture/video/chromeos/pixel_format_utils.h"
 #include "media/capture/video/chromeos/video_capture_device_arc_chromeos.h"
 
 namespace media {
@@ -51,16 +51,17 @@ CameraHalDelegate::CameraHalDelegate(
           base::WaitableEvent::ResetPolicy::MANUAL,
           base::WaitableEvent::InitialState::NOT_SIGNALED),
       num_builtin_cameras_(0),
+      camera_buffer_factory_(new CameraBufferFactory()),
       ipc_task_runner_(std::move(ipc_task_runner)),
       camera_module_callbacks_(this) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
 }
 
-CameraHalDelegate::~CameraHalDelegate() {}
+CameraHalDelegate::~CameraHalDelegate() = default;
 
 void CameraHalDelegate::RegisterCameraClient() {
   CameraHalDispatcherImpl::GetInstance()->AddClientObserver(
-      base::MakeUnique<LocalCameraClientObserver>(this));
+      std::make_unique<LocalCameraClientObserver>(this));
 }
 
 void CameraHalDelegate::SetCameraModule(
@@ -143,15 +144,16 @@ void CameraHalDelegate::GetSupportedFormats(
 
     DVLOG(1) << "[" << std::hex << format << " " << std::dec << width << " "
              << height << " " << duration << "]";
-    VideoPixelFormat cr_format =
-        PixFormatHalToChromium(static_cast<arc::mojom::HalPixelFormat>(format));
-    if (cr_format == PIXEL_FORMAT_UNKNOWN) {
+    auto hal_format = static_cast<arc::mojom::HalPixelFormat>(format);
+    const ChromiumPixelFormat cr_format =
+        camera_buffer_factory_->ResolveStreamBufferFormat(hal_format);
+    if (cr_format.video_format == PIXEL_FORMAT_UNKNOWN) {
       continue;
     }
     VLOG(1) << "Supported format: " << width << "x" << height
-            << " fps=" << max_fps << " format=" << cr_format;
+            << " fps=" << max_fps << " format=" << cr_format.video_format;
     supported_formats->emplace_back(gfx::Size(width, height), max_fps,
-                                    cr_format);
+                                    cr_format.video_format);
   }
 }
 
@@ -175,15 +177,15 @@ void CameraHalDelegate::GetDeviceDescriptors(
     switch (camera_info->facing) {
       case arc::mojom::CameraFacing::CAMERA_FACING_BACK:
         desc.facing = VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT;
-        desc.display_name = std::string("Back Camera");
+        desc.set_display_name("Back Camera");
         break;
       case arc::mojom::CameraFacing::CAMERA_FACING_FRONT:
         desc.facing = VideoFacingMode::MEDIA_VIDEO_FACING_USER;
-        desc.display_name = std::string("Front Camera");
+        desc.set_display_name("Front Camera");
         break;
       case arc::mojom::CameraFacing::CAMERA_FACING_EXTERNAL:
         desc.facing = VideoFacingMode::MEDIA_VIDEO_FACING_NONE;
-        desc.display_name = std::string("External Camera");
+        desc.set_display_name("External Camera");
         break;
         // Mojo validates the input parameters for us so we don't need to worry
         // about malformed values.
@@ -345,6 +347,13 @@ void CameraHalDelegate::CameraDeviceStatusChange(
   DCHECK(ipc_task_runner_->BelongsToCurrentThread());
   // TODO(jcliang): Handle status change for external cameras.
   NOTIMPLEMENTED() << "CameraDeviceStatusChange is not implemented";
+}
+
+void CameraHalDelegate::TorchModeStatusChange(
+    int32_t camera_id,
+    arc::mojom::TorchModeStatus new_status) {
+  DCHECK(ipc_task_runner_->BelongsToCurrentThread());
+  // Do nothing here as we don't care about torch mode status.
 }
 
 }  // namespace media

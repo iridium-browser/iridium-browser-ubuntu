@@ -7,22 +7,16 @@
 #include <memory>
 #include <utility>
 
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/message_center_notification_manager.h"
-#include "chrome/browser/notifications/message_center_settings_controller.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "ui/message_center/message_center.h"
 
 // static
 NotificationUIManager* NotificationUIManager::Create() {
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  if (!profile_manager)
+  // If there's no MessageCenter, there should be no NotificationUIManager to
+  // manage it.
+  auto* message_center = message_center::MessageCenter::Get();
+  if (!message_center)
     return nullptr;
 
-  std::unique_ptr<message_center::NotifierSettingsProvider> settings_provider(
-      new MessageCenterSettingsController(
-          profile_manager->GetProfileAttributesStorage()));
-  return new MessageCenterNotificationManager(
-      g_browser_process->message_center(),
-      std::move(settings_provider));
+  return new MessageCenterNotificationManager(message_center);
 }

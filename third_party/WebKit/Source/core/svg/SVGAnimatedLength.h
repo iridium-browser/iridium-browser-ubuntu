@@ -37,9 +37,10 @@
 
 namespace blink {
 
-class SVGAnimatedLength : public SVGAnimatedProperty<SVGLength>,
-                          public ScriptWrappable {
+class SVGAnimatedLength : public ScriptWrappable,
+                          public SVGAnimatedProperty<SVGLength> {
   DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(SVGAnimatedLength);
 
  public:
   static SVGAnimatedLength* Create(
@@ -54,11 +55,12 @@ class SVGAnimatedLength : public SVGAnimatedProperty<SVGLength>,
   void SetDefaultValueAsString(const String&);
   SVGParsingError SetBaseValueAsString(const String&) override;
 
-  const CSSValue* CssValue() const {
-    return &CurrentValue()->AsCSSPrimitiveValue();
+  const CSSValue& CssValue() const {
+    return CurrentValue()->AsCSSPrimitiveValue();
   }
 
-  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
   SVGAnimatedLength(SVGElement* context_element,

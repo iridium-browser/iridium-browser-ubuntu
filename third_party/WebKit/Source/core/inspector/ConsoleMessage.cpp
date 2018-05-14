@@ -5,7 +5,13 @@
 #include "core/inspector/ConsoleMessage.h"
 
 #include "bindings/core/v8/SourceLocation.h"
-#include "platform/wtf/CurrentTime.h"
+#include "core/dom/Node.h"
+#include "core/frame/LocalFrame.h"
+#include "core/inspector/IdentifiersFactory.h"
+#include "core/workers/WorkerThread.h"
+#include "platform/wtf/Assertions.h"
+#include "platform/wtf/Time.h"
+#include "public/web/WebConsoleMessage.h"
 
 namespace blink {
 
@@ -15,10 +21,12 @@ ConsoleMessage* ConsoleMessage::CreateForRequest(
     MessageLevel level,
     const String& message,
     const String& url,
+    DocumentLoader* loader,
     unsigned long request_identifier) {
   ConsoleMessage* console_message = ConsoleMessage::Create(
       source, level, message, SourceLocation::Capture(url, 0, 0));
-  console_message->request_identifier_ = request_identifier;
+  console_message->request_identifier_ =
+      IdentifiersFactory::RequestId(loader, request_identifier);
   return console_message;
 }
 
@@ -44,10 +52,11 @@ ConsoleMessage* ConsoleMessage::CreateFromWorker(
     MessageLevel level,
     const String& message,
     std::unique_ptr<SourceLocation> location,
-    const String& worker_id) {
+    WorkerThread* worker_thread) {
   ConsoleMessage* console_message = ConsoleMessage::Create(
       kWorkerMessageSource, level, message, std::move(location));
-  console_message->worker_id_ = worker_id;
+  console_message->worker_id_ =
+      IdentifiersFactory::IdFromToken(worker_thread->GetDevToolsWorkerToken());
   return console_message;
 }
 
@@ -59,16 +68,16 @@ ConsoleMessage::ConsoleMessage(MessageSource source,
       level_(level),
       message_(message),
       location_(std::move(location)),
-      request_identifier_(0),
-      timestamp_(WTF::CurrentTimeMS()) {}
+      timestamp_(WTF::CurrentTimeMS()),
+      frame_(nullptr) {}
 
-ConsoleMessage::~ConsoleMessage() {}
+ConsoleMessage::~ConsoleMessage() = default;
 
 SourceLocation* ConsoleMessage::Location() const {
   return location_.get();
 }
 
-unsigned long ConsoleMessage::RequestIdentifier() const {
+const String& ConsoleMessage::RequestIdentifier() const {
   return request_identifier_;
 }
 
@@ -92,6 +101,29 @@ const String& ConsoleMessage::WorkerId() const {
   return worker_id_;
 }
 
-DEFINE_TRACE(ConsoleMessage) {}
+LocalFrame* ConsoleMessage::Frame() const {
+  // Do not reference detached frames.
+  if (frame_ && frame_->Client())
+    return frame_;
+  return nullptr;
+}
+
+Vector<DOMNodeId>& ConsoleMessage::Nodes() {
+  return nodes_;
+}
+
+void ConsoleMessage::SetNodes(LocalFrame* frame, Vector<DOMNodeId> nodes) {
+  frame_ = frame;
+  nodes_ = std::move(nodes);
+}
+
+void ConsoleMessage::Trace(blink::Visitor* visitor) {
+  visitor->Trace(frame_);
+}
+
+STATIC_ASSERT_ENUM(WebConsoleMessage::kLevelVerbose, kVerboseMessageLevel);
+STATIC_ASSERT_ENUM(WebConsoleMessage::kLevelInfo, kInfoMessageLevel);
+STATIC_ASSERT_ENUM(WebConsoleMessage::kLevelWarning, kWarningMessageLevel);
+STATIC_ASSERT_ENUM(WebConsoleMessage::kLevelError, kErrorMessageLevel);
 
 }  // namespace blink

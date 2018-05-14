@@ -83,3 +83,23 @@ Common.UIStringFormat = class {
         .formattedResult;
   }
 };
+
+
+/**
+ * @param {!Array<string>|string} strings
+ * @param {...*} vararg
+ * @return {string}
+ */
+self.ls = function(strings, vararg) {
+  if (typeof strings === 'string')
+    return strings;
+  const values = Array.prototype.slice.call(arguments, 1);
+  if (!values.length)
+    return strings[0];
+  let result = '';
+  for (let i = 0; i < values.length; i++) {
+    result += strings[i];
+    result += '' + values[i];
+  }
+  return result + strings[values.length];
+};

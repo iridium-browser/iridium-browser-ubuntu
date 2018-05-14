@@ -6,6 +6,10 @@
 
 #import "ios/web/public/web_state/web_state.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
 WebStateDelegate::WebStateDelegate() {}
@@ -33,9 +37,7 @@ WebState* WebStateDelegate::OpenURLFromWebState(
   return nullptr;
 }
 
-bool WebStateDelegate::HandleContextMenu(WebState*, const ContextMenuParams&) {
-  return false;
-}
+void WebStateDelegate::HandleContextMenu(WebState*, const ContextMenuParams&) {}
 
 void WebStateDelegate::ShowRepostFormWarningDialog(
     WebState*,
@@ -54,6 +56,21 @@ void WebStateDelegate::OnAuthRequired(WebState* source,
                                       const AuthCallback& callback) {
   callback.Run(nil, nil);
 }
+
+bool WebStateDelegate::ShouldPreviewLink(WebState* source,
+                                         const GURL& link_url) {
+  return false;
+}
+
+UIViewController* WebStateDelegate::GetPreviewingViewController(
+    WebState* source,
+    const GURL& link_url) {
+  return nullptr;
+}
+
+void WebStateDelegate::CommitPreviewingViewController(
+    WebState* source,
+    UIViewController* previewing_view_controller) {}
 
 void WebStateDelegate::Attach(WebState* source) {
   DCHECK(attached_states_.find(source) == attached_states_.end());

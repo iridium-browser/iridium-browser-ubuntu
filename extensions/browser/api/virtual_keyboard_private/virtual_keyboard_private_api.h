@@ -151,6 +151,22 @@ class VirtualKeyboardPrivateSetModeFunction
 
   // ExtensionFunction:
   ResponseAction Run() override;
+
+ private:
+  void OnSetMode(bool success);
+};
+
+class VirtualKeyboardPrivateSetDraggableAreaFunction
+    : public VirtualKeyboardPrivateFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("virtualKeyboardPrivate.setDraggableArea",
+                             VIRTUALKEYBOARDPRIVATE_SETDRAGGABLEAREA);
+
+ protected:
+  ~VirtualKeyboardPrivateSetDraggableAreaFunction() override {}
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
 };
 
 class VirtualKeyboardPrivateSetKeyboardStateFunction

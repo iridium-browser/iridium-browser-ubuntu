@@ -23,6 +23,8 @@ class VertexArrayGL : public VertexArrayImpl
     VertexArrayGL(const gl::VertexArrayState &data,
                   const FunctionsGL *functions,
                   StateManagerGL *stateManager);
+    ~VertexArrayGL() override;
+
     void destroy(const gl::Context *context) override;
 
     gl::Error syncDrawArraysState(const gl::Context *context,
@@ -38,13 +40,13 @@ class VertexArrayGL : public VertexArrayImpl
                                     GLsizei instanceCount,
                                     bool primitiveRestartEnabled,
                                     const void **outIndices) const;
-    gl::Error syncElementArrayState(const gl::Context *context) const;
 
     GLuint getVertexArrayID() const;
     GLuint getAppliedElementArrayBufferID() const;
 
     void syncState(const gl::Context *context,
                    const gl::VertexArray::DirtyBits &dirtyBits) override;
+    void applyNumViewsToDivisor(int numViews);
 
   private:
     gl::Error syncDrawState(const gl::Context *context,
@@ -91,6 +93,8 @@ class VertexArrayGL : public VertexArrayImpl
     void updateBindingBuffer(const gl::Context *context, size_t bindingIndex);
     void updateBindingDivisor(size_t bindingIndex);
 
+    void updateElementArrayBufferBinding(const gl::Context *context) const;
+
     void callVertexAttribPointer(GLuint attribIndex,
                                  const gl::VertexAttribute &attrib,
                                  GLsizei stride,
@@ -100,6 +104,7 @@ class VertexArrayGL : public VertexArrayImpl
     StateManagerGL *mStateManager;
 
     GLuint mVertexArrayID;
+    int mAppliedNumViews;
 
     mutable gl::BindingPointer<gl::Buffer> mAppliedElementArrayBuffer;
 

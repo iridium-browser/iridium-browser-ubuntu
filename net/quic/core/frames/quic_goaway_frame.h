@@ -6,26 +6,26 @@
 #define NET_QUIC_CORE_FRAMES_QUIC_GOAWAY_FRAME_H_
 
 #include <ostream>
-#include <string>
 
+#include "net/quic/core/frames/quic_control_frame.h"
 #include "net/quic/core/quic_error_codes.h"
-#include "net/quic/core/quic_types.h"
-#include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_string.h"
 
 namespace net {
 
-struct QUIC_EXPORT_PRIVATE QuicGoAwayFrame {
+struct QUIC_EXPORT_PRIVATE QuicGoAwayFrame : public QuicControlFrame {
   QuicGoAwayFrame();
-  QuicGoAwayFrame(QuicErrorCode error_code,
+  QuicGoAwayFrame(QuicControlFrameId control_frame_id,
+                  QuicErrorCode error_code,
                   QuicStreamId last_good_stream_id,
-                  const std::string& reason);
+                  const QuicString& reason);
 
   friend QUIC_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& os,
                                                       const QuicGoAwayFrame& g);
 
   QuicErrorCode error_code;
   QuicStreamId last_good_stream_id;
-  std::string reason_phrase;
+  QuicString reason_phrase;
 };
 
 }  // namespace net

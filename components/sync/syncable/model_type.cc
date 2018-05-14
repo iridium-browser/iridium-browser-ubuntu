@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
 #include "components/sync/protocol/app_notification_specifics.pb.h"
@@ -237,6 +236,7 @@ void AddDefaultFieldValue(ModelType type, sync_pb::EntitySpecifics* specifics) {
       break;
     case SUPERVISED_USER_SHARED_SETTINGS:
       specifics->mutable_managed_user_shared_setting();
+      break;
     case ARTICLES:
       specifics->mutable_article();
       break;
@@ -486,27 +486,29 @@ int ModelTypeToHistogramInt(ModelType model_type) {
 
 std::unique_ptr<base::Value> ModelTypeToValue(ModelType model_type) {
   if (model_type >= FIRST_REAL_MODEL_TYPE) {
-    return base::MakeUnique<base::Value>(ModelTypeToString(model_type));
+    return std::make_unique<base::Value>(ModelTypeToString(model_type));
   } else if (model_type == TOP_LEVEL_FOLDER) {
-    return base::MakeUnique<base::Value>("Top-level folder");
+    return std::make_unique<base::Value>("Top-level folder");
   } else if (model_type == UNSPECIFIED) {
-    return base::MakeUnique<base::Value>("Unspecified");
+    return std::make_unique<base::Value>("Unspecified");
   }
   NOTREACHED();
-  return base::MakeUnique<base::Value>(std::string());
+  return std::make_unique<base::Value>(std::string());
 }
 
 ModelType ModelTypeFromValue(const base::Value& value) {
-  if (value.IsType(base::Value::Type::STRING)) {
+  if (value.is_string()) {
     std::string result;
-    CHECK(value.GetAsString(&result));
+    bool success = value.GetAsString(&result);
+    DCHECK(success);
     return ModelTypeFromString(result);
-  } else if (value.IsType(base::Value::Type::INTEGER)) {
-    int result;
-    CHECK(value.GetAsInteger(&result));
+  } else if (value.is_int()) {
+    int result = 0;
+    bool success = value.GetAsInteger(&result);
+    DCHECK(success);
     return ModelTypeFromInt(result);
   } else {
-    NOTREACHED() << "Unsupported value type: " << value.GetType();
+    NOTREACHED() << "Unsupported value type: " << value.type();
     return UNSPECIFIED;
   }
 }

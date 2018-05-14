@@ -24,20 +24,49 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "EditingStyleUtilities.h"
+#include "core/editing/EditingStyleUtilities.h"
 
 #include "core/CSSPropertyNames.h"
 #include "core/css/CSSColorValue.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
 #include "core/css/CSSIdentifierValue.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/editing/EditingStyle.h"
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 
 namespace blink {
 
 using namespace cssvalue;
+
+namespace {
+
+Position AdjustedSelectionStartForStyleComputation(const Position& position) {
+  // This function is used by range style computations to avoid bugs like:
+  // <rdar://problem/4017641> REGRESSION (Mail): you can only bold/unbold a
+  // selection starting from end of line once
+  // It is important to skip certain irrelevant content at the start of the
+  // selection, so we do not wind up with a spurious "mixed" style.
+
+  VisiblePosition visible_position = CreateVisiblePosition(position);
+  if (visible_position.IsNull())
+    return Position();
+
+  // if the selection starts just before a paragraph break, skip over it
+  if (IsEndOfParagraph(visible_position)) {
+    return MostForwardCaretPosition(
+        NextPositionOf(visible_position).DeepEquivalent());
+  }
+
+  // otherwise, make sure to be at the start of the first selected node,
+  // instead of possibly at the end of the last node before the selection
+  return MostForwardCaretPosition(visible_position.DeepEquivalent());
+}
+
+}  // anonymous namespace
 
 bool EditingStyleUtilities::HasAncestorVerticalAlignStyle(Node& node,
                                                           CSSValueID value) {
@@ -53,6 +82,9 @@ bool EditingStyleUtilities::HasAncestorVerticalAlignStyle(Node& node,
 EditingStyle*
 EditingStyleUtilities::CreateWrappingStyleForAnnotatedSerialization(
     ContainerNode* context) {
+  // TODO(editing-dev): Change this function to take |const ContainerNode&|.
+  // Tracking bug for this is crbug.com/766448.
+  DCHECK(context);
   EditingStyle* wrapping_style =
       EditingStyle::Create(context, EditingStyle::kEditingPropertiesInEffect);
 
@@ -61,12 +93,13 @@ EditingStyleUtilities::CreateWrappingStyleForAnnotatedSerialization(
   // has applied. This helps us get the color of content pasted into
   // blockquotes right.
   wrapping_style->RemoveStyleAddedByElement(ToHTMLElement(EnclosingNodeOfType(
-      FirstPositionInOrBeforeNode(context), IsMailHTMLBlockquoteElement,
+      FirstPositionInOrBeforeNode(*context), IsMailHTMLBlockquoteElement,
       kCanCrossEditingBoundary)));
 
   // Call collapseTextDecorationProperties first or otherwise it'll copy the
   // value over from in-effect to text-decorations.
-  wrapping_style->CollapseTextDecorationProperties();
+  wrapping_style->CollapseTextDecorationProperties(
+      context->GetDocument().GetSecureContextMode());
 
   return wrapping_style;
 }
@@ -94,7 +127,7 @@ EditingStyle* EditingStyleUtilities::CreateWrappingStyleForSerialization(
 EditingStyle* EditingStyleUtilities::CreateStyleAtSelectionStart(
     const VisibleSelection& selection,
     bool should_use_background_color_in_effect,
-    MutableStylePropertySet* style_to_check) {
+    MutableCSSPropertyValueSet* style_to_check) {
   if (selection.IsNone())
     return nullptr;
 
@@ -156,8 +189,11 @@ EditingStyle* EditingStyleUtilities::CreateStyleAtSelectionStart(
       (selection.IsRange() || HasTransparentBackgroundColor(style->Style()))) {
     const EphemeralRange range(selection.ToNormalizedEphemeralRange());
     if (const CSSValue* value =
-            BackgroundColorValueInEffect(range.CommonAncestorContainer()))
-      style->SetProperty(CSSPropertyBackgroundColor, value->CssText());
+            BackgroundColorValueInEffect(range.CommonAncestorContainer())) {
+      style->SetProperty(CSSPropertyBackgroundColor, value->CssText(),
+                         /* important */ false,
+                         document.GetSecureContextMode());
+    }
   }
 
   return style;
@@ -181,7 +217,7 @@ bool EditingStyleUtilities::HasTransparentBackgroundColor(
 }
 
 bool EditingStyleUtilities::HasTransparentBackgroundColor(
-    StylePropertySet* style) {
+    CSSPropertyValueSet* style) {
   const CSSValue* css_value =
       style->GetPropertyCSSValue(CSSPropertyBackgroundColor);
   return IsTransparentColorValue(css_value);
@@ -192,8 +228,10 @@ const CSSValue* EditingStyleUtilities::BackgroundColorValueInEffect(
   for (Node* ancestor = node; ancestor; ancestor = ancestor->parentNode()) {
     CSSComputedStyleDeclaration* ancestor_style =
         CSSComputedStyleDeclaration::Create(ancestor);
-    if (!HasTransparentBackgroundColor(ancestor_style))
-      return ancestor_style->GetPropertyCSSValue(CSSPropertyBackgroundColor);
+    if (!HasTransparentBackgroundColor(ancestor_style)) {
+      return ancestor_style->GetPropertyCSSValue(
+          GetCSSPropertyBackgroundColor());
+    }
   }
   return nullptr;
 }

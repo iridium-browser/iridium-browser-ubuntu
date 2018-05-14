@@ -32,30 +32,26 @@ import org.chromium.base.test.util.Restriction;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
+import org.chromium.chrome.browser.multiwindow.MultiWindowTestHelper;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtilsTest;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabPersistentStoreTest.MockTabPersistentStoreObserver;
-import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.chrome.test.util.ChromeRestriction;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.OverviewModeBehaviorWatcher;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.ui.test.util.UiRestriction;
 
 /**
  * Tests merging tab models for Android N+ multi-instance.
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({
-        ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG,
-})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-@MinAndroidSdkLevel(24)
+@MinAndroidSdkLevel(Build.VERSION_CODES.N)
 public class TabModelMergingTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
@@ -67,6 +63,7 @@ public class TabModelMergingTest {
     private static final String TEST_URL_4 = UrlUtils.encodeHtmlDataUri("<html>test_url_4.</html>");
     private static final String TEST_URL_5 = UrlUtils.encodeHtmlDataUri("<html>test_url_5.</html>");
     private static final String TEST_URL_6 = UrlUtils.encodeHtmlDataUri("<html>test_url_6.</html>");
+    private static final String TEST_URL_7 = UrlUtils.encodeHtmlDataUri("<html>test_url_7.</html>");
 
     private ChromeTabbedActivity mActivity1;
     private ChromeTabbedActivity mActivity2;
@@ -94,8 +91,9 @@ public class TabModelMergingTest {
         // Start multi-instance mode so that ChromeTabbedActivity's check for whether the activity
         // is started up correctly doesn't fail.
         ChromeTabbedActivity.onMultiInstanceModeStarted();
-        mActivity2 = MultiWindowUtilsTest.createSecondChromeTabbedActivity(mActivity1);
-        CriteriaHelper.pollUiThread(new Criteria() {
+        mActivity2 = MultiWindowTestHelper.createSecondChromeTabbedActivity(
+                mActivity1, new LoadUrlParams(TEST_URL_7));
+        CriteriaHelper.pollUiThread(new Criteria("CTA2 tab state failed to initialize.") {
             @Override
             public boolean isSatisfied() {
                 return mActivity2.areTabModelsInitialized()
@@ -140,6 +138,9 @@ public class TabModelMergingTest {
                         TabLaunchType.FROM_CHROME_UI, null);
                 mActivity2.getTabCreator(false).createNewTab(new LoadUrlParams(TEST_URL_4),
                         TabLaunchType.FROM_CHROME_UI, null);
+
+                mActivity1.saveState();
+                mActivity2.saveState();
             }
         });
 
@@ -195,7 +196,7 @@ public class TabModelMergingTest {
         });
 
         // Wait for all tabs to be merged into the activity.
-        CriteriaHelper.pollUiThread(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria("Total tab count incorrect.") {
             @Override
             public boolean isSatisfied() {
                 return activity.getTabModelSelector().getTotalTabCount() == expectedNumberOfTabs;
@@ -230,7 +231,7 @@ public class TabModelMergingTest {
                         .startActivitySync(intent);
 
         // Wait for the tab state to be initialized.
-        CriteriaHelper.pollUiThread(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria("Tab state failed to initialize.") {
             @Override
             public boolean isSatisfied() {
                 return newActivity.areTabModelsInitialized()
@@ -295,15 +296,23 @@ public class TabModelMergingTest {
         });
 
         // Destroy both activities.
-        mActivity1.finishAndRemoveTask();
         mActivity2.finishAndRemoveTask();
-        CriteriaHelper.pollUiThread(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria(
+                "CTA2 should be destroyed, current state: " + mActivity2State) {
             @Override
             public boolean isSatisfied() {
-                return mActivity1State == ActivityState.DESTROYED
-                        && mActivity2State == ActivityState.DESTROYED;
+                return mActivity2State == ActivityState.DESTROYED;
             }
         });
+
+        mActivity1.finishAndRemoveTask();
+        CriteriaHelper.pollUiThread(
+                new Criteria("CTA should be destroyed, current state: " + mActivity1State) {
+                    @Override
+                    public boolean isSatisfied() {
+                        return mActivity1State == ActivityState.DESTROYED;
+                    }
+                });
 
         // Start the new ChromeTabbedActivity.
         final ChromeTabbedActivity newActivity = startNewChromeTabbedActivityAndAssert(
@@ -322,7 +331,7 @@ public class TabModelMergingTest {
         MockTabPersistentStoreObserver mockObserver = new MockTabPersistentStoreObserver();
         TabModelSelectorImpl tabModelSelector =
                 (TabModelSelectorImpl) mActivity2.getTabModelSelector();
-        tabModelSelector.getTabPersistentStoreForTesting().setObserverForTesting(mockObserver);
+        tabModelSelector.getTabPersistentStoreForTesting().addObserver(mockObserver);
 
         // Merge tabs into ChromeTabbedActivity2. Wait for the merge to finish, ensuring the
         // tab metadata file for ChromeTabbedActivity gets deleted before attempting to merge
@@ -336,7 +345,8 @@ public class TabModelMergingTest {
         // Destroy ChromeTabbedActivity2. ChromeTabbedActivity should have been destroyed during the
         // merge.
         mActivity2.finishAndRemoveTask();
-        CriteriaHelper.pollUiThread(new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria("Both activitie should be destroyed."
+                + "CTA state: " + mActivity1State + " - CTA2State: " + mActivity2State) {
             @Override
             public boolean isSatisfied() {
                 return mActivity1State == ActivityState.DESTROYED
@@ -355,7 +365,7 @@ public class TabModelMergingTest {
     @Test
     @LargeTest
     @Feature({"TabPersistentStore", "MultiWindow"})
-    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    @Restriction({UiRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     public void testMergeWhileInTabSwitcher() throws Exception {
         OverviewModeBehaviorWatcher overviewModeWatcher = new OverviewModeBehaviorWatcher(
                 mActivity1.getLayoutManager(), true, false);

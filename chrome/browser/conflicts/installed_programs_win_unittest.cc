@@ -7,9 +7,7 @@
 #include <map>
 
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "chrome/browser/conflicts/msi_util_win.h"
@@ -62,7 +60,8 @@ class MockMsiUtil : public MsiUtil {
 
 class TestInstalledPrograms : public InstalledPrograms {
  public:
-  using InstalledPrograms::Initialize;
+  explicit TestInstalledPrograms(std::unique_ptr<MsiUtil> msi_util)
+      : InstalledPrograms(std::move(msi_util)) {}
 };
 
 class InstalledProgramsTest : public testing::Test {
@@ -114,22 +113,18 @@ class InstalledProgramsTest : public testing::Test {
                             program_info.install_location.c_str());
   }
 
-  TestInstalledPrograms& installed_programs() { return installed_programs_; }
+  TestInstalledPrograms& installed_programs() { return *installed_programs_; }
 
-  void InitializeInstalledProgramsSynchronously() {
-    installed_programs_.Initialize(
-        base::Closure(), base::MakeUnique<MockMsiUtil>(component_paths_map_));
-    scoped_task_environment_.RunUntilIdle();
+  void InitializeInstalledPrograms() {
+    installed_programs_ = std::make_unique<TestInstalledPrograms>(
+        std::make_unique<MockMsiUtil>(component_paths_map_));
   }
 
  private:
-  base::test::ScopedTaskEnvironment scoped_task_environment_;
   registry_util::RegistryOverrideManager registry_override_manager_;
 
-  TestInstalledPrograms installed_programs_;
+  std::unique_ptr<TestInstalledPrograms> installed_programs_;
 
-  // This should not get modified after InitializeInstalledPrograms() is called
-  // because it will end up being accessed on a different thread by MockMsiUtil.
   std::map<base::string16, std::vector<base::string16>> component_paths_map_;
 
   DISALLOW_COPY_AND_ASSIGN(InstalledProgramsTest);
@@ -175,14 +170,14 @@ TEST_F(InstalledProgramsTest, InvalidEntries) {
   for (const auto& test_case : kTestCases)
     AddFakeProgram(test_case);
 
-  InitializeInstalledProgramsSynchronously();
+  InitializeInstalledPrograms();
 
   // None of the invalid entries were picked up.
   const base::FilePath valid_child_file =
       base::FilePath(kInstallLocation).Append(L"file.dll");
-  std::vector<base::string16> program_names;
-  EXPECT_FALSE(installed_programs().GetInstalledProgramNames(valid_child_file,
-                                                             &program_names));
+  std::vector<InstalledPrograms::ProgramInfo> programs;
+  EXPECT_FALSE(
+      installed_programs().GetInstalledPrograms(valid_child_file, &programs));
 }
 
 // Tests InstalledPrograms on a valid entry with an InstallLocation.
@@ -201,22 +196,25 @@ TEST_F(InstalledProgramsTest, InstallLocation) {
 
   AddFakeProgram(kTestCase);
 
-  InitializeInstalledProgramsSynchronously();
+  InitializeInstalledPrograms();
 
   // Child file path.
   const base::FilePath valid_child_file =
       base::FilePath(kInstallLocation).Append(L"file.dll");
-  std::vector<base::string16> program_names;
-  EXPECT_TRUE(installed_programs().GetInstalledProgramNames(valid_child_file,
-                                                            &program_names));
-  ASSERT_EQ(1u, program_names.size());
-  EXPECT_EQ(kTestCase.common_info.display_name, program_names[0]);
+  std::vector<InstalledPrograms::ProgramInfo> programs;
+  EXPECT_TRUE(
+      installed_programs().GetInstalledPrograms(valid_child_file, &programs));
+  ASSERT_EQ(1u, programs.size());
+  EXPECT_EQ(kTestCase.common_info.display_name, programs[0].name);
+  EXPECT_EQ(HKEY_CURRENT_USER, programs[0].registry_root);
+  EXPECT_FALSE(programs[0].registry_key_path.empty());
+  EXPECT_EQ(0u, programs[0].registry_wow64_access);
 
   // Non-child file path.
   const base::FilePath invalid_child_file(
       L"c:\\program files\\another program\\test.dll");
-  EXPECT_FALSE(installed_programs().GetInstalledProgramNames(invalid_child_file,
-                                                             &program_names));
+  EXPECT_FALSE(
+      installed_programs().GetInstalledPrograms(invalid_child_file, &programs));
 }
 
 // Tests InstalledPrograms on a valid MSI entry.
@@ -239,23 +237,26 @@ TEST_F(InstalledProgramsTest, Msi) {
 
   AddFakeProgram(kTestCase);
 
-  InitializeInstalledProgramsSynchronously();
+  InitializeInstalledPrograms();
 
   // Checks that all the files match the program.
   for (const auto& component : kTestCase.components) {
-    std::vector<base::string16> program_names;
-    EXPECT_TRUE(installed_programs().GetInstalledProgramNames(
-        base::FilePath(component), &program_names));
-    ASSERT_EQ(1u, program_names.size());
-    EXPECT_EQ(kTestCase.common_info.display_name, program_names[0]);
+    std::vector<InstalledPrograms::ProgramInfo> programs;
+    EXPECT_TRUE(installed_programs().GetInstalledPrograms(
+        base::FilePath(component), &programs));
+    ASSERT_EQ(1u, programs.size());
+    EXPECT_EQ(kTestCase.common_info.display_name, programs[0].name);
+    EXPECT_EQ(HKEY_CURRENT_USER, programs[0].registry_root);
+    EXPECT_FALSE(programs[0].registry_key_path.empty());
+    EXPECT_EQ(0u, programs[0].registry_wow64_access);
   }
 
   // Any other file shouldn't work.
   const base::FilePath invalid_child_file(
       L"c:\\program files\\another program\\test.dll");
-  std::vector<base::string16> program_names;
-  EXPECT_FALSE(installed_programs().GetInstalledProgramNames(invalid_child_file,
-                                                             &program_names));
+  std::vector<InstalledPrograms::ProgramInfo> programs;
+  EXPECT_FALSE(
+      installed_programs().GetInstalledPrograms(invalid_child_file, &programs));
 }
 
 // Checks that if a file matches an InstallLocation and an MSI component, only
@@ -287,17 +288,18 @@ TEST_F(InstalledProgramsTest, PrioritizeMsi) {
   AddFakeProgram(kInstallLocationFakeProgram);
   AddFakeProgram(kMsiFakeProgram);
 
-  InitializeInstalledProgramsSynchronously();
+  InitializeInstalledPrograms();
 
-  std::vector<base::string16> program_names;
-  EXPECT_TRUE(installed_programs().GetInstalledProgramNames(
-      base::FilePath(kMsiComponent), &program_names));
-  ASSERT_EQ(1u, program_names.size());
-  EXPECT_NE(kInstallLocationDisplayName, program_names[0]);
-  EXPECT_EQ(kMsiDisplayName, program_names[0]);
+  std::vector<InstalledPrograms::ProgramInfo> programs;
+  EXPECT_TRUE(installed_programs().GetInstalledPrograms(
+      base::FilePath(kMsiComponent), &programs));
+  ASSERT_EQ(1u, programs.size());
+  EXPECT_NE(kInstallLocationDisplayName, programs[0].name);
+  EXPECT_EQ(kMsiDisplayName, programs[0].name);
 }
 
-// Tests that if 2 entries with an InstallLocation exist, both are ignored.
+// Tests that if 2 entries with conflicting InstallLocation exist, both are
+// ignored.
 TEST_F(InstalledProgramsTest, ConflictingInstallLocations) {
   const wchar_t kValidUninstallString[] = L"c:\\an\\UninstallString.exe";
   const wchar_t kDisplayName1[] = L"DisplayName1";
@@ -323,9 +325,9 @@ TEST_F(InstalledProgramsTest, ConflictingInstallLocations) {
   AddFakeProgram(kFakeProgram1);
   AddFakeProgram(kFakeProgram2);
 
-  InitializeInstalledProgramsSynchronously();
+  InitializeInstalledPrograms();
 
-  std::vector<base::string16> program_names;
-  EXPECT_FALSE(installed_programs().GetInstalledProgramNames(
-      base::FilePath(kFile), &program_names));
+  std::vector<InstalledPrograms::ProgramInfo> programs;
+  EXPECT_FALSE(installed_programs().GetInstalledPrograms(base::FilePath(kFile),
+                                                         &programs));
 }

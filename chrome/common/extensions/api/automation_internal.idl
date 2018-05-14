@@ -25,6 +25,10 @@ namespace automationInternal {
     // The mouse coordinates when this event fired.
     double mouseX;
     double mouseY;
+
+
+    // ID of an action request resulting in this event.
+    long actionRequestID;
   };
 
   // All possible actions that can be performed on automation nodes.
@@ -36,7 +40,12 @@ namespace automationInternal {
     hitTest,
     makeVisible,
     resumeMedia,
-    setAccessibilityFocus,
+    scrollBackward,
+    scrollForward,
+    scrollUp,
+    scrollDown,
+    scrollLeft,
+    scrollRight,
     setSequentialFocusNavigationStartingPoint,
     setSelection,
     showContextMenu,
@@ -50,6 +59,7 @@ namespace automationInternal {
     long treeID;
     long automationNodeID;
     ActionType actionType;
+    long? requestID;
   };
 
   // Arguments for the customAction action. Those args are passed to
@@ -76,7 +86,6 @@ namespace automationInternal {
 
   // Arguments for the enableTab function.
   dictionary EnableTabParams {
-    long routingID;
     long? tabID;
   };
 
@@ -114,8 +123,7 @@ namespace automationInternal {
     static void enableFrame(long tree_id);
 
     // Enables desktop automation.
-    static void enableDesktop(long routingID,
-                              EnableDesktopCallback callback);
+    static void enableDesktop(EnableDesktopCallback callback);
 
     // Performs an action on an automation node.
     static void performAction(PerformActionRequiredParams args,
@@ -142,5 +150,7 @@ namespace automationInternal {
     static void onNodesRemoved(long treeID, long[] nodeIDs);
 
     static void onAccessibilityTreeSerializationError(long treeID);
+
+    static void onActionResult(long treeID, long requestID, boolean result);
   };
 };

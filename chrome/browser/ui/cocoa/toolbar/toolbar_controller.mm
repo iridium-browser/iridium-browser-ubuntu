@@ -4,10 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 
-#include <sys/stat.h>
 #include <algorithm>
 
-#include "base/debug/crash_logging.h"
 #include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
@@ -31,6 +29,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/app_menu/app_menu_controller.h"
 #import "chrome/browser/ui/cocoa/background_gradient_view.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
 #include "chrome/browser/ui/cocoa/drag_util.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
@@ -53,11 +52,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
@@ -67,11 +64,11 @@
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/web_contents.h"
+#include "third_party/metrics_proto/omnibox_event.pb.h"
 #import "ui/base/cocoa/menu_controller.h"
 #import "ui/base/cocoa/nsview_additions.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/image/image.h"
 
@@ -256,25 +253,6 @@ class NotificationBridge : public AppMenuIconController::Delegate {
 }
 
 - (void)viewDidLoadImpl {
-  // Temporary: collect information about a potentially missing or inaccessible
-  // nib (https://crbug.com/685985)
-  NSString* nibPath = [self.nibBundle pathForResource:@"Toolbar" ofType:@"nib"];
-  struct stat sb;
-  int nibErrno = 0;
-  if (stat(nibPath.fileSystemRepresentation, &sb) != 0) {
-    nibErrno = errno;
-  }
-  NSString* closestPath = nibPath;
-  while (closestPath && stat(closestPath.fileSystemRepresentation, &sb) != 0) {
-    closestPath = [closestPath stringByDeletingLastPathComponent];
-  }
-  base::debug::ScopedCrashKey nibCrashKey {
-    crash_keys::mac::kToolbarNibInfo,
-        [NSString stringWithFormat:@"errno: %d nib: %@ closest: %@", nibErrno,
-                                   nibPath, closestPath]
-            .UTF8String
-  };
-
   // When linking and running on 10.10+, both -awakeFromNib and -viewDidLoad may
   // be called, don't initialize twice.
   if (locationBarView_) {
@@ -332,7 +310,8 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   // Adjust the menu button's position.
   NSRect menuButtonFrame = [appMenuButton_ frame];
   if (isRTL) {
-    menuButtonFrame.origin.x = [ToolbarController appMenuPadding];
+    menuButtonFrame.origin.x =
+        [ToolbarController appMenuPadding] + kButtonInset;
   } else {
     CGFloat menuButtonFrameMaxX =
         NSMaxX(toolbarBounds) - [ToolbarController appMenuPadding];
@@ -375,7 +354,7 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   containerFrame.origin.y = locationBarFrame.origin.y + kContainerYOffset;
   containerFrame.size.height = toolbarButtonSize.height;
   if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
-    containerFrame.origin.x = NSMinX(locationBarFrame);
+    containerFrame.origin.x = NSMinX(locationBarFrame) - kButtonInset;
   [browserActionsContainerView_ setFrame:containerFrame];
   [browserActionsContainerView_ setAutoresizingMask:trailingButtonMask];
 
@@ -520,7 +499,7 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   [[backButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
-  NSString* helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_BACK);
+  NSString* helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCDESCRIPTION_BACK);
   [[backButton_ cell]
       accessibilitySetOverrideValue:helpTag
                        forAttribute:NSAccessibilityHelpAttribute];
@@ -529,7 +508,7 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   [[forwardButton_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
-  helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_TOOLTIP_FORWARD);
+  helpTag = l10n_util::GetNSStringWithFixup(IDS_ACCDESCRIPTION_FORWARD);
   [[forwardButton_ cell]
       accessibilitySetOverrideValue:helpTag
                        forAttribute:NSAccessibilityHelpAttribute];
@@ -546,6 +525,13 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   [[locationBar_ cell]
       accessibilitySetOverrideValue:description
                        forAttribute:NSAccessibilityDescriptionAttribute];
+  // Expose Cmd+L shortcut in help for now.
+  // TODO(aleventhal) Key shortcuts attribute should eventually get
+  // its own field. Follow what WebKit does for aria-keyshortcuts, see
+  // https://bugs.webkit.org/show_bug.cgi?id=159215 (WebKit bug).
+  [[locationBar_ cell]
+      accessibilitySetOverrideValue:@"\u2318L"  // Expose Cmd+L shortcut.
+                       forAttribute:NSAccessibilityHelpAttribute];
   description = l10n_util::GetNSStringWithFixup(IDS_ACCNAME_APP);
   [[appMenuButton_ cell]
       accessibilitySetOverrideValue:description
@@ -971,6 +957,10 @@ class NotificationBridge : public AppMenuIconController::Delegate {
   if (dX == 0)
     return;
 
+  if (dX < 0) {
+    // Clip to the minimum width. Speculative fix for crbug.com/746944.
+    dX = std::max(dX, -location_bar_flex);
+  }
   // Ensure that the location bar is in its proper place.
   locationFrame.size.width += dX;
   if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
@@ -997,7 +987,7 @@ class NotificationBridge : public AppMenuIconController::Delegate {
 - (NSPoint)appMenuBubblePoint {
   NSRect frame = appMenuButton_.frame;
   NSPoint point;
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (chrome::ShowAllDialogsWithViewsToolkit()) {
     // Use the bottom right for MD-style anchoring (no arrow).
     point = NSMakePoint(NSMaxX(frame), NSMinY(frame));
   } else {

@@ -24,8 +24,11 @@ class BrowserView;
 class DownloadItemView;
 
 namespace content {
-class DownloadItem;
 class PageNavigator;
+}
+
+namespace download {
+class DownloadItem;
 }
 
 namespace views {
@@ -94,7 +97,7 @@ class DownloadShelfView : public views::AccessiblePaneView,
 
  protected:
   // DownloadShelf:
-  void DoAddDownload(content::DownloadItem* download) override;
+  void DoAddDownload(download::DownloadItem* download) override;
   void DoOpen() override;
   void DoClose(CloseReason reason) override;
   void DoHide() override;
@@ -132,7 +135,7 @@ class DownloadShelfView : public views::AccessiblePaneView,
   SkColor GetTextColorForIconMd();
 
   // The browser for this shelf.
-  Browser* browser_;
+  Browser* const browser_;
 
   // The animation for adding new items to the shelf.
   gfx::SlideAnimation new_item_animation_;

@@ -8,11 +8,32 @@
 #include "core/CoreExport.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/heap/Handle.h"
+#include "platform/wtf/text/WTFString.h"
 
 namespace blink {
 
 class LayoutObject;
 class ScrollableArea;
+
+static const int kMaxSerializedSelectorLength = 500;
+
+struct SerializedAnchor {
+  SerializedAnchor() : simhash(0) {}
+  SerializedAnchor(const String& s, const LayoutPoint& p)
+      : selector(s), relative_offset(p), simhash(0) {}
+  SerializedAnchor(const String& s, const LayoutPoint& p, uint64_t hash)
+      : selector(s), relative_offset(p), simhash(hash) {}
+
+  bool IsValid() const { return !selector.IsEmpty(); }
+
+  // Used to locate an element previously used as a scroll anchor.
+  const String selector;
+  // Used to restore the previous offset of the element within its scroller.
+  const LayoutPoint relative_offset;
+  // Used to compare the similarity of a prospective anchor's contents to the
+  // contents at the time the previous anchor was saved.
+  const uint64_t simhash;
+};
 
 // Scrolls to compensate for layout movements (bit.ly/scroll-anchoring).
 class CORE_EXPORT ScrollAnchor final {
@@ -33,6 +54,9 @@ class CORE_EXPORT ScrollAnchor final {
   // The LayoutObject we are currently anchored to. Lazily computed during
   // notifyBeforeLayout() and cached until the next call to clear().
   LayoutObject* AnchorObject() const { return anchor_object_; }
+
+  // Called when the scroller attached to this anchor is being destroyed.
+  void Dispose();
 
   // Indicates that this ScrollAnchor, and all ancestor ScrollAnchors, should
   // compute new anchor nodes on their next notifyBeforeLayout().
@@ -58,13 +82,33 @@ class CORE_EXPORT ScrollAnchor final {
   // Only meaningful if anchorObject() is non-null.
   Corner GetCorner() const { return corner_; }
 
+  // This enum must remain in sync with the corresponding enum in enums.xml.
+  enum RestorationStatus {
+    kSuccess = 0,
+    kFailedNoMatches,
+    kFailedNoValidMatches,
+    kFailedBadSelector,
+    kStatusCount  // Special value used to count the number of enum values; not
+                  // to be used as an actual status. Add new values above.
+  };
+
+  // Attempt to restore |serialized_anchor| by scrolling to the element
+  // identified by its selector, adjusting by its relative_offset.
+  bool RestoreAnchor(const SerializedAnchor&);
+
+  // Get the serialized representation of the current anchor_object_.
+  // If there is not currently an anchor_object_, this will attempt to find one.
+  // Repeated calls will re-use the previously calculated selector until the
+  // anchor_object it corresponds to is cleared.
+  const SerializedAnchor GetSerializedAnchor();
+
   // Checks if we hold any references to the specified object.
   bool RefersTo(const LayoutObject*) const;
 
   // Notifies us that an object will be removed from the layout tree.
   void NotifyRemoved(LayoutObject*);
 
-  DEFINE_INLINE_TRACE() { visitor->Trace(scroller_); }
+  void Trace(blink::Visitor* visitor) { visitor->Trace(scroller_); }
 
  private:
   void FindAnchor();
@@ -102,6 +146,10 @@ class CORE_EXPORT ScrollAnchor final {
   // Location of m_layoutObject relative to scroller at time of
   // notifyBeforeLayout().
   LayoutPoint saved_relative_offset_;
+
+  // Previously calculated css selector that uniquely locates the current
+  // anchor_object_. Cleared when the anchor_object_ is cleared.
+  String saved_selector_;
 
   // We suppress scroll anchoring after a style change on the anchor node or
   // one of its ancestors, if that change might have caused the node to move.

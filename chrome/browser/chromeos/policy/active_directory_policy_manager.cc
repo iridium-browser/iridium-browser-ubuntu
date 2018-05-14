@@ -21,6 +21,11 @@ namespace {
 // https://technet.microsoft.com/en-us/library/cc940895.aspx
 constexpr base::TimeDelta kFetchInterval = base::TimeDelta::FromMinutes(90);
 
+void RunRefreshCallback(base::OnceCallback<void(bool success)> callback,
+                        authpolicy::ErrorType error) {
+  std::move(callback).Run(error == authpolicy::ERROR_NONE);
+}
+
 }  // namespace
 
 namespace policy {
@@ -61,7 +66,7 @@ void ActiveDirectoryPolicyManager::Init(SchemaRegistry* registry) {
   // Does nothing if |store_| hasn't yet initialized.
   PublishPolicy();
 
-  scheduler_ = base::MakeUnique<PolicyScheduler>(
+  scheduler_ = std::make_unique<PolicyScheduler>(
       base::BindRepeating(&ActiveDirectoryPolicyManager::DoPolicyFetch,
                           weak_ptr_factory_.GetWeakPtr()),
       base::BindRepeating(&ActiveDirectoryPolicyManager::OnPolicyFetched,
@@ -146,7 +151,7 @@ void ActiveDirectoryPolicyManager::PublishPolicy() {
   if (!store_->is_initialized()) {
     return;
   }
-  std::unique_ptr<PolicyBundle> bundle = base::MakeUnique<PolicyBundle>();
+  std::unique_ptr<PolicyBundle> bundle = std::make_unique<PolicyBundle>();
   PolicyMap& policy_map =
       bundle->Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()));
   policy_map.CopyFrom(store_->policy_map());
@@ -168,9 +173,11 @@ void ActiveDirectoryPolicyManager::DoPolicyFetch(
       thread_manager->GetAuthPolicyClient();
   DCHECK(auth_policy_client);
   if (account_id_ == EmptyAccountId()) {
-    auth_policy_client->RefreshDevicePolicy(std::move(callback));
+    auth_policy_client->RefreshDevicePolicy(
+        base::BindOnce(&RunRefreshCallback, std::move(callback)));
   } else {
-    auth_policy_client->RefreshUserPolicy(account_id_, std::move(callback));
+    auth_policy_client->RefreshUserPolicy(
+        account_id_, base::BindOnce(&RunRefreshCallback, std::move(callback)));
   }
 }
 

@@ -16,10 +16,10 @@
 
 ******************************************************************/
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_GAIN_DEQUANT_H_
-#define WEBRTC_MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_GAIN_DEQUANT_H_
+#ifndef MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_GAIN_DEQUANT_H_
+#define MODULES_AUDIO_CODING_CODECS_ILBC_MAIN_SOURCE_GAIN_DEQUANT_H_
 
-#include "defines.h"
+#include "modules/audio_coding/codecs/ilbc/defines.h"
 
 /*----------------------------------------------------------------*
  *  decoder for quantized gains in the gain-shape coding of

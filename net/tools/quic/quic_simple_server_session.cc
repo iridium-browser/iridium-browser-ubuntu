@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "net/quic/core/proto/cached_network_parameters.pb.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/platform/api/quic_flags.h"
 #include "net/quic/platform/api/quic_logging.h"
@@ -44,7 +43,7 @@ QuicSimpleServerSession::CreateQuicCryptoServerStream(
     QuicCompressedCertsCache* compressed_certs_cache) {
   return new QuicCryptoServerStream(
       crypto_config, compressed_certs_cache,
-      FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support, this,
+      GetQuicReloadableFlag(enable_quic_stateless_reject_support), this,
       stream_helper());
 }
 
@@ -101,22 +100,15 @@ QuicSpdyStream* QuicSimpleServerSession::CreateIncomingDynamicStream(
   return stream;
 }
 
-QuicSimpleServerStream* QuicSimpleServerSession::CreateOutgoingDynamicStream(
-    SpdyPriority priority) {
+QuicSimpleServerStream* QuicSimpleServerSession::CreateOutgoingDynamicStream() {
   if (!ShouldCreateOutgoingDynamicStream()) {
     return nullptr;
   }
 
   QuicSimpleServerStream* stream = new QuicSimpleServerStream(
       GetNextOutgoingStreamId(), this, response_cache_);
-  stream->SetPriority(priority);
   ActivateStream(QuicWrapUnique(stream));
   return stream;
-}
-
-std::unique_ptr<QuicStream> QuicSimpleServerSession::CreateStream(
-    QuicStreamId id) {
-  return QuicMakeUnique<QuicSimpleServerStream>(id, this, response_cache_);
 }
 
 void QuicSimpleServerSession::CloseStreamInner(QuicStreamId stream_id,
@@ -149,7 +141,13 @@ void QuicSimpleServerSession::HandleRstOnValidNonexistentStream(
     size_t index = (frame.stream_id - next_outgoing_stream_id()) / 2;
     DCHECK(index <= promised_streams_.size());
     promised_streams_[index].is_cancelled = true;
-    connection()->SendRstStream(frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT, 0);
+    if (use_control_frame_manager()) {
+      control_frame_manager().WriteOrBufferRstStream(
+          frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT, 0);
+      connection()->OnStreamReset(frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT);
+    } else {
+      connection()->SendRstStream(frame.stream_id, QUIC_RST_ACKNOWLEDGEMENT, 0);
+    }
   }
 }
 
@@ -187,10 +185,7 @@ void QuicSimpleServerSession::SendPushPromise(QuicStreamId original_stream_id,
 }
 
 void QuicSimpleServerSession::HandlePromisedPushRequests() {
-  while (!promised_streams_.empty() &&
-         (FLAGS_quic_reloadable_flag_quic_refactor_stream_creation
-              ? ShouldCreateOutgoingDynamicStream2()
-              : ShouldCreateOutgoingDynamicStream())) {
+  while (!promised_streams_.empty() && ShouldCreateOutgoingDynamicStream()) {
     PromisedStreamInfo& promised_info = promised_streams_.front();
     DCHECK_EQ(next_outgoing_stream_id(), promised_info.stream_id);
 
@@ -202,13 +197,12 @@ void QuicSimpleServerSession::HandlePromisedPushRequests() {
     }
 
     QuicSimpleServerStream* promised_stream =
-        static_cast<QuicSimpleServerStream*>(
-            FLAGS_quic_reloadable_flag_quic_refactor_stream_creation
-                ? MaybeCreateOutgoingDynamicStream(promised_info.priority)
-                : CreateOutgoingDynamicStream(promised_info.priority));
+        static_cast<QuicSimpleServerStream*>(CreateOutgoingDynamicStream());
     DCHECK_NE(promised_stream, nullptr);
     DCHECK_EQ(promised_info.stream_id, promised_stream->id());
     QUIC_DLOG(INFO) << "created server push stream " << promised_stream->id();
+
+    promised_stream->SetPriority(promised_info.priority);
 
     SpdyHeaderBlock request_headers(std::move(promised_info.request_headers));
 

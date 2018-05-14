@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/ios/imageset.gni")
+import("//build/config/ios/asset_catalog.gni")
 
 # List all resources used by Chrome on iOS (including those used by the private
 # downstream repository).  Not all resources are listed as there are thousands
@@ -14,6 +14,7 @@ _image_sets = [
   "action/ic_account_circle",
   "action/ic_account_circle_48pt",
   "action/ic_delete",
+  "action/ic_done",
   "action/ic_feedback",
   "action/ic_help",
   "action/ic_info",
@@ -28,10 +29,13 @@ _image_sets = [
   "communication/ic_email",
   "communication/ic_message",
   "content/ic_link",
+  "content/ic_send",
+  "content/ic_undo",
   "editor/ic_mode_edit",
   "file/ic_file_download",
   "hardware/ic_desktop_windows",
   "hardware/ic_desktop_windows_white",
+  "hardware/ic_keyboard_arrow_down",
   "hardware/ic_keyboard_arrow_right",
   "hardware/ic_mouse",
   "image/ic_photo_camera",

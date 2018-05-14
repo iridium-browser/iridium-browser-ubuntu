@@ -13,6 +13,7 @@ Polymer({
   properties: {
     checked: {
       type: Boolean,
+      value: false,
       reflectToAttribute: true,
       observer: 'checkedChanged_',
     },
@@ -47,7 +48,6 @@ Polymer({
     'blur': 'updatePressed_',
     'down': 'updatePressed_',
     'focus': 'updatePressed_',
-    'tap': 'onTap_',
     'up': 'updatePressed_',
   },
 
@@ -87,15 +87,9 @@ Polymer({
    * @private
    */
   onIndicatorTap_: function(e) {
-    // Disallow <controlled-radio-button on-tap="..."> when controlled.
+    // Disallow <controlled-radio-button on-click="..."> when controlled.
     e.preventDefault();
     e.stopPropagation();
-  },
-
-  /** @private */
-  onTap_: function() {
-    if (!this.controlled_)
-      this.checked = true;
   },
 
   /**

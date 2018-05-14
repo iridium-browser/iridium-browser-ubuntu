@@ -28,7 +28,6 @@ bool SpokenFeedbackEventRewriterDelegate::IsSpokenFeedbackEnabled() const {
 bool SpokenFeedbackEventRewriterDelegate::DispatchKeyEventToChromeVox(
     const ui::KeyEvent& key_event,
     bool capture) {
-
   // Always capture the Search key.
   capture |= key_event.IsCommandDown();
 
@@ -54,10 +53,6 @@ bool SpokenFeedbackEventRewriterDelegate::DispatchKeyEventToChromeVox(
   // Forward all key events to ChromeVox's background page.
   chromeos::ForwardKeyToExtension(key_event, host);
 
-  if ((key_event.key_code() >= ui::VKEY_F1) &&
-      (key_event.key_code() <= ui::VKEY_F12))
-    return false;
-
   return capture;
 }
 
@@ -65,10 +60,6 @@ void SpokenFeedbackEventRewriterDelegate::HandleKeyboardEvent(
     content::WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
   ui::KeyEvent key_event(*static_cast<ui::KeyEvent*>(event.os_event));
-
-  if ((key_event.key_code() >= ui::VKEY_F1) &&
-      (key_event.key_code() <= ui::VKEY_F12))
-    return;
 
   ui::EventSink* sink =
       ash::Shell::GetPrimaryRootWindow()->GetHost()->event_sink();
@@ -83,8 +74,7 @@ SpokenFeedbackEventRewriter::SpokenFeedbackEventRewriter() {
   delegate_.reset(new SpokenFeedbackEventRewriterDelegate());
 }
 
-SpokenFeedbackEventRewriter::~SpokenFeedbackEventRewriter() {
-}
+SpokenFeedbackEventRewriter::~SpokenFeedbackEventRewriter() {}
 
 void SpokenFeedbackEventRewriter::SetDelegateForTest(
     std::unique_ptr<SpokenFeedbackEventRewriterDelegate> delegate) {

@@ -4,7 +4,7 @@
 
 #include "services/service_manager/embedder/main.h"
 
-#include "base/allocator/features.h"
+#include "base/allocator/buildflags.h"
 #include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -21,7 +21,6 @@
 #include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/task_scheduler/task_scheduler.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_log.h"
@@ -106,7 +105,7 @@ class ServiceProcessLauncherDelegateImpl
   DISALLOW_COPY_AND_ASSIGN(ServiceProcessLauncherDelegateImpl);
 };
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
 // Setup signal-handling state: resanitize most signals, ignore SIGPIPE.
 void SetupSignalHandlers() {
@@ -157,7 +156,7 @@ void PopulateFDsFromCommandLine() {
   }
 }
 
-#endif  // defined(OS_POSIX) && !defined(OS_ANDROID)
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
 
 void CommonSubprocessInit() {
 #if defined(OS_WIN)
@@ -194,7 +193,10 @@ void NonEmbedderProcessInit() {
   // names in all loaded libraries will be cached.
   // NOTE: On Chrome OS, crash reporting for the root process and non-browser
   // service processes is handled by the OS-level crash_reporter.
-  base::debug::EnableInProcessStackDumping();
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableInProcessStackTraces)) {
+    base::debug::EnableInProcessStackDumping();
+  }
 #endif
 
   base::TaskScheduler::CreateAndStartWithDefaultParams("ServiceManagerProcess");
@@ -219,24 +221,10 @@ void WaitForDebuggerIfNecessary() {
   base::debug::WaitForDebugger(120, true);
 }
 
-// Quits |run_loop| if the |identity| of the quitting service is critical to the
-// system (e.g. the window manager). Used in the main process.
-void OnInstanceQuit(MainDelegate* delegate,
-                    base::RunLoop* run_loop,
-                    int* exit_code,
-                    const service_manager::Identity& identity) {
-  if (delegate->ShouldTerminateServiceManagerOnInstanceQuit(identity,
-                                                            exit_code)) {
-    run_loop->Quit();
-  }
-}
-
 int RunServiceManager(MainDelegate* delegate) {
   NonEmbedderProcessInit();
 
   base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
-
-  base::SequencedWorkerPool::EnableWithRedirectionToTaskSchedulerForProcess();
 
   base::Thread ipc_thread("IPC thread");
   ipc_thread.StartWithOptions(
@@ -251,10 +239,6 @@ int RunServiceManager(MainDelegate* delegate) {
       &service_process_launcher_delegate, delegate->CreateServiceCatalog());
 
   base::RunLoop run_loop;
-  int exit_code = 0;
-  background_service_manager.SetInstanceQuitCallback(
-      base::Bind(&OnInstanceQuit, delegate, &run_loop, &exit_code));
-
   delegate->OnServiceManagerInitialized(run_loop.QuitClosure(),
                                         &background_service_manager);
   run_loop.Run();
@@ -262,7 +246,7 @@ int RunServiceManager(MainDelegate* delegate) {
   ipc_thread.Stop();
   base::TaskScheduler::GetInstance()->Shutdown();
 
-  return exit_code;
+  return 0;
 }
 
 void InitializeResources() {
@@ -363,7 +347,7 @@ int Main(const MainParams& params) {
 
   base::CommandLine::Init(argc, argv);
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
   PopulateFDsFromCommandLine();
 #endif
 
@@ -374,7 +358,7 @@ int Main(const MainParams& params) {
 
 // On Android setlocale() is not supported, and we don't override the signal
 // handlers so we can get a stack trace when crashing.
-#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
   // Set C library locale to make sure CommandLine can parse argument values in
   // the correct encoding.
   setlocale(LC_ALL, "");
@@ -396,7 +380,7 @@ int Main(const MainParams& params) {
   // Each "main" needs to flush this pool right before it goes into its main
   // event loop to get rid of the cruft.
   std::unique_ptr<base::mac::ScopedNSAutoreleasePool> autorelease_pool =
-      base::MakeUnique<base::mac::ScopedNSAutoreleasePool>();
+      std::make_unique<base::mac::ScopedNSAutoreleasePool>();
   init_params.autorelease_pool = autorelease_pool.get();
   InitializeMac();
 #endif

@@ -40,8 +40,6 @@ class InputHandlerWrapper : public ui::InputHandlerProxyClient {
 
   // InputHandlerProxyClient implementation.
   void WillShutdown() override;
-  void TransferActiveWheelFlingAnimation(
-      const blink::WebActiveWheelFlingParameters& params) override;
   void DispatchNonBlockingEventToMainThread(
       ui::WebScopedInputEvent event,
       const ui::LatencyInfo& latency_info) override;
@@ -49,15 +47,20 @@ class InputHandlerWrapper : public ui::InputHandlerProxyClient {
       blink::WebGestureDevice deviceSource,
       const blink::WebFloatPoint& velocity,
       const blink::WebSize& cumulativeScroll) override;
-  void DidOverscroll(const gfx::Vector2dF& accumulated_overscroll,
-                     const gfx::Vector2dF& latest_overscroll_delta,
-                     const gfx::Vector2dF& current_fling_velocity,
-                     const gfx::PointF& causal_event_viewport_point) override;
+  void DidOverscroll(
+      const gfx::Vector2dF& accumulated_overscroll,
+      const gfx::Vector2dF& latest_overscroll_delta,
+      const gfx::Vector2dF& current_fling_velocity,
+      const gfx::PointF& causal_event_viewport_point,
+      const cc::OverscrollBehavior& overscroll_behavior) override;
   void DidStopFlinging() override;
   void DidAnimateForInput() override;
   void GenerateScrollBeginAndSendToMainThread(
       const blink::WebGestureEvent& update_event) override;
-  void SetWhiteListedTouchAction(cc::TouchAction touch_action) override;
+  void SetWhiteListedTouchAction(
+      cc::TouchAction touch_action,
+      uint32_t unique_touch_event_id,
+      ui::InputHandlerProxy::EventDisposition event_disposition) override;
 
  private:
   InputHandlerManager* input_handler_manager_;

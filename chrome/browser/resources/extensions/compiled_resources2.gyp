@@ -4,29 +4,16 @@
 {
   'targets': [
     {
-      'target_name': 'shortcut_util',
-      'dependencies': [
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
-      ],
-      'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
-    },
-    {
-      'target_name': 'drag_and_drop_handler',
-      'dependencies': [
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
-        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:cr',
-        '<(DEPTH)/ui/webui/resources/js/cr/ui/compiled_resources2.gyp:drag_wrapper',
-      ],
-      'includes': ['../../../../third_party/closure_compiler/compile_js2.gypi'],
-    },
-    {
       'target_name': 'extensions',
+      'dependencies': [
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:webui_listener_tracker',
+      ],
       'variables': {
         'script_args': ['--custom_sources'],
         'source_files': [
           '<(DEPTH)/ui/webui/resources/js/promise_resolver.js',
           '<(DEPTH)/ui/webui/resources/js/load_time_data.js',
+          '<(DEPTH)/ui/webui/resources/js/parse_html_subset.js',
           '<(DEPTH)/ui/webui/resources/js/cr.js',
           '<(DEPTH)/ui/webui/resources/js/cr/ui/array_data_model.js',
           '<(DEPTH)/ui/webui/resources/js/cr/ui/list.js',
@@ -64,12 +51,12 @@
           'extension_command_list.js',
           '<(DEPTH)/ui/webui/resources/js/cr/ui/controlled_indicator.js',
           'extension_error_overlay.js',
-          'drag_and_drop_handler.js',
+          '../md_extensions/drag_and_drop_handler.js',
           '<(DEPTH)/ui/webui/resources/js/cr/ui/list_selection_model.js',
           '<(DEPTH)/third_party/jstemplate/jstemplate.js',
           'chromeos/kiosk_app_list.js',
           '<(DEPTH)/third_party/closure_compiler/externs/developer_private.js',
-          'shortcut_util.js',
+          '../md_extensions/shortcut_util.js',
           'pack_extension_overlay.js',
         ],
       },

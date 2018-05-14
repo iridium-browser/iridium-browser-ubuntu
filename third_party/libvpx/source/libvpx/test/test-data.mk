@@ -734,6 +734,8 @@ endif  # CONFIG_VP9_HIGHBITDEPTH
 # Invalid files for testing libvpx error checking.
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-bug-1443.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-bug-1443.ivf.res
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-token-partition.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-token-partition.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-01-v3.webm
@@ -774,6 +776,8 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-12-droppable_1.ivf.s367
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-12-droppable_1.ivf.s3676_r01-05_b6-.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-12-droppable_1.ivf.s73804_r01-05_b6-.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-12-droppable_1.ivf.s73804_r01-05_b6-.ivf.res
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-21-resize_inter_320x180_5_3-4.webm.ivf.s45551_r01-05_b6-.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-21-resize_inter_320x180_5_3-4.webm.ivf.s45551_r01-05_b6-.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp91-2-mixedrefcsp-444to420.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp91-2-mixedrefcsp-444to420.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-2-07-frame_parallel-1.webm
@@ -876,3 +880,5 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-21-resize_inter_1920x1080_7_3-4
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-21-resize_inter_1920x1080_7_3-4.webm.md5
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-22-svc_1280x720_3.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-22-svc_1280x720_3.ivf.md5
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-22-svc_1280x720_1.webm
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += vp90-2-22-svc_1280x720_1.webm.md5

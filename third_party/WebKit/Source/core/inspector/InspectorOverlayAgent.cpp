@@ -28,6 +28,7 @@
 
 #include "core/inspector/InspectorOverlayAgent.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "bindings/core/v8/ScriptController.h"
@@ -38,33 +39,33 @@
 #include "core/dom/DOMNodeIds.h"
 #include "core/dom/Node.h"
 #include "core/dom/StaticNodeList.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/events/WebInputEventConversion.h"
-#include "core/exported/WebViewBase.h"
+#include "core/exported/WebViewImpl.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameClient.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/VisualViewport.h"
-#include "core/frame/WebLocalFrameBase.h"
+#include "core/frame/WebLocalFrameImpl.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/input/EventHandler.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InspectedFrames.h"
 #include "core/inspector/InspectorDOMAgent.h"
 #include "core/inspector/InspectorOverlayHost.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/EmptyClients.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/PageOverlay.h"
-#include "platform/ScriptForbiddenScope.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/CullRect.h"
 #include "platform/wtf/AutoReset.h"
 #include "public/platform/Platform.h"
+#include "public/platform/TaskType.h"
 #include "public/platform/WebData.h"
 #include "v8/include/v8.h"
 
@@ -97,7 +98,7 @@ Node* HoveredNodeForPoint(LocalFrame* frame,
   HitTestRequest request(hit_type);
   HitTestResult result(request,
                        frame->View()->RootFrameToContents(point_in_root_frame));
-  frame->ContentLayoutItem().HitTest(result);
+  frame->ContentLayoutObject()->HitTest(result);
   Node* node = result.InnerPossiblyPseudoNode();
   while (node && node->getNodeType() == Node::kTextNode)
     node = node->parentNode();
@@ -121,11 +122,9 @@ Node* HoveredNodeForEvent(LocalFrame* frame,
 }
 
 Node* HoveredNodeForEvent(LocalFrame* frame,
-                          const WebTouchEvent& event,
+                          const WebPointerEvent& event,
                           bool ignore_pointer_events_none) {
-  if (!event.touches_length)
-    return nullptr;
-  WebTouchPoint transformed_point = event.TouchPointInRootFrame(0);
+  WebPointerEvent transformed_point = event.WebPointerEventInRootFrame();
   return HoveredNodeForPoint(
       frame, RoundedIntPoint(transformed_point.PositionInWidget()),
       ignore_pointer_events_none);
@@ -143,6 +142,12 @@ bool ParseQuad(std::unique_ptr<protocol::Array<double>> quad_array,
   return true;
 }
 
+#if defined(OS_MACOSX)
+const int kCtrlOrMeta = WebInputEvent::kMetaKey;
+#else
+const int kCtrlOrMeta = WebInputEvent::kControlKey;
+#endif
+
 }  // namespace
 
 class InspectorOverlayAgent::InspectorPageOverlayDelegate final
@@ -159,8 +164,9 @@ class InspectorOverlayAgent::InspectorPageOverlayDelegate final
 
     LocalFrameView* view = overlay_->OverlayMainFrame()->View();
     DCHECK(!view->NeedsLayout());
-    view->Paint(graphics_context,
-                CullRect(IntRect(0, 0, view->Width(), view->Height())));
+    view->PaintWithLifecycleUpdate(
+        graphics_context, kGlobalPaintNormalPhase,
+        CullRect(IntRect(0, 0, view->Width(), view->Height())));
   }
 
  private:
@@ -175,7 +181,7 @@ class InspectorOverlayAgent::InspectorOverlayChromeClient final
     return new InspectorOverlayChromeClient(client, overlay);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(client_);
     visitor->Trace(overlay_);
     EmptyChromeClient::Trace(visitor);
@@ -213,7 +219,7 @@ class InspectorOverlayAgent::InspectorOverlayChromeClient final
 };
 
 InspectorOverlayAgent::InspectorOverlayAgent(
-    WebLocalFrameBase* frame_impl,
+    WebLocalFrameImpl* frame_impl,
     InspectedFrames* inspected_frames,
     v8_inspector::V8InspectorSession* v8_session,
     InspectorDOMAgent* dom_agent)
@@ -223,8 +229,7 @@ InspectorOverlayAgent::InspectorOverlayAgent(
       draw_view_size_(false),
       resize_timer_active_(false),
       omit_tooltip_(false),
-      timer_(TaskRunnerHelper::Get(TaskType::kUnspecedTimer,
-                                   frame_impl->GetFrame()),
+      timer_(frame_impl->GetFrame()->GetTaskRunner(TaskType::kUnspecedTimer),
              this,
              &InspectorOverlayAgent::OnTimer),
       suspended_(false),
@@ -242,7 +247,7 @@ InspectorOverlayAgent::~InspectorOverlayAgent() {
   DCHECK(!overlay_page_);
 }
 
-DEFINE_TRACE(InspectorOverlayAgent) {
+void InspectorOverlayAgent::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_impl_);
   visitor->Trace(inspected_frames_);
   visitor->Trace(highlight_node_);
@@ -418,7 +423,7 @@ Response InspectorOverlayAgent::highlightQuad(
     std::unique_ptr<protocol::Array<double>> quad_array,
     Maybe<protocol::DOM::RGBA> color,
     Maybe<protocol::DOM::RGBA> outline_color) {
-  std::unique_ptr<FloatQuad> quad = WTF::MakeUnique<FloatQuad>();
+  std::unique_ptr<FloatQuad> quad = std::make_unique<FloatQuad>();
   if (!ParseQuad(std::move(quad_array), quad.get()))
     return Response::Error("Invalid Quad format");
   InnerHighlightQuad(std::move(quad), std::move(color),
@@ -457,7 +462,7 @@ Response InspectorOverlayAgent::highlightFrame(
   // FIXME: Inspector doesn't currently work cross process.
   if (frame && frame->DeprecatedLocalOwner()) {
     std::unique_ptr<InspectorHighlightConfig> highlight_config =
-        WTF::MakeUnique<InspectorHighlightConfig>();
+        std::make_unique<InspectorHighlightConfig>();
     highlight_config->show_info = true;  // Always show tooltips for frames.
     highlight_config->content =
         InspectorDOMAgent::ParseColor(color.fromMaybe(nullptr));
@@ -526,6 +531,12 @@ void InspectorOverlayAgent::UpdateAllLifecyclePhases() {
   OverlayMainFrame()->View()->UpdateAllLifecyclePhases();
 }
 
+void InspectorOverlayAgent::DispatchBufferedTouchEvents() {
+  if (IsEmpty())
+    return;
+  OverlayMainFrame()->GetEventHandler().DispatchBufferedTouchEvents();
+}
+
 bool InspectorOverlayAgent::HandleInputEvent(const WebInputEvent& input_event) {
   bool handled = false;
 
@@ -551,9 +562,9 @@ bool InspectorOverlayAgent::HandleInputEvent(const WebInputEvent& input_event) {
     if (mouse_event.GetType() == WebInputEvent::kMouseMove)
       handled = HandleMouseMove(mouse_event);
     else if (mouse_event.GetType() == WebInputEvent::kMouseDown)
-      handled = HandleMouseDown();
+      handled = HandleMouseDown(mouse_event);
     else if (mouse_event.GetType() == WebInputEvent::kMouseUp)
-      handled = HandleMouseUp();
+      handled = HandleMouseUp(mouse_event);
 
     if (handled)
       return true;
@@ -575,15 +586,15 @@ bool InspectorOverlayAgent::HandleInputEvent(const WebInputEvent& input_event) {
     }
   }
 
-  if (WebInputEvent::IsTouchEventType(input_event.GetType())) {
-    WebTouchEvent transformed_event =
-        TransformWebTouchEvent(frame_impl_->GetFrameView(),
-                               static_cast<const WebTouchEvent&>(input_event));
-    handled = HandleTouchEvent(transformed_event);
+  if (WebInputEvent::IsPointerEventType(input_event.GetType())) {
+    WebPointerEvent transformed_event = TransformWebPointerEvent(
+        frame_impl_->GetFrameView(),
+        static_cast<const WebPointerEvent&>(input_event));
+    handled = HandlePointerEvent(transformed_event);
     if (handled)
       return true;
-    OverlayMainFrame()->GetEventHandler().HandleTouchEvent(
-        transformed_event, Vector<WebTouchEvent>());
+    OverlayMainFrame()->GetEventHandler().HandlePointerEvent(
+        transformed_event, Vector<WebPointerEvent>());
   }
   if (WebInputEvent::IsKeyboardEventType(input_event.GetType())) {
     OverlayMainFrame()->GetEventHandler().KeyEvent(
@@ -697,6 +708,7 @@ void InspectorOverlayAgent::RebuildOverlayPage() {
   DrawQuadHighlight();
   DrawPausedInDebuggerMessage();
   DrawViewSize();
+  DrawScreenshotBorder();
 }
 
 static std::unique_ptr<protocol::DictionaryValue> BuildObjectForSize(
@@ -770,6 +782,22 @@ void InspectorOverlayAgent::DrawViewSize() {
     EvaluateInOverlay("drawViewSize", "");
 }
 
+void InspectorOverlayAgent::DrawScreenshotBorder() {
+  if (!screenshot_mode_)
+    return;
+  VisualViewport& visual_viewport =
+      frame_impl_->GetFrame()->GetPage()->GetVisualViewport();
+  IntPoint p1 = visual_viewport.RootFrameToViewport(screenshot_anchor_);
+  IntPoint p2 = visual_viewport.RootFrameToViewport(screenshot_position_);
+  std::unique_ptr<protocol::DictionaryValue> data =
+      protocol::DictionaryValue::create();
+  data->setInteger("x1", p1.X());
+  data->setInteger("y1", p1.Y());
+  data->setInteger("x2", p2.X());
+  data->setInteger("y2", p2.Y());
+  EvaluateInOverlay("drawScreenshotBorder", std::move(data));
+}
+
 float InspectorOverlayAgent::WindowToViewportScale() const {
   LocalFrame* frame = frame_impl_->GetFrame();
   if (!frame)
@@ -815,25 +843,22 @@ Page* InspectorOverlayAgent::OverlayPage() {
   overlay_settings.SetScriptEnabled(true);
   overlay_settings.SetPluginsEnabled(false);
   overlay_settings.SetLoadsImagesAutomatically(true);
-  overlay_settings.SetForceDisplayList2dCanvasEnabled(true);
   // FIXME: http://crbug.com/363843. Inspector should probably create its
   // own graphics layers and attach them to the tree rather than going
   // through some non-composited paint function.
   overlay_settings.SetAcceleratedCompositingEnabled(false);
 
   LocalFrame* frame =
-      LocalFrame::Create(&dummy_local_frame_client, *overlay_page_, 0);
+      LocalFrame::Create(&dummy_local_frame_client, *overlay_page_, nullptr);
   frame->SetView(LocalFrameView::Create(*frame));
   frame->Init();
-  FrameLoader& loader = frame->Loader();
   frame->View()->SetCanHaveScrollbars(false);
   frame->View()->SetBaseBackgroundColor(Color::kTransparent);
 
   const WebData& overlay_page_html_resource =
       Platform::Current()->GetDataResource("InspectorOverlayPage.html");
-  loader.Load(FrameLoadRequest(
-      0, ResourceRequest(BlankURL()),
-      SubstituteData(overlay_page_html_resource, kForceSynchronousLoad)));
+  frame->ForceSynchronousDocumentInstall("text/html",
+                                         overlay_page_html_resource);
   v8::Isolate* isolate = ToIsolate(frame);
   ScriptState* script_state = ToScriptStateForMainWorld(frame);
   DCHECK(script_state);
@@ -900,6 +925,7 @@ void InspectorOverlayAgent::EvaluateInOverlay(const String& method,
       ->GetScriptController()
       .ExecuteScriptInMainWorld(
           "dispatch(" + command->serialize() + ")",
+          ScriptSourceLocationType::kInspector,
           ScriptController::kExecuteScriptWhenScriptsDisabled);
 }
 
@@ -914,6 +940,7 @@ void InspectorOverlayAgent::EvaluateInOverlay(
       ->GetScriptController()
       .ExecuteScriptInMainWorld(
           "dispatch(" + command->serialize() + ")",
+          ScriptSourceLocationType::kInspector,
           ScriptController::kExecuteScriptWhenScriptsDisabled);
 }
 
@@ -924,7 +951,8 @@ String InspectorOverlayAgent::EvaluateInOverlayForTest(const String& script) {
       ToLocalFrame(OverlayPage()->MainFrame())
           ->GetScriptController()
           .ExecuteScriptInMainWorldAndReturnValue(
-              ScriptSourceCode(script),
+              ScriptSourceCode(script, ScriptSourceLocationType::kInspector),
+              KURL(), ScriptFetchOptions(),
               ScriptController::kExecuteScriptWhenScriptsDisabled);
   return ToCoreStringWithUndefinedOrNullCheck(string);
 }
@@ -945,6 +973,7 @@ void InspectorOverlayAgent::ClearInternal() {
   resize_timer_active_ = false;
   paused_in_debugger_message_ = String();
   inspect_mode_ = kNotSearching;
+  screenshot_mode_ = false;
   timer_.Stop();
   page_overlay_.reset();
   InnerHideHighlight();
@@ -963,7 +992,7 @@ void InspectorOverlayAgent::OverlaySteppedOver() {
 void InspectorOverlayAgent::PageLayoutInvalidated(bool resized) {
   if (resized && draw_view_size_) {
     resize_timer_active_ = true;
-    timer_.StartOneShot(1, BLINK_FROM_HERE);
+    timer_.StartOneShot(TimeDelta::FromSeconds(1), FROM_HERE);
   }
   ScheduleUpdate();
 }
@@ -972,8 +1001,23 @@ bool InspectorOverlayAgent::HandleMouseMove(const WebMouseEvent& event) {
   if (!ShouldSearchForNode())
     return false;
 
+  if (event.GetModifiers() & kCtrlOrMeta) {
+    InnerHideHighlight();
+    hovered_node_for_inspect_mode_.Clear();
+    if (screenshot_mode_) {
+      screenshot_position_ = RoundedIntPoint(event.PositionInRootFrame());
+      ScheduleUpdate();
+    }
+    return true;
+  }
+
+  if (screenshot_mode_) {
+    screenshot_mode_ = false;
+    ScheduleUpdate();
+  }
+
   LocalFrame* frame = frame_impl_->GetFrame();
-  if (!frame || !frame->View() || frame->ContentLayoutItem().IsNull())
+  if (!frame || !frame->View() || !frame->ContentLayoutObject())
     return false;
   Node* node = HoveredNodeForEvent(
       frame, event, event.GetModifiers() & WebInputEvent::kShiftKey);
@@ -1020,10 +1064,22 @@ bool InspectorOverlayAgent::HandleMouseMove(const WebMouseEvent& event) {
   return true;
 }
 
-bool InspectorOverlayAgent::HandleMouseDown() {
+bool InspectorOverlayAgent::HandleMouseDown(const WebMouseEvent& event) {
   swallow_next_mouse_up_ = false;
+  screenshot_mode_ = false;
   if (!ShouldSearchForNode())
     return false;
+
+  if ((event.GetModifiers() & kCtrlOrMeta) &&
+      (event.GetModifiers() & WebInputEvent::kLeftButtonDown)) {
+    InnerHideHighlight();
+    hovered_node_for_inspect_mode_.Clear();
+    screenshot_mode_ = true;
+    screenshot_anchor_ = RoundedIntPoint(event.PositionInRootFrame());
+    screenshot_position_ = screenshot_anchor_;
+    ScheduleUpdate();
+    return true;
+  }
 
   if (hovered_node_for_inspect_mode_) {
     swallow_next_mouse_up_ = true;
@@ -1034,7 +1090,30 @@ bool InspectorOverlayAgent::HandleMouseDown() {
   return false;
 }
 
-bool InspectorOverlayAgent::HandleMouseUp() {
+bool InspectorOverlayAgent::HandleMouseUp(const WebMouseEvent& event) {
+  if (screenshot_mode_) {
+    screenshot_mode_ = false;
+    float scale = 1.0f;
+    IntPoint p1 = screenshot_anchor_;
+    IntPoint p2 = screenshot_position_;
+    if (LocalFrame* frame = frame_impl_->GetFrame()) {
+      scale = frame->GetPage()->PageScaleFactor();
+      p1 = frame->View()->RootFrameToContents(p1);
+      p2 = frame->View()->RootFrameToContents(p2);
+    }
+    int min_x = std::min(p1.X(), p2.X());
+    int max_x = std::max(p1.X(), p2.X());
+    int min_y = std::min(p1.Y(), p2.Y());
+    int max_y = std::max(p1.Y(), p2.Y());
+    GetFrontend()->screenshotRequested(protocol::Page::Viewport::create()
+                                           .setX(min_x)
+                                           .setY(min_y)
+                                           .setWidth(max_x - min_x)
+                                           .setHeight(max_y - min_y)
+                                           .setScale(scale)
+                                           .build());
+    return true;
+  }
   if (swallow_next_mouse_up_) {
     swallow_next_mouse_up_ = false;
     return true;
@@ -1054,7 +1133,7 @@ bool InspectorOverlayAgent::HandleGestureEvent(const WebGestureEvent& event) {
   return false;
 }
 
-bool InspectorOverlayAgent::HandleTouchEvent(const WebTouchEvent& event) {
+bool InspectorOverlayAgent::HandlePointerEvent(const WebPointerEvent& event) {
   if (!ShouldSearchForNode())
     return false;
   Node* node = HoveredNodeForEvent(frame_impl_->GetFrame(), event, false);
@@ -1120,6 +1199,7 @@ Response InspectorOverlayAgent::SetSearchingForNode(
     Maybe<protocol::Overlay::HighlightConfig> highlight_inspector_object) {
   if (search_mode == kNotSearching) {
     inspect_mode_ = search_mode;
+    screenshot_mode_ = false;
     ScheduleUpdate();
     hovered_node_for_inspect_mode_.Clear();
     InnerHideHighlight();
@@ -1148,7 +1228,7 @@ Response InspectorOverlayAgent::HighlightConfigFromInspectorObject(
   protocol::Overlay::HighlightConfig* config =
       highlight_inspector_object.fromJust();
   std::unique_ptr<InspectorHighlightConfig> highlight_config =
-      WTF::MakeUnique<InspectorHighlightConfig>();
+      std::make_unique<InspectorHighlightConfig>();
   highlight_config->show_info = config->getShowInfo(false);
   highlight_config->show_rulers = config->getShowRulers(false);
   highlight_config->show_extension_lines = config->getShowExtensionLines(false);
@@ -1167,6 +1247,8 @@ Response InspectorOverlayAgent::HighlightConfigFromInspectorObject(
       InspectorDOMAgent::ParseColor(config->getShapeColor(nullptr));
   highlight_config->shape_margin =
       InspectorDOMAgent::ParseColor(config->getShapeMarginColor(nullptr));
+  highlight_config->css_grid =
+      InspectorDOMAgent::ParseColor(config->getCssGridColor(nullptr));
   highlight_config->selector_list = config->getSelectorList("");
 
   *out_config = std::move(highlight_config);

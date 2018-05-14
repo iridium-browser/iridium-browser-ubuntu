@@ -14,15 +14,14 @@
 #include "media/base/mock_filters.h"
 #include "media/base/test_helpers.h"
 #include "media/blink/buffered_data_source_host_impl.h"
+#include "media/blink/mock_resource_fetch_context.h"
 #include "media/blink/mock_webassociatedurlloader.h"
 #include "media/blink/multibuffer_data_source.h"
 #include "media/blink/multibuffer_reader.h"
 #include "media/blink/resource_multibuffer_data_provider.h"
 #include "media/blink/test_response_generator.h"
+#include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
-#include "third_party/WebKit/public/web/WebFrameClient.h"
-#include "third_party/WebKit/public/web/WebLocalFrame.h"
-#include "third_party/WebKit/public/web/WebView.h"
 
 using ::testing::_;
 using ::testing::Assign;
@@ -34,10 +33,8 @@ using ::testing::NiceMock;
 using ::testing::StrictMock;
 
 using blink::WebAssociatedURLLoader;
-using blink::WebLocalFrame;
 using blink::WebString;
 using blink::WebURLResponse;
-using blink::WebView;
 
 namespace media {
 
@@ -49,36 +46,32 @@ std::set<TestMultiBufferDataProvider*> test_data_providers;
 class TestMultiBufferDataProvider : public ResourceMultiBufferDataProvider {
  public:
   TestMultiBufferDataProvider(UrlData* url_data, MultiBuffer::BlockId pos)
-      : ResourceMultiBufferDataProvider(url_data, pos), loading_(false) {
+      : ResourceMultiBufferDataProvider(url_data,
+                                        pos,
+                                        false /* is_client_audio_element */) {
     CHECK(test_data_providers.insert(this).second);
   }
   ~TestMultiBufferDataProvider() override {
     CHECK_EQ(static_cast<size_t>(1), test_data_providers.erase(this));
   }
+
+  // ResourceMultiBufferDataProvider overrides.
   void Start() override {
-    // Create a mock active loader.
-    // Keep track of active loading state via loadAsynchronously() and cancel().
-    NiceMock<MockWebAssociatedURLLoader>* url_loader =
-        new NiceMock<MockWebAssociatedURLLoader>();
-    ON_CALL(*url_loader, Cancel()).WillByDefault(Invoke([this]() {
-      // Check that we have not been destroyed first.
-      if (test_data_providers.find(this) != test_data_providers.end()) {
-        this->loading_ = false;
-      }
-    }));
-    loading_ = true;
-    active_loader_.reset(
-        new ActiveLoader(std::unique_ptr<WebAssociatedURLLoader>(url_loader)));
-    if (!on_start_.is_null()) {
+    ResourceMultiBufferDataProvider::Start();
+    if (!on_start_.is_null())
       on_start_.Run();
-    }
+  }
+  void SetDeferred(bool defer) override {
+    deferred_ = defer;
+    ResourceMultiBufferDataProvider::SetDeferred(defer);
   }
 
-  bool loading() const { return loading_; }
+  bool loading() const { return !!active_loader_; }
+  bool deferred() const { return deferred_; }
   void RunOnStart(base::Closure cb) { on_start_ = cb; }
 
  private:
-  bool loading_;
+  bool deferred_ = false;
   base::Closure on_start_;
 };
 
@@ -89,12 +82,11 @@ class TestResourceMultiBuffer : public ResourceMultiBuffer {
   explicit TestResourceMultiBuffer(UrlData* url_data, int shift)
       : ResourceMultiBuffer(url_data, shift) {}
 
-  std::unique_ptr<MultiBuffer::DataProvider> CreateWriter(
-      const BlockId& pos) override {
-    TestMultiBufferDataProvider* ret =
-        new TestMultiBufferDataProvider(url_data_, pos);
-    ret->Start();
-    return std::unique_ptr<MultiBuffer::DataProvider>(ret);
+  std::unique_ptr<MultiBuffer::DataProvider> CreateWriter(const BlockId& pos,
+                                                          bool) override {
+    auto writer = std::make_unique<TestMultiBufferDataProvider>(url_data_, pos);
+    writer->Start();
+    return writer;
   }
 
   // TODO: Make these global
@@ -121,9 +113,7 @@ class TestResourceMultiBuffer : public ResourceMultiBuffer {
 
 class TestUrlData : public UrlData {
  public:
-  TestUrlData(const GURL& url,
-              CORSMode cors_mode,
-              const base::WeakPtr<UrlIndex>& url_index)
+  TestUrlData(const GURL& url, CORSMode cors_mode, UrlIndex* url_index)
       : UrlData(url, cors_mode, url_index),
         block_shift_(url_index->block_shift()) {}
 
@@ -142,7 +132,7 @@ class TestUrlData : public UrlData {
   }
 
  protected:
-  ~TestUrlData() override {}
+  ~TestUrlData() override = default;
   const int block_shift_;
 
   std::unique_ptr<TestResourceMultiBuffer> test_multibuffer_;
@@ -150,12 +140,12 @@ class TestUrlData : public UrlData {
 
 class TestUrlIndex : public UrlIndex {
  public:
-  explicit TestUrlIndex(blink::WebLocalFrame* frame) : UrlIndex(frame) {}
+  explicit TestUrlIndex(ResourceFetchContext* fetch_context)
+      : UrlIndex(fetch_context) {}
 
   scoped_refptr<UrlData> NewUrlData(const GURL& url,
                                     UrlData::CORSMode cors_mode) override {
-    last_url_data_ =
-        new TestUrlData(url, cors_mode, weak_factory_.GetWeakPtr());
+    last_url_data_ = new TestUrlData(url, cors_mode, this);
     return last_url_data_;
   }
 
@@ -170,8 +160,8 @@ class TestUrlIndex : public UrlIndex {
 
 class MockBufferedDataSourceHost : public BufferedDataSourceHost {
  public:
-  MockBufferedDataSourceHost() {}
-  virtual ~MockBufferedDataSourceHost() {}
+  MockBufferedDataSourceHost() = default;
+  virtual ~MockBufferedDataSourceHost() = default;
 
   MOCK_METHOD1(SetTotalBytes, void(int64_t total_bytes));
   MOCK_METHOD2(AddBufferedByteRange, void(int64_t start, int64_t end));
@@ -183,18 +173,12 @@ class MockBufferedDataSourceHost : public BufferedDataSourceHost {
 class MockMultibufferDataSource : public MultibufferDataSource {
  public:
   MockMultibufferDataSource(
-      const GURL& url,
-      UrlData::CORSMode cors_mode,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      linked_ptr<UrlIndex> url_index,
-      WebLocalFrame* frame,
+      scoped_refptr<UrlData> url_data,
       BufferedDataSourceHost* host)
       : MultibufferDataSource(
-            url,
-            cors_mode,
             task_runner,
-            url_index,
-            frame,
+            std::move(url_data),
             &media_log_,
             host,
             base::Bind(&MockMultibufferDataSource::set_downloading,
@@ -204,6 +188,7 @@ class MockMultibufferDataSource : public MultibufferDataSource {
   bool downloading() { return downloading_; }
   void set_downloading(bool downloading) { downloading_ = downloading; }
   bool range_supported() { return url_data_->range_supported(); }
+  void CallSeekTask() { SeekTask(); }
 
  private:
   // Whether the resource is downloading or deferred.
@@ -224,15 +209,14 @@ static const char kHttpDifferentOriginUrl[] = "http://127.0.0.1/foo.webm";
 
 class MultibufferDataSourceTest : public testing::Test {
  public:
-  MultibufferDataSourceTest()
-      : view_(WebView::Create(nullptr, blink::kWebPageVisibilityStateVisible)),
-        preload_(MultibufferDataSource::AUTO) {
-    WebLocalFrame* frame =
-        WebLocalFrame::CreateMainFrame(view_, &client_, nullptr, nullptr);
-    url_index_ = make_linked_ptr(new TestUrlIndex(frame));
-  }
+  MultibufferDataSourceTest() : preload_(MultibufferDataSource::AUTO) {
+    ON_CALL(fetch_context_, CreateUrlLoader(_))
+        .WillByDefault(Invoke([](const blink::WebAssociatedURLLoaderOptions&) {
+          return std::make_unique<NiceMock<MockWebAssociatedURLLoader>>();
+        }));
 
-  virtual ~MultibufferDataSourceTest() { view_->Close(); }
+    url_index_ = std::make_unique<TestUrlIndex>(&fetch_context_);
+  }
 
   MOCK_METHOD1(OnInitialize, void(bool));
 
@@ -242,8 +226,8 @@ class MultibufferDataSourceTest : public testing::Test {
                           size_t file_size = kFileSize) {
     GURL gurl(url);
     data_source_.reset(new MockMultibufferDataSource(
-        gurl, cors_mode, message_loop_.task_runner(), url_index_,
-        view_->MainFrame()->ToWebLocalFrame(), &host_));
+        message_loop_.task_runner(), url_index_->GetByUrl(gurl, cors_mode),
+        &host_));
     data_source_->SetPreload(preload_);
 
     response_generator_.reset(new TestResponseGenerator(gurl, file_size));
@@ -294,6 +278,13 @@ class MultibufferDataSourceTest : public testing::Test {
     ReceiveData(kDataSize);
   }
 
+  // Starts data source.
+  void Start() {
+    EXPECT_TRUE(data_provider());
+    EXPECT_FALSE(active_loader_allownull());
+    data_provider()->Start();
+  }
+
   // Stops any active loaders and shuts down the data source.
   //
   // This typically happens when the page is closed and for our purposes is
@@ -309,17 +300,13 @@ class MultibufferDataSourceTest : public testing::Test {
   }
 
   void Respond(const WebURLResponse& response) {
-    EXPECT_TRUE(url_loader());
-    if (!active_loader())
-      return;
+    EXPECT_TRUE(active_loader());
     data_provider()->DidReceiveResponse(response);
     base::RunLoop().RunUntilIdle();
   }
 
   void ReceiveDataLow(int size) {
-    EXPECT_TRUE(url_loader());
-    if (!url_loader())
-      return;
+    EXPECT_TRUE(active_loader());
     std::unique_ptr<char[]> data(new char[size]);
     memset(data.get(), 0xA5, size);  // Arbitrary non-zero value.
 
@@ -332,9 +319,7 @@ class MultibufferDataSourceTest : public testing::Test {
   }
 
   void FinishLoading() {
-    EXPECT_TRUE(url_loader());
-    if (!url_loader())
-      return;
+    EXPECT_TRUE(active_loader());
     data_provider()->DidFinishLoading(0);
     base::RunLoop().RunUntilIdle();
   }
@@ -342,14 +327,6 @@ class MultibufferDataSourceTest : public testing::Test {
   void FailLoading() {
     data_provider()->DidFail(response_generator_->GenerateError());
     base::RunLoop().RunUntilIdle();
-  }
-
-  void Restart() {
-    EXPECT_TRUE(data_provider());
-    EXPECT_FALSE(active_loader_allownull());
-    if (!data_provider())
-      return;
-    data_provider()->Start();
   }
 
   MOCK_METHOD1(ReadCallback, void(int size));
@@ -374,7 +351,7 @@ class MultibufferDataSourceTest : public testing::Test {
     EXPECT_TRUE(loading());
 
     FinishLoading();
-    Restart();
+    Start();
     ReadAt(kDataSize);
     Respond(response2);
     ReceiveData(kDataSize);
@@ -399,7 +376,7 @@ class MultibufferDataSourceTest : public testing::Test {
     EXPECT_TRUE(loading());
 
     FinishLoading();
-    Restart();
+    Start();
     ReadAt(kDataSize);
     Respond(response2);
     EXPECT_TRUE(failed_);
@@ -412,8 +389,8 @@ class MultibufferDataSourceTest : public testing::Test {
   }
 
   void CheckReadThenDefer() {
-    EXPECT_EQ(0, preload_low());
-    EXPECT_EQ(0, preload_high());
+    EXPECT_EQ(2 << 14, preload_low());
+    EXPECT_EQ(3 << 14, preload_high());
   }
 
   void CheckNeverDefer() {
@@ -431,26 +408,19 @@ class MultibufferDataSourceTest : public testing::Test {
   TestMultiBufferDataProvider* data_provider() {
     return multibuffer()->GetProvider();
   }
-  ActiveLoader* active_loader() {
+  blink::WebAssociatedURLLoader* active_loader() {
     EXPECT_TRUE(data_provider());
     if (!data_provider())
       return nullptr;
     return data_provider()->active_loader_.get();
   }
-  ActiveLoader* active_loader_allownull() {
+  blink::WebAssociatedURLLoader* active_loader_allownull() {
     TestMultiBufferDataProvider* data_provider =
         multibuffer()->GetProvider_allownull();
     if (!data_provider)
       return nullptr;
     return data_provider->active_loader_.get();
   }
-  WebAssociatedURLLoader* url_loader() {
-    EXPECT_TRUE(active_loader());
-    if (!active_loader())
-      return nullptr;
-    return active_loader()->loader_.get();
-  }
-
   bool loading() { return multibuffer()->loading(); }
 
   MultibufferDataSource::Preload preload() { return data_source_->preload_; }
@@ -479,11 +449,10 @@ class MultibufferDataSourceTest : public testing::Test {
   }
 
  protected:
-  blink::WebFrameClient client_;
-  WebView* view_;
-  MultibufferDataSource::Preload preload_;
   base::MessageLoop message_loop_;
-  linked_ptr<TestUrlIndex> url_index_;
+  MultibufferDataSource::Preload preload_;
+  NiceMock<MockResourceFetchContext> fetch_context_;
+  std::unique_ptr<TestUrlIndex> url_index_;
 
   std::unique_ptr<MockMultibufferDataSource> data_source_;
 
@@ -653,7 +622,7 @@ TEST_F(MultibufferDataSourceTest, Http_Retry) {
   // Issue a pending read but terminate the connection to force a retry.
   ReadAt(kDataSize);
   FinishLoading();
-  Restart();
+  Start();
   Respond(response_generator_->Generate206(kDataSize));
 
   // Complete the read.
@@ -707,7 +676,7 @@ TEST_F(MultibufferDataSourceTest, Http_PartialResponsePrefetch) {
   EXPECT_TRUE(loading());
 
   FinishLoading();
-  Restart();
+  Start();
   Respond(response2);
   ReceiveData(kDataSize);
   ReceiveData(kDataSize);
@@ -835,7 +804,7 @@ TEST_F(MultibufferDataSourceTest, File_Retry) {
   // Issue a pending read but terminate the connection to force a retry.
   ReadAt(kDataSize);
   FinishLoading();
-  Restart();
+  Start();
   Respond(response_generator_->GenerateFileResponse(kDataSize));
 
   // Complete the read.
@@ -854,7 +823,7 @@ TEST_F(MultibufferDataSourceTest, Http_TooManyRetries) {
 
   for (int i = 0; i < ResourceMultiBufferDataProvider::kMaxRetries; i++) {
     FailLoading();
-    data_provider()->Start();
+    Start();
     Respond(response_generator_->Generate206(kDataSize));
   }
 
@@ -877,7 +846,7 @@ TEST_F(MultibufferDataSourceTest, File_TooManyRetries) {
 
   for (int i = 0; i < ResourceMultiBufferDataProvider::kMaxRetries; i++) {
     FailLoading();
-    data_provider()->Start();
+    Start();
     Respond(response_generator_->Generate206(kDataSize));
   }
 
@@ -916,7 +885,7 @@ TEST_F(MultibufferDataSourceTest, StopDuringRead) {
   InitializeWith206Response();
 
   uint8_t buffer[256];
-  data_source_->Read(0, arraysize(buffer), buffer,
+  data_source_->Read(kDataSize, arraysize(buffer), buffer,
                      base::Bind(&MultibufferDataSourceTest::ReadCallback,
                                 base::Unretained(this)));
 
@@ -1020,8 +989,8 @@ TEST_F(MultibufferDataSourceTest, Http_ShareData) {
 
   StrictMock<MockBufferedDataSourceHost> host2;
   MockMultibufferDataSource source2(
-      GURL(kHttpUrl), UrlData::CORS_UNSPECIFIED, message_loop_.task_runner(),
-      url_index_, view_->MainFrame()->ToWebLocalFrame(), &host2);
+      message_loop_.task_runner(),
+      url_index_->GetByUrl(GURL(kHttpUrl), UrlData::CORS_UNSPECIFIED), &host2);
   source2.SetPreload(preload_);
 
   EXPECT_CALL(*this, OnInitialize(true));
@@ -1211,8 +1180,11 @@ TEST_F(MultibufferDataSourceTest, ExternalResource_Response206_VerifyDefer) {
   EXPECT_CALL(*this, ReadCallback(kDataSize));
   ReadAt(0);
 
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 2));
+  ReceiveData(kDataSize);
+
   ASSERT_TRUE(active_loader());
-  EXPECT_TRUE(active_loader()->deferred());
+  EXPECT_TRUE(data_provider()->deferred());
 }
 
 TEST_F(MultibufferDataSourceTest,
@@ -1233,6 +1205,12 @@ TEST_F(MultibufferDataSourceTest,
 
   EXPECT_CALL(*this, ReadCallback(kDataSize));
   EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 2));
+  ReceiveData(kDataSize);
+
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 3));
+  ReceiveData(kDataSize);
+
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 4));
   ReceiveData(kDataSize);
 
   EXPECT_FALSE(active_loader_allownull());
@@ -1261,9 +1239,16 @@ TEST_F(MultibufferDataSourceTest,
 
   ReceiveDataLow(2000);
   EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 2 + 2000));
+  EXPECT_CALL(host_, AddBufferedByteRange(kDataSize * 2, kDataSize * 2 + 2000));
   ReceiveDataLow(kDataSize);
 
   base::RunLoop().RunUntilIdle();
+
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 3 + 2000));
+  ReceiveData(kDataSize);
+
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 4 + 2000));
+  ReceiveData(kDataSize);
 
   EXPECT_FALSE(active_loader_allownull());
 }
@@ -1295,12 +1280,12 @@ TEST_F(MultibufferDataSourceTest,
   ASSERT_TRUE(active_loader());
   data_source_->OnBufferingHaveEnough(true);
   ASSERT_TRUE(active_loader());
-  ASSERT_FALSE(active_loader()->deferred());
+  ASSERT_FALSE(data_provider()->deferred());
 
   // Deliver data until capacity is reached and verify deferral.
   int bytes_received = 0;
   EXPECT_CALL(host_, AddBufferedByteRange(_, _)).Times(testing::AtLeast(1));
-  while (active_loader_allownull() && !active_loader()->deferred()) {
+  while (active_loader_allownull() && !data_provider()->deferred()) {
     ReceiveData(kDataSize);
     bytes_received += kDataSize;
   }
@@ -1312,8 +1297,8 @@ TEST_F(MultibufferDataSourceTest,
 TEST_F(MultibufferDataSourceTest, SeekPastEOF) {
   GURL gurl(kHttpUrl);
   data_source_.reset(new MockMultibufferDataSource(
-      gurl, UrlData::CORS_UNSPECIFIED, message_loop_.task_runner(), url_index_,
-      view_->MainFrame()->ToWebLocalFrame(), &host_));
+      message_loop_.task_runner(),
+      url_index_->GetByUrl(gurl, UrlData::CORS_UNSPECIFIED), &host_));
   data_source_->SetPreload(preload_);
 
   response_generator_.reset(new TestResponseGenerator(gurl, kDataSize + 1));
@@ -1361,10 +1346,10 @@ TEST_F(MultibufferDataSourceTest, Http_RetryThenRedirect) {
   run_loop.Run();
 
   // Server responds with a redirect.
-  blink::WebURLRequest request((GURL(kHttpDifferentPathUrl)));
+  blink::WebURL url{GURL(kHttpDifferentPathUrl)};
   blink::WebURLResponse response((GURL(kHttpUrl)));
   response.SetHTTPStatusCode(307);
-  data_provider()->WillFollowRedirect(request, response);
+  data_provider()->WillFollowRedirect(url, response);
   Respond(response_generator_->Generate206(kDataSize));
   ReceiveData(kDataSize);
   EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 3));
@@ -1377,10 +1362,10 @@ TEST_F(MultibufferDataSourceTest, Http_NotStreamingAfterRedirect) {
   Initialize(kHttpUrl, true);
 
   // Server responds with a redirect.
-  blink::WebURLRequest request((GURL(kHttpDifferentPathUrl)));
+  blink::WebURL url{GURL(kHttpDifferentPathUrl)};
   blink::WebURLResponse response((GURL(kHttpUrl)));
   response.SetHTTPStatusCode(307);
-  data_provider()->WillFollowRedirect(request, response);
+  data_provider()->WillFollowRedirect(url, response);
 
   EXPECT_CALL(host_, SetTotalBytes(response_generator_->content_length()));
   Respond(response_generator_->Generate206(0));
@@ -1399,10 +1384,10 @@ TEST_F(MultibufferDataSourceTest, Http_RangeNotSatisfiableAfterRedirect) {
   Initialize(kHttpUrl, true);
 
   // Server responds with a redirect.
-  blink::WebURLRequest request((GURL(kHttpDifferentPathUrl)));
+  blink::WebURL url{GURL(kHttpDifferentPathUrl)};
   blink::WebURLResponse response((GURL(kHttpUrl)));
   response.SetHTTPStatusCode(307);
-  data_provider()->WillFollowRedirect(request, response);
+  data_provider()->WillFollowRedirect(url, response);
 
   EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize));
   Respond(response_generator_->GenerateResponse(416));
@@ -1413,10 +1398,10 @@ TEST_F(MultibufferDataSourceTest, Http_404AfterRedirect) {
   Initialize(kHttpUrl, false);
 
   // Server responds with a redirect.
-  blink::WebURLRequest request((GURL(kHttpDifferentPathUrl)));
+  blink::WebURL url{GURL(kHttpDifferentPathUrl)};
   blink::WebURLResponse response((GURL(kHttpUrl)));
   response.SetHTTPStatusCode(307);
-  data_provider()->WillFollowRedirect(request, response);
+  data_provider()->WillFollowRedirect(url, response);
 
   Respond(response_generator_->Generate404());
   Stop();
@@ -1576,7 +1561,7 @@ TEST_F(MultibufferDataSourceTest, CheckBufferSizeForSmallFiles) {
   EXPECT_EQ(3 << 20, preload_high());
   EXPECT_EQ(25 << 20, max_buffer_forward());
   EXPECT_EQ(kFileSize * 2, max_buffer_backward());
-  EXPECT_EQ(5013504 /* file size rounted up to blocks size */, buffer_size());
+  EXPECT_EQ(5013504 /* file size rounded up to blocks size */, buffer_size());
 
   data_source_->SetBitrate(80 << 20);  // 80 mbit / s
   base::RunLoop().RunUntilIdle();
@@ -1585,7 +1570,33 @@ TEST_F(MultibufferDataSourceTest, CheckBufferSizeForSmallFiles) {
   EXPECT_EQ(51 << 20, preload_high());
   EXPECT_EQ(51 << 20, max_buffer_forward());
   EXPECT_EQ(20 << 20, max_buffer_backward());
-  EXPECT_EQ(5013504 /* file size rounted up to blocks size */, buffer_size());
+  EXPECT_EQ(5013504 /* file size rounded up to blocks size */, buffer_size());
+}
+
+TEST_F(MultibufferDataSourceTest, CheckBufferSizeAfterReadingALot) {
+  InitializeWith206Response();
+
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+
+  const int to_read = 40;
+
+  for (int i = 1; i < to_read; i++) {
+    EXPECT_CALL(*this, ReadCallback(kDataSize));
+    EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * (i + 1)));
+    ReadAt(i * kDataSize);
+    ReceiveData(kDataSize);
+  }
+
+  data_source_->SetBitrate(1 << 20);  // 1 mbit / s
+  base::RunLoop().RunUntilIdle();
+  int64_t extra_buffer = to_read / 10 * kDataSize;
+  EXPECT_EQ(1 << 20, data_source_bitrate());
+  EXPECT_EQ((2 << 20) + extra_buffer, preload_low());
+  EXPECT_EQ((3 << 20) + extra_buffer, preload_high());
+  EXPECT_EQ(25 << 20, max_buffer_forward());
+  EXPECT_EQ(kFileSize * 2, max_buffer_backward());
+  EXPECT_EQ(5013504 /* file size rounded up to blocks size */, buffer_size());
 }
 
 // Provoke an edge case where the loading state may not end up transitioning
@@ -1593,8 +1604,8 @@ TEST_F(MultibufferDataSourceTest, CheckBufferSizeForSmallFiles) {
 TEST_F(MultibufferDataSourceTest, Http_CheckLoadingTransition) {
   GURL gurl(kHttpUrl);
   data_source_.reset(new MockMultibufferDataSource(
-      gurl, UrlData::CORS_UNSPECIFIED, message_loop_.task_runner(), url_index_,
-      view_->MainFrame()->ToWebLocalFrame(), &host_));
+      message_loop_.task_runner(),
+      url_index_->GetByUrl(gurl, UrlData::CORS_UNSPECIFIED), &host_));
   data_source_->SetPreload(preload_);
 
   response_generator_.reset(new TestResponseGenerator(gurl, kDataSize * 1));
@@ -1625,6 +1636,81 @@ TEST_F(MultibufferDataSourceTest, Http_CheckLoadingTransition) {
 
   // Make sure we're not downloading anymore.
   EXPECT_EQ(data_source_->downloading(), false);
+  Stop();
+}
+
+TEST_F(MultibufferDataSourceTest, Http_Seek_Back) {
+  InitializeWith206Response();
+
+  // Read a bit from the beginning.
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+
+  ReadAt(kDataSize);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 2));
+  ReceiveData(kDataSize);
+  ReadAt(kDataSize * 2);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  EXPECT_CALL(host_, AddBufferedByteRange(0, kDataSize * 3));
+  ReceiveData(kDataSize);
+
+  // Read some data from far ahead.
+  ReadAt(kFarReadPosition);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  EXPECT_CALL(host_, AddBufferedByteRange(kFarReadPosition,
+                                          kFarReadPosition + kDataSize));
+  Respond(response_generator_->Generate206(kFarReadPosition));
+  ReceiveData(kDataSize);
+
+  // This should not close the current connection, because we have
+  // more data buffered at this location than at kFarReadPosition.
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+  data_source_->CallSeekTask();
+  EXPECT_EQ(kFarReadPosition + kDataSize, loader()->Tell());
+
+  // Again, no seek.
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(kDataSize);
+  data_source_->CallSeekTask();
+  EXPECT_EQ(kFarReadPosition + kDataSize, loader()->Tell());
+
+  // Still no seek
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(kFarReadPosition);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(kDataSize);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(kDataSize * 2);
+  data_source_->CallSeekTask();
+  EXPECT_EQ(kFarReadPosition + kDataSize, loader()->Tell());
+
+  // Read some data from far ahead, but right before where we read before.
+  // This time we'll have one block buffered.
+  ReadAt(kFarReadPosition - kDataSize);
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  EXPECT_CALL(host_, AddBufferedByteRange(kFarReadPosition - kDataSize,
+                                          kFarReadPosition + kDataSize));
+  Respond(response_generator_->Generate206(kFarReadPosition - kDataSize));
+  ReceiveData(kDataSize);
+
+  // No Seek
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(0);
+  data_source_->CallSeekTask();
+  EXPECT_EQ(kFarReadPosition, loader()->Tell());
+
+  // Seek
+  EXPECT_CALL(*this, ReadCallback(kDataSize));
+  ReadAt(kDataSize * 2);
+  data_source_->CallSeekTask();
+  EXPECT_EQ(kDataSize * 3, loader()->Tell());
+
   Stop();
 }
 

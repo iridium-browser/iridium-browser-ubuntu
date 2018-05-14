@@ -40,11 +40,11 @@ namespace blink {
 
 class CORE_EXPORT AnimatableValue : public RefCounted<AnimatableValue> {
  public:
-  virtual ~AnimatableValue() {}
+  virtual ~AnimatableValue() = default;
 
-  static PassRefPtr<AnimatableValue> Interpolate(const AnimatableValue*,
-                                                 const AnimatableValue*,
-                                                 double fraction);
+  static scoped_refptr<AnimatableValue> Interpolate(const AnimatableValue*,
+                                                    const AnimatableValue*,
+                                                    double fraction);
   bool IsDouble() const { return GetType() == kTypeDouble; }
   bool IsFilterOperations() const { return GetType() == kTypeFilterOperations; }
   bool IsTransform() const { return GetType() == kTypeTransform; }
@@ -63,12 +63,12 @@ class CORE_EXPORT AnimatableValue : public RefCounted<AnimatableValue> {
     kTypeUnknown,
   };
 
-  virtual PassRefPtr<AnimatableValue> InterpolateTo(const AnimatableValue*,
-                                                    double fraction) const {
+  virtual scoped_refptr<AnimatableValue> InterpolateTo(const AnimatableValue*,
+                                                       double fraction) const {
     NOTREACHED();
     return nullptr;
   }
-  static PassRefPtr<AnimatableValue> DefaultInterpolateTo(
+  static scoped_refptr<AnimatableValue> DefaultInterpolateTo(
       const AnimatableValue* left,
       const AnimatableValue* right,
       double fraction) {
@@ -76,8 +76,8 @@ class CORE_EXPORT AnimatableValue : public RefCounted<AnimatableValue> {
   }
 
   template <class T>
-  static PassRefPtr<T> TakeConstRef(const T* value) {
-    return PassRefPtr<T>(const_cast<T*>(value));
+  static scoped_refptr<T> TakeConstRef(const T* value) {
+    return scoped_refptr<T>(const_cast<T*>(value));
   }
 
  private:

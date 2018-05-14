@@ -1,6 +1,9 @@
+{% from 'methods.cpp.tmpl' import runtime_timer_scope_disabled_by_default %}
+
 {##############################################################################}
 {% macro constant_getter_callback(constant) %}
 void {{v8_class_or_partial}}::{{constant.name}}ConstantGetterCallback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  {{ runtime_timer_scope_disabled_by_default(constant.rcs_counter) }}
   {% if constant.deprecate_as %}
   Deprecation::CountDeprecation(CurrentExecutionContext(info.GetIsolate()), WebFeature::k{{constant.deprecate_as}});
   {% endif %}
@@ -22,7 +25,7 @@ void {{v8_class_or_partial}}::{{constant.name}}ConstantGetterCallback(v8::Local<
 {% macro install_constants() %}
 {% if constants | has_constant_configuration %}
 {# Normal constants #}
-const V8DOMConfiguration::ConstantConfiguration {{v8_class}}Constants[] = {
+static constexpr V8DOMConfiguration::ConstantConfiguration {{v8_class}}Constants[] = {
     {% for constant in constants | has_constant_configuration %}
     {{constant_configuration(constant)}},
     {% endfor %}
@@ -51,11 +54,12 @@ static_assert({{constant.value}} == {{constant_cpp_class}}::{{constant.reflected
 
 {######################################}
 {%- macro constant_configuration(constant) %}
+{# Explicitly select the correct overload to populate the union. #}
 {% if constant.idl_type in ('Double', 'Float') %}
-    {% set value = '0, %s' % constant.value %}
+    {% set value = 'static_cast<double>(%s)' % constant.value %}
 {% else %}
     {# 'Short', 'Long' etc. #}
-    {% set value = '%s, 0' % constant.value %}
+    {% set value = 'static_cast<int>(%s)' % constant.value %}
 {% endif %}
-{"{{constant.name}}", {{value}}, V8DOMConfiguration::kConstantType{{constant.idl_type}}}
+{"{{constant.name}}", V8DOMConfiguration::kConstantType{{constant.idl_type}}, {{value}}}
 {%- endmacro %}

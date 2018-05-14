@@ -10,7 +10,6 @@
 #include <set>
 #include <string>
 
-#include "ash/public/interfaces/touch_view.mojom.h"
 #include "ash/wallpaper/wallpaper_controller_observer.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
@@ -24,6 +23,7 @@
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/ui/ash/tablet_mode_client_observer.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_webui_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -34,7 +34,6 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui.h"
-#include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/net_errors.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -144,17 +143,9 @@ class SigninScreenHandlerDelegate {
   // Signs out if the screen is currently locked.
   virtual void Signout() = 0;
 
-  // --------------- Account creation methods.
-  // Confirms sign up by provided credentials in |user_context|.
-  // Used for new user login via GAIA extension.
-  virtual void CompleteLogin(const UserContext& user_context) = 0;
-
   // --------------- Shared with login display methods.
   // Notify the delegate when the sign-in UI is finished loading.
   virtual void OnSigninScreenReady() = 0;
-
-  // Notify the delegate when the GAIA UI is finished loading.
-  virtual void OnGaiaScreenReady() = 0;
 
   // Shows Enterprise Enrollment screen.
   virtual void ShowEnterpriseEnrollmentScreen() = 0;
@@ -171,25 +162,12 @@ class SigninScreenHandlerDelegate {
   // Show wrong hwid screen.
   virtual void ShowWrongHWIDScreen() = 0;
 
-  // Sets the displayed email for the next login attempt. If it succeeds,
-  // user's displayed email value will be updated to |email|.
-  virtual void SetDisplayEmail(const std::string& email) = 0;
-
-  // Sets the displayed name and given name for the next login attempt. If it
-  // succeeds, user's displayed name and give name values will be updated to
-  // |display_name| and |given_name|.
-  virtual void SetDisplayAndGivenName(const std::string& display_name,
-                                      const std::string& given_name) = 0;
+  // Show update required screen.
+  virtual void ShowUpdateRequiredScreen() = 0;
 
   // --------------- Rest of the methods.
   // Cancels user adding.
   virtual void CancelUserAdding() = 0;
-
-  // Load wallpaper for given |account_id|.
-  virtual void LoadWallpaper(const AccountId& account_id) = 0;
-
-  // Loads the default sign-in wallpaper.
-  virtual void LoadSigninWallpaper() = 0;
 
   // Attempts to remove given user.
   virtual void RemoveUser(const AccountId& account_id) = 0;
@@ -222,9 +200,6 @@ class SigninScreenHandlerDelegate {
   // Runs an OAuth token validation check for user.
   virtual void CheckUserStatus(const AccountId& account_id) = 0;
 
-  // Returns true if user is allowed to log in by domain policy.
-  virtual bool IsUserWhitelisted(const AccountId& account_id) = 0;
-
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
 };
@@ -238,7 +213,7 @@ class SigninScreenHandler
       public NetworkStateInformer::NetworkStateInformerObserver,
       public PowerManagerClient::Observer,
       public input_method::ImeKeyboard::Observer,
-      public ash::mojom::TouchViewObserver,
+      public TabletModeClientObserver,
       public lock_screen_apps::StateObserver,
       public OobeUI::Observer,
       public ash::WallpaperControllerObserver {
@@ -278,18 +253,22 @@ class SigninScreenHandler
   // OobeUI::Observer implementation:
   void OnCurrentScreenChanged(OobeScreen current_screen,
                               OobeScreen new_screen) override;
+  void OnScreenInitialized(OobeScreen screen) override{};
 
   // ash::WallpaperControllerObserver implementation:
-  void OnWallpaperColorsChanged() override;
   void OnWallpaperDataChanged() override;
+  void OnWallpaperColorsChanged() override;
+  void OnWallpaperBlurChanged() override;
 
   void SetFocusPODCallbackForTesting(base::Closure callback);
 
   // To avoid spurious error messages on flaky networks, the offline message is
   // only shown if the network is offline for a threshold number of seconds.
-  // This method reduces the threshold to zero, allowing the offline message to
-  // show instantaneously in tests.
-  void ZeroOfflineTimeoutForTesting();
+  // This method provides an ability to reduce the threshold to zero, allowing
+  // the offline message to show instantaneously in tests. The threshold can
+  // also be set to a high value to disable the offline message on slow
+  // configurations like MSAN, where it otherwise triggers on every run.
+  void SetOfflineTimeoutForTesting(base::TimeDelta offline_timeout);
 
   // Gets the keyboard remapped pref value for |pref_name| key. Returns true if
   // successful, otherwise returns false.
@@ -364,8 +343,8 @@ class SigninScreenHandler
   // PowerManagerClient::Observer implementation:
   void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
-  // ash::mojom::TouchView:
-  void OnTouchViewToggled(bool enabled) override;
+  // TabletModeClientObserver:
+  void OnTabletModeToggled(bool enabled) override;
 
   // lock_screen_apps::StateObserver:
   void OnLockScreenNoteStateChanged(ash::mojom::TrayActionState state) override;
@@ -392,7 +371,6 @@ class SigninScreenHandler
   void HandleShutdownSystem();
   void HandleRebootSystem();
   void HandleRemoveUser(const AccountId& account_id);
-  void HandleShowAddUser(const base::ListValue* args);
   void HandleToggleEnrollmentScreen();
   void HandleToggleEnrollmentAd();
   void HandleToggleEnableDebuggingScreen();
@@ -402,7 +380,7 @@ class SigninScreenHandler
   void HandleAccountPickerReady();
   void HandleWallpaperReady();
   void HandleSignOutUser();
-  void HandleOpenProxySettings();
+  void HandleOpenInternetDetailDialog();
   void HandleLoginVisible(const std::string& source);
   void HandleCancelPasswordChangedFlow(const AccountId& account_id);
   void HandleCancelUserAdding();
@@ -421,14 +399,14 @@ class SigninScreenHandler
   void HandleLaunchArcKioskApp(const AccountId& app_account_id);
   void HandleGetPublicSessionKeyboardLayouts(const AccountId& account_id,
                                              const std::string& locale);
-  void HandleGetTouchViewState();
+  void HandleGetTabletModeState();
   void HandleLogRemoveUserWarningShown();
   void HandleFirstIncorrectPasswordAttempt(const AccountId& account_id);
   void HandleMaxIncorrectPasswordAttempts(const AccountId& account_id);
   void HandleSendFeedbackAndResyncUserData();
   void HandleRequestNewNoteAction(const std::string& request_type);
-  void HandleRecordLockScreenAppUnlockUIAction(const std::string& action);
-  void HandleSetLockScreenAppsState(const std::string& state);
+  void HandleNewNoteLaunchAnimationDone();
+  void HandleCloseLockScreenApp();
 
   // Sends the list of |keyboard_layouts| available for the |locale| that is
   // currently selected for the public session identified by |user_id|.
@@ -462,9 +440,6 @@ class SigninScreenHandler
 
   bool ShouldLoadGaia() const;
 
-  // Shows signin.
-  void OnShowAddUser();
-
   net::Error FrameError() const;
 
   // input_method::ImeKeyboard::Observer implementation:
@@ -476,6 +451,10 @@ class SigninScreenHandler
 
   // Called when the cros property controlling allowed input methods changes.
   void OnAllowedInputMethodsChanged();
+
+  // After proxy auth information has been supplied, this function re-enables
+  // responding to network state notifications.
+  void ReenableNetworkStateUpdatesAfterProxyAuth();
 
   // Current UI state of the signin screen.
   UIState ui_state_ = UI_STATE_UNKNOWN;
@@ -516,10 +495,10 @@ class SigninScreenHandler
   std::unique_ptr<CrosSettings::ObserverSubscription>
       allowed_input_methods_subscription_;
 
-  // Whether there is an auth UI pending. This flag is set on receiving
-  // NOTIFICATION_AUTH_NEEDED and reset on either NOTIFICATION_AUTH_SUPPLIED or
-  // NOTIFICATION_AUTH_CANCELLED.
-  bool has_pending_auth_ui_ = false;
+  // Whether we're currently ignoring network state updates because a proxy auth
+  // UI pending (or we're waiting for a grace period after the proxy auth UI is
+  // finished for the network to switch into the ONLINE state).
+  bool network_state_ignored_until_proxy_auth_ = false;
 
   // Used for pending GAIA reloads.
   NetworkError::ErrorReason gaia_reload_reason_ =
@@ -541,10 +520,6 @@ class SigninScreenHandler
   // TODO(antrim@): remove this dependency.
   GaiaScreenHandler* gaia_screen_handler_ = nullptr;
 
-  mojo::Binding<ash::mojom::TouchViewObserver> touch_view_binding_;
-  ash::mojom::TouchViewManagerPtr touch_view_manager_ptr_;
-  bool touch_view_enabled_ = false;
-
   // Input Method Engine state used at signin screen.
   scoped_refptr<input_method::InputMethodManager::State> ime_state_;
 
@@ -554,7 +529,8 @@ class SigninScreenHandler
   // True if SigninScreenHandler has already been added to OobeUI observers.
   bool oobe_ui_observer_added_ = false;
 
-  bool zero_offline_timeout_for_test_ = false;
+  bool is_offline_timeout_for_test_set_ = false;
+  base::TimeDelta offline_timeout_for_test_;
 
   std::unique_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 

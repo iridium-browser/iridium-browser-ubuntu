@@ -4,15 +4,26 @@
 
 package org.chromium.net;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import static org.chromium.net.CronetTestRule.getContext;
+import static org.chromium.net.CronetTestRule.getTestStorage;
+
 import android.support.test.filters.LargeTest;
 import android.support.test.filters.SmallTest;
 
 import org.json.JSONObject;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.runner.RunWith;
 
 import org.chromium.base.Log;
-import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.net.CronetTestBase.OnlyRunNativeCronet;
+import org.chromium.net.CronetTestRule.OnlyRunNativeCronet;
 import org.chromium.net.MetricsTestUtil.TestRequestFinishedListener;
 
 import java.io.File;
@@ -25,14 +36,17 @@ import java.util.concurrent.Executors;
 /**
  * Tests making requests using QUIC.
  */
-public class QuicTest extends CronetTestBase {
+@RunWith(BaseJUnit4ClassRunner.class)
+public class QuicTest {
+    @Rule
+    public final CronetTestRule mTestRule = new CronetTestRule();
+
     private static final String TAG = QuicTest.class.getSimpleName();
     private static final String QUIC_PROTOCOL_STRING_PREFIX = "http/2+quic/";
     private ExperimentalCronetEngine.Builder mBuilder;
 
-    @Override
-    protected void setUp() throws Exception {
-        super.setUp();
+    @Before
+    public void setUp() throws Exception {
         // Load library first, since we need the Quic test server's URL.
         System.loadLibrary("cronet_tests");
         QuicTestServer.startQuicTestServer(getContext());
@@ -42,19 +56,24 @@ public class QuicTest extends CronetTestBase {
         mBuilder.addQuicHint(QuicTestServer.getServerHost(), QuicTestServer.getServerPort(),
                 QuicTestServer.getServerPort());
 
+        // The pref may not be written if the computed Effective Connection Type (ECT) matches the
+        // default ECT for the current connection type. Force the ECT to "Slow-2G". Since "Slow-2G"
+        // is not the default ECT for any connection type, this ensures that the pref is written to.
+        JSONObject nqeParams = new JSONObject().put("force_effective_connection_type", "Slow-2G");
+
         // TODO(mgersh): Enable connection migration once it works, see http://crbug.com/634910
         JSONObject quicParams = new JSONObject()
                                         .put("connection_options", "PACE,IW10,FOO,DEADBEEF")
                                         .put("max_server_configs_stored_in_properties", 2)
                                         .put("idle_connection_timeout_seconds", 300)
-                                        .put("close_sessions_on_ip_change", false)
                                         .put("migrate_sessions_on_network_change", false)
                                         .put("migrate_sessions_early", false)
                                         .put("race_cert_verification", true);
         JSONObject hostResolverParams = CronetTestUtil.generateHostResolverRules();
         JSONObject experimentalOptions = new JSONObject()
                                                  .put("QUIC", quicParams)
-                                                 .put("HostResolverRules", hostResolverParams);
+                                                 .put("HostResolverRules", hostResolverParams)
+                                                 .put("NetworkQualityEstimator", nqeParams);
         mBuilder.setExperimentalOptions(experimentalOptions.toString());
         mBuilder.setStoragePath(getTestStorage(getContext()));
         mBuilder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, 1000 * 1024);
@@ -62,12 +81,12 @@ public class QuicTest extends CronetTestBase {
                 mBuilder, QuicTestServer.createMockCertVerifier());
     }
 
-    @Override
-    protected void tearDown() throws Exception {
+    @After
+    public void tearDown() throws Exception {
         QuicTestServer.shutdownQuicTestServer();
-        super.tearDown();
     }
 
+    @Test
     @LargeTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -133,10 +152,10 @@ public class QuicTest extends CronetTestBase {
         // The total received bytes should be larger than the content length, to account for
         // headers.
         assertTrue(callback2.mResponseInfo.getReceivedByteCount() > expectedContent.length());
+        cronetEngine.shutdown();
     }
 
     // Returns whether a file contains a particular string.
-    @SuppressFBWarnings("OBL_UNSATISFIED_OBLIGATION_EXCEPTION_EDGE")
     private boolean fileContainsString(String filename, String content) throws IOException {
         File file = new File(getTestStorage(getContext()) + "/prefs/" + filename);
         FileInputStream fileInputStream = new FileInputStream(file);
@@ -149,6 +168,7 @@ public class QuicTest extends CronetTestBase {
     /**
      * Tests that the network quality listeners are propoerly notified when QUIC is enabled.
      */
+    @Test
     @LargeTest
     @Feature({"Cronet"})
     @OnlyRunNativeCronet
@@ -228,6 +248,7 @@ public class QuicTest extends CronetTestBase {
         cronetEngine.shutdown();
     }
 
+    @Test
     @SmallTest
     @OnlyRunNativeCronet
     @Feature({"Cronet"})

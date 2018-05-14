@@ -35,15 +35,17 @@ class URLRequestContextGetter;
 
 namespace policy {
 
+class ActiveDirectoryPolicyManager;
 class AffiliatedCloudPolicyInvalidator;
 class AffiliatedInvalidationServiceProvider;
 class AffiliatedRemoteCommandsInvalidator;
 class BluetoothPolicyHandler;
-class ActiveDirectoryPolicyManager;
 class DeviceCloudPolicyInitializer;
 class DeviceLocalAccountPolicyService;
 struct EnrollmentConfig;
-class NetworkConfigurationUpdater;
+class HostnameHandler;
+class MinimumVersionPolicyHandler;
+class DeviceNetworkConfigurationUpdater;
 class ProxyPolicyProvider;
 class ServerBackedStateKeysBroker;
 
@@ -56,6 +58,7 @@ class BrowserPolicyConnectorChromeOS
 
   ~BrowserPolicyConnectorChromeOS() override;
 
+  // ChromeBrowserPolicyConnector:
   void Init(
       PrefService* local_state,
       scoped_refptr<net::URLRequestContextGetter> request_context) override;
@@ -91,6 +94,9 @@ class BrowserPolicyConnectorChromeOS
 
   // Returns the device asset ID if it is set.
   std::string GetDeviceAssetID() const;
+
+  // Returns the device annotated location if it is set.
+  std::string GetDeviceAnnotatedLocation() const;
 
   // Returns the cloud directory API ID or an empty string if it is not set.
   std::string GetDirectoryApiID() const;
@@ -135,6 +141,15 @@ class BrowserPolicyConnectorChromeOS
     return state_keys_broker_.get();
   }
 
+  MinimumVersionPolicyHandler* GetMinimumVersionPolicyHandler() const {
+    return minimum_version_policy_handler_.get();
+  }
+
+  DeviceNetworkConfigurationUpdater* GetDeviceNetworkConfigurationUpdater()
+      const {
+    return device_network_configuration_updater_.get();
+  }
+
   // The browser-global PolicyService is created before Profiles are ready, to
   // provide managed values for the local state PrefService. It includes a
   // policy provider that forwards policies from a delegate policy provider.
@@ -165,6 +180,11 @@ class BrowserPolicyConnectorChromeOS
   void OnDeviceCloudPolicyManagerDisconnected() override;
 
   chromeos::AffiliationIDSet GetDeviceAffiliationIDs() const;
+
+ protected:
+  // ChromeBrowserPolicyConnector:
+  std::vector<std::unique_ptr<policy::ConfigurationPolicyProvider>>
+  CreatePolicyProviders() override;
 
  private:
   // Set the timezone as soon as the policies are available.
@@ -198,6 +218,8 @@ class BrowserPolicyConnectorChromeOS
       device_remote_commands_invalidator_;
 
   std::unique_ptr<BluetoothPolicyHandler> bluetooth_policy_handler_;
+  std::unique_ptr<HostnameHandler> hostname_handler_;
+  std::unique_ptr<MinimumVersionPolicyHandler> minimum_version_policy_handler_;
 
   // This policy provider is used on Chrome OS to feed user policy into the
   // global PolicyService instance. This works by installing the cloud policy
@@ -207,7 +229,12 @@ class BrowserPolicyConnectorChromeOS
   // pointer to get to the ProxyPolicyProvider at SetUserPolicyDelegate().
   ProxyPolicyProvider* global_user_cloud_policy_provider_ = nullptr;
 
-  std::unique_ptr<NetworkConfigurationUpdater> network_configuration_updater_;
+  std::unique_ptr<DeviceNetworkConfigurationUpdater>
+      device_network_configuration_updater_;
+
+  // The ConfigurationPolicyProviders created in the constructor are initially
+  // added here, and then pushed to the super class in BuildPolicyProviders().
+  std::vector<std::unique_ptr<ConfigurationPolicyProvider>> providers_for_init_;
 
   base::WeakPtrFactory<BrowserPolicyConnectorChromeOS> weak_ptr_factory_;
 

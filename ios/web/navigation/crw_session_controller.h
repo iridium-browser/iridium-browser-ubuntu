@@ -30,7 +30,7 @@ struct Referrer;
 @interface CRWSessionController : NSObject
 
 @property(nonatomic, readonly, assign) NSInteger lastCommittedItemIndex;
-@property(nonatomic, readonly, assign) NSInteger previousItemIndex;
+@property(nonatomic, readwrite, assign) NSInteger previousItemIndex;
 // The index of the pending item if it is in |items|, or -1 if |pendingItem|
 // corresponds with a new navigation (created by addPendingItem:).
 @property(nonatomic, readwrite, assign) NSInteger pendingItemIndex;
@@ -90,10 +90,6 @@ struct Referrer;
     userAgentOverrideOption:(web::NavigationManager::UserAgentOverrideOption)
                                 userAgentOverrideOption;
 
-// Updates the URL of the yet to be committed pending item. Useful for page
-// redirects. Does nothing if there is no pending item.
-- (void)updatePendingItem:(const GURL&)url;
-
 // Commits the current pending item. No changes are made to the item during
 // this process, it is just moved from pending to committed.
 // TODO(pinkerton): Desktop Chrome broadcasts a notification here, should we?
@@ -112,10 +108,6 @@ struct Referrer;
 - (void)pushNewItemWithURL:(const GURL&)URL
                stateObject:(NSString*)stateObject
                 transition:(ui::PageTransition)transition;
-
-// Updates the URL and state object for the current item.
-- (void)updateCurrentItemWithURL:(const GURL&)url
-                     stateObject:(NSString*)stateObject;
 
 // Removes the pending and transient NavigationItems.
 - (void)discardNonCommittedItems;

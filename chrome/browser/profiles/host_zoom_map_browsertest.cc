@@ -16,6 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,8 +33,8 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/signin_switches.h"
+#include "components/signin/core/browser/profile_management_switches.h"
+#include "components/signin/core/browser/signin_switches.h"
 #include "components/zoom/page_zoom.h"
 #include "components/zoom/zoom_event_manager.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -118,7 +119,7 @@ class HostZoomMapBrowserTest : public InProcessBrowserTest {
         prefs->GetDictionary(prefs::kPartitionPerHostZoomLevels);
     const base::DictionaryValue* values = NULL;
     std::string partition_key =
-        ChromeZoomLevelPrefs::GetHashForTesting(base::FilePath());
+        ChromeZoomLevelPrefs::GetPartitionKeyForTesting(base::FilePath());
     dictionaries->GetDictionary(partition_key, &values);
     std::vector<std::string> results;
     if (values) {
@@ -130,7 +131,7 @@ class HostZoomMapBrowserTest : public InProcessBrowserTest {
   }
 
   std::string GetSigninPromoURL() {
-    return signin::GetPromoURL(
+    return signin::GetPromoURLForTab(
                signin_metrics::AccessPoint::ACCESS_POINT_START_PAGE,
                signin_metrics::Reason::REASON_SIGNIN_PRIMARY_ACCOUNT, false)
         .spec();
@@ -173,14 +174,14 @@ class HostZoomMapBrowserTestWithPrefs : public HostZoomMapBrowserTest {
     // It seems the hash functions on different platforms can return different
     // values for the same input, so make sure we test with the hash appropriate
     // for the platform.
-    std::string hash_string =
-        ChromeZoomLevelPrefs::GetHashForTesting(base::FilePath());
+    std::string partition_key =
+        ChromeZoomLevelPrefs::GetPartitionKeyForTesting(base::FilePath());
     std::string partition_key_placeholder(PARTITION_KEY_PLACEHOLDER);
     size_t start_index;
     while ((start_index = prefs_data_.find(partition_key_placeholder)) !=
            std::string::npos) {
-      prefs_data_.replace(
-          start_index, partition_key_placeholder.size(), hash_string);
+      prefs_data_.replace(start_index, partition_key_placeholder.size(),
+                          partition_key);
     }
 
     base::FilePath user_data_directory, path_to_prefs;

@@ -30,17 +30,28 @@ class DocumentOrShadowRoot {
     return &shadow_root.StyleSheets();
   }
 
+  static StyleSheetList* moreStyleSheets(TreeScope& tree_scope) {
+    CHECK(RuntimeEnabledFeatures::ConstructableStylesheetsEnabled());
+    return &tree_scope.MoreStyleSheets();
+  }
+
+  static void setMoreStyleSheets(TreeScope& tree_scope,
+                                 StyleSheetList* more_style_sheets) {
+    CHECK(RuntimeEnabledFeatures::ConstructableStylesheetsEnabled());
+    tree_scope.SetMoreStyleSheets(more_style_sheets);
+  }
+
   static DOMSelection* getSelection(TreeScope& tree_scope) {
     return tree_scope.GetSelection();
   }
 
-  static Element* elementFromPoint(TreeScope& tree_scope, int x, int y) {
+  static Element* elementFromPoint(TreeScope& tree_scope, double x, double y) {
     return tree_scope.ElementFromPoint(x, y);
   }
 
   static HeapVector<Member<Element>> elementsFromPoint(TreeScope& tree_scope,
-                                                       int x,
-                                                       int y) {
+                                                       double x,
+                                                       double y) {
     return tree_scope.ElementsFromPoint(x, y);
   }
 

@@ -32,13 +32,17 @@ uint32_t GetHomeButtonAndHomePageIsNewTabPageFlags() {
 
 }  // namespace
 
-namespace chrome {
-
 void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kOptionsWindowLastTabIndex, 0);
   registry->RegisterBooleanPref(prefs::kAllowFileSelectionDialogs, true);
-  registry->RegisterIntegerPref(prefs::kShowFirstRunBubbleOption,
-                             first_run::FIRST_RUN_BUBBLE_DONT_SHOW);
+
+#if !defined(OS_ANDROID)
+#if !defined(OS_CHROMEOS)
+  registry->RegisterIntegerPref(prefs::kRelaunchNotification, 0);
+#endif  // !defined(OS_CHROMEOS)
+  registry->RegisterIntegerPref(prefs::kRelaunchNotificationPeriod,
+                                7 * 24 * 60 * 60 * 1000);  // 1 week.
+#endif  // !defined(OS_ANDROID)
 }
 
 void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
@@ -61,8 +65,7 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kWebAppCreateInAppsMenu, true);
   registry->RegisterBooleanPref(prefs::kWebAppCreateInQuickLaunchBar, true);
   registry->RegisterBooleanPref(
-      prefs::kEnableTranslate,
-      false,
+      prefs::kOfferTranslateEnabled, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterStringPref(prefs::kCloudPrintEmail, std::string());
   registry->RegisterBooleanPref(prefs::kCloudPrintProxyEnabled, true);
@@ -98,8 +101,6 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
 
   // We need to register the type of these preferences in order to query
   // them even though they're only typically controlled via policy.
-  registry->RegisterBooleanPref(prefs::kPluginsAllowOutdated, false);
-  registry->RegisterBooleanPref(prefs::kPluginsAlwaysAuthorize, false);
   registry->RegisterBooleanPref(prefs::kClearPluginLSODataEnabled, true);
   registry->RegisterBooleanPref(prefs::kHideWebStoreIcon, false);
 #if defined(OS_MACOSX)
@@ -116,9 +117,10 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kShowFullscreenToolbar,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterBooleanPref(
+      prefs::kAllowJavascriptAppleEvents, false,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 #else
   registry->RegisterBooleanPref(prefs::kFullscreenAllowed, true);
 #endif
 }
-
-}  // namespace chrome

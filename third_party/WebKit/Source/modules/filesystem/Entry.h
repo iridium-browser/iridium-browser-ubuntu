@@ -34,18 +34,17 @@
 #include "modules/ModulesExport.h"
 #include "modules/filesystem/DOMFileSystem.h"
 #include "modules/filesystem/EntryBase.h"
-#include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class DirectoryEntry;
-class EntryCallback;
-class ErrorCallback;
-class MetadataCallback;
-class VoidCallback;
+class V8EntryCallback;
+class V8ErrorCallback;
+class V8MetadataCallback;
+class V8VoidCallback;
 
-class MODULES_EXPORT Entry : public EntryBase, public ScriptWrappable {
+class MODULES_EXPORT Entry : public EntryBase {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -55,27 +54,27 @@ class MODULES_EXPORT Entry : public EntryBase, public ScriptWrappable {
   DOMFileSystem* filesystem(ScriptState*) const;
 
   void getMetadata(ScriptState*,
-                   MetadataCallback* success_callback = nullptr,
-                   ErrorCallback* = nullptr);
+                   V8MetadataCallback* success_callback = nullptr,
+                   V8ErrorCallback* = nullptr);
   void moveTo(ScriptState*,
               DirectoryEntry* parent,
               const String& name = String(),
-              EntryCallback* success_callback = nullptr,
-              ErrorCallback* = nullptr) const;
+              V8EntryCallback* success_callback = nullptr,
+              V8ErrorCallback* = nullptr) const;
   void copyTo(ScriptState*,
               DirectoryEntry* parent,
               const String& name = String(),
-              EntryCallback* success_callback = nullptr,
-              ErrorCallback* = nullptr) const;
+              V8EntryCallback* success_callback = nullptr,
+              V8ErrorCallback* = nullptr) const;
   void remove(ScriptState*,
-              VoidCallback* success_callback = nullptr,
-              ErrorCallback* = nullptr) const;
+              V8VoidCallback* success_callback = nullptr,
+              V8ErrorCallback* = nullptr) const;
   void getParent(ScriptState*,
-                 EntryCallback* success_callback = nullptr,
-                 ErrorCallback* = nullptr) const;
+                 V8EntryCallback* success_callback = nullptr,
+                 V8ErrorCallback* = nullptr) const;
   String toURL(ScriptState*) const;
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  protected:
   Entry(DOMFileSystemBase*, const String& full_path);

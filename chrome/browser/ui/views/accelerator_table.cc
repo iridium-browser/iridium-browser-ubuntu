@@ -13,8 +13,8 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/events/event_constants.h"
 
-#if defined(USE_ASH)
-#include "ash/accelerators/accelerator_table.h"  // nogncheck
+#if defined(OS_CHROMEOS)
+#include "ash/accelerators/accelerator_table.h"
 #endif
 
 namespace {
@@ -34,7 +34,6 @@ const ui::EventFlags kPlatformModifier = ui::EF_CONTROL_DOWN;
 // Do not use Ctrl-Alt as a shortcut modifier, as it is used by i18n keyboards:
 // http://blogs.msdn.com/b/oldnewthing/archive/2004/03/29/101121.aspx
 const AcceleratorMapping kAcceleratorMap[] = {
-  { ui::VKEY_BACK, ui::EF_NONE, IDC_BACKSPACE_BACK },
   { ui::VKEY_D, kPlatformModifier, IDC_BOOKMARK_PAGE },
   { ui::VKEY_D, ui::EF_SHIFT_DOWN | kPlatformModifier,
     IDC_BOOKMARK_ALL_TABS },
@@ -44,7 +43,6 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_G, kPlatformModifier, IDC_FIND_NEXT },
   { ui::VKEY_G, ui::EF_SHIFT_DOWN | kPlatformModifier, IDC_FIND_PREVIOUS },
   { ui::VKEY_L, kPlatformModifier, IDC_FOCUS_LOCATION },
-  { ui::VKEY_BACK, ui::EF_SHIFT_DOWN, IDC_BACKSPACE_FORWARD },
   { ui::VKEY_F12, ui::EF_NONE, IDC_DEV_TOOLS_TOGGLE },
   { ui::VKEY_O, kPlatformModifier, IDC_OPEN_FILE },
   { ui::VKEY_P, kPlatformModifier, IDC_PRINT },
@@ -147,31 +145,32 @@ const AcceleratorMapping kAcceleratorMap[] = {
     IDC_HELP_PAGE_VIA_KEYBOARD },
   { ui::VKEY_BROWSER_FAVORITES, ui::EF_NONE, IDC_SHOW_BOOKMARK_MANAGER },
   { ui::VKEY_BROWSER_STOP, ui::EF_NONE, IDC_STOP },
-  { ui::VKEY_P, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN,
-    IDC_TOUCH_HUD_PROJECTION_TOGGLE },
+  // On Chrome OS, Search + Esc is used to call out task manager.
+  { ui::VKEY_ESCAPE, ui::EF_COMMAND_DOWN, IDC_TASK_MANAGER },
 #else  // !OS_CHROMEOS
-  { ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN, IDC_TASK_MANAGER },
-  { ui::VKEY_LMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
-  { ui::VKEY_MENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
-  { ui::VKEY_RMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR },
-  // On Windows, all VKEY_BROWSER_* keys except VKEY_BROWSER_SEARCH are handled
-  // via WM_APPCOMMAND.
-  { ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, IDC_FOCUS_SEARCH },
-  { ui::VKEY_M, ui::EF_SHIFT_DOWN | kPlatformModifier, IDC_SHOW_AVATAR_MENU },
+    {ui::VKEY_ESCAPE, ui::EF_SHIFT_DOWN, IDC_TASK_MANAGER},
+    {ui::VKEY_LMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR},
+    {ui::VKEY_MENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR},
+    {ui::VKEY_RMENU, ui::EF_NONE, IDC_FOCUS_MENU_BAR},
+    // On Windows, all VKEY_BROWSER_* keys except VKEY_BROWSER_SEARCH are
+    // handled via WM_APPCOMMAND.
+    {ui::VKEY_BROWSER_SEARCH, ui::EF_NONE, IDC_FOCUS_SEARCH},
+    {ui::VKEY_M, ui::EF_SHIFT_DOWN | kPlatformModifier, IDC_SHOW_AVATAR_MENU},
   // For each entry until the end of the !OS_CHROMEOS block, and an entry into
   // kChromeCmdId2AshActionId below if Ash has a corresponding accelerator.
+#if !defined(OS_MACOSX)
+    {ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_EXIT},
+#endif  // !OS_MACOSX
+#endif  // !OS_CHROMEOS
+
 #if defined(GOOGLE_CHROME_BUILD) && !defined(OS_MACOSX)
   { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FEEDBACK },
 #endif  // GOOGLE_CHROME_BUILD && !OS_MACOSX
-#if !defined(OS_MACOSX)
-  { ui::VKEY_Q, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_EXIT },
-#endif  // !OS_MACOSX
   { ui::VKEY_N, ui::EF_SHIFT_DOWN | kPlatformModifier,
     IDC_NEW_INCOGNITO_WINDOW },
   { ui::VKEY_T, kPlatformModifier, IDC_NEW_TAB },
   { ui::VKEY_N, kPlatformModifier, IDC_NEW_WINDOW },
   { ui::VKEY_T, ui::EF_SHIFT_DOWN | kPlatformModifier, IDC_RESTORE_TAB },
-#endif  // !OS_CHROMEOS
 
 #if defined(OS_MACOSX)
   // VKEY_OEM_4 is Left Brace '[{' key.
@@ -217,44 +216,44 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_OEM_PERIOD, ui::EF_COMMAND_DOWN, IDC_STOP },
   { ui::VKEY_U, ui::EF_COMMAND_DOWN | ui::EF_ALT_DOWN, IDC_VIEW_SOURCE },
 #else  // !OS_MACOSX
-  // Alt by itself (or with just shift) is never used on Mac since it's used
-  // to generate non-ASCII characters. Such commands are given Mac-specific
-  // bindings as well. Mapping with just Alt appear here, and should have an
-  // alternative mapping in the block above.
-  { ui::VKEY_LEFT, ui::EF_ALT_DOWN, IDC_BACK },
+    // Alt by itself (or with just shift) is never used on Mac since it's used
+    // to generate non-ASCII characters. Such commands are given Mac-specific
+    // bindings as well. Mapping with just Alt appear here, and should have an
+    // alternative mapping in the block above.
+    {ui::VKEY_LEFT, ui::EF_ALT_DOWN, IDC_BACK},
 #if BUILDFLAG(ENABLE_BASIC_PRINTING)
-  { ui::VKEY_P, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_BASIC_PRINT},
+    {ui::VKEY_P, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_BASIC_PRINT},
 #endif  // ENABLE_BASIC_PRINTING
 #if !defined(OS_CHROMEOS)
-  { ui::VKEY_DELETE, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_CLEAR_BROWSING_DATA },
+    {ui::VKEY_DELETE, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+     IDC_CLEAR_BROWSING_DATA},
 #endif  // !OS_CHROMEOS
-  { ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_DEV_TOOLS },
-  { ui::VKEY_J, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_DEV_TOOLS_CONSOLE },
-  { ui::VKEY_C, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_DEV_TOOLS_INSPECT },
-  { ui::VKEY_B, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_BOOKMARKS },
-  { ui::VKEY_A, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_INFOBARS },
-  { ui::VKEY_D, ui::EF_ALT_DOWN, IDC_FOCUS_LOCATION },
-  { ui::VKEY_E, ui::EF_CONTROL_DOWN, IDC_FOCUS_SEARCH },
-  { ui::VKEY_K, ui::EF_CONTROL_DOWN, IDC_FOCUS_SEARCH },
-  { ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_TOOLBAR },
-  { ui::VKEY_RIGHT, ui::EF_ALT_DOWN, IDC_FORWARD },
-  { ui::VKEY_HOME, ui::EF_ALT_DOWN, IDC_HOME },
-  { ui::VKEY_E, ui::EF_ALT_DOWN, IDC_SHOW_APP_MENU},
-  { ui::VKEY_F, ui::EF_ALT_DOWN, IDC_SHOW_APP_MENU},
-  { ui::VKEY_O, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_SHOW_BOOKMARK_MANAGER },
-  { ui::VKEY_J, ui::EF_CONTROL_DOWN, IDC_SHOW_DOWNLOADS },
-  { ui::VKEY_H, ui::EF_CONTROL_DOWN, IDC_SHOW_HISTORY },
-  { ui::VKEY_U, ui::EF_CONTROL_DOWN, IDC_VIEW_SOURCE },
+    {ui::VKEY_I, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_DEV_TOOLS},
+    {ui::VKEY_J, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+     IDC_DEV_TOOLS_CONSOLE},
+    {ui::VKEY_C, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+     IDC_DEV_TOOLS_INSPECT},
+    {ui::VKEY_B, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_BOOKMARKS},
+    {ui::VKEY_A, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN,
+     IDC_FOCUS_INACTIVE_POPUP_FOR_ACCESSIBILITY},
+    {ui::VKEY_D, ui::EF_ALT_DOWN, IDC_FOCUS_LOCATION},
+    {ui::VKEY_E, ui::EF_CONTROL_DOWN, IDC_FOCUS_SEARCH},
+    {ui::VKEY_K, ui::EF_CONTROL_DOWN, IDC_FOCUS_SEARCH},
+    {ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN, IDC_FOCUS_TOOLBAR},
+    {ui::VKEY_RIGHT, ui::EF_ALT_DOWN, IDC_FORWARD},
+    {ui::VKEY_HOME, ui::EF_ALT_DOWN, IDC_HOME},
+    {ui::VKEY_E, ui::EF_ALT_DOWN, IDC_SHOW_APP_MENU},
+    {ui::VKEY_F, ui::EF_ALT_DOWN, IDC_SHOW_APP_MENU},
+    {ui::VKEY_O, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+     IDC_SHOW_BOOKMARK_MANAGER},
+    {ui::VKEY_J, ui::EF_CONTROL_DOWN, IDC_SHOW_DOWNLOADS},
+    {ui::VKEY_H, ui::EF_CONTROL_DOWN, IDC_SHOW_HISTORY},
+    {ui::VKEY_U, ui::EF_CONTROL_DOWN, IDC_VIEW_SOURCE},
 #if !defined(OS_CHROMEOS)
-  // On Chrome OS, these keys are assigned to change UI scale.
-  { ui::VKEY_OEM_MINUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_ZOOM_MINUS },
-  { ui::VKEY_OEM_PLUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
-    IDC_ZOOM_PLUS },
+    // On Chrome OS, these keys are assigned to change UI scale.
+    {ui::VKEY_OEM_MINUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN,
+     IDC_ZOOM_MINUS},
+    {ui::VKEY_OEM_PLUS, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN, IDC_ZOOM_PLUS},
 #endif  // !OS_CHROMEOS
 #endif  // OS_MACOSX
 };
@@ -271,7 +270,7 @@ const int kRepeatableCommandIds[] = {
 };
 const size_t kRepeatableCommandIdsLength = arraysize(kRepeatableCommandIds);
 
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
 // Below we map Chrome command ids to Ash action ids for commands that have
 // an shortcut that is handled by Ash (instead of Chrome). Adding entries
 // here will show shortcut text on menus. See comment above.
@@ -289,13 +288,10 @@ const ChromeCmdId2AshActionId kChromeCmdId2AshActionId[] = {
   { IDC_NEW_WINDOW,           ash::NEW_WINDOW },
   { IDC_RESTORE_TAB,          ash::RESTORE_TAB },
   { IDC_TASK_MANAGER,         ash::SHOW_TASK_MANAGER },
-#if defined(OS_CHROMEOS)
-  { IDC_TOUCH_HUD_PROJECTION_TOGGLE, ash::TOUCH_HUD_PROJECTION_TOGGLE },
-#endif
 };
 const size_t kChromeCmdId2AshActionIdLength =
     arraysize(kChromeCmdId2AshActionId);
-#endif // defined(USE_ASH)
+#endif  // defined(OS_CHROMEOS)
 
 } // namespace
 
@@ -308,7 +304,7 @@ std::vector<AcceleratorMapping> GetAcceleratorList() {
 
 bool GetAshAcceleratorForCommandId(int command_id,
                                    ui::Accelerator* accelerator) {
-#if defined(USE_ASH)
+#if defined(OS_CHROMEOS)
   for (size_t i = 0; i < kChromeCmdId2AshActionIdLength; ++i) {
     if (command_id == kChromeCmdId2AshActionId[i].chrome_cmd_id) {
       for (size_t j = 0; j < ash::kAcceleratorDataLength; ++j) {
@@ -321,7 +317,7 @@ bool GetAshAcceleratorForCommandId(int command_id,
       }
     }
   }
-#endif // defined(USE_ASH)
+#endif  // defined(OS_CHROMEOS)
   return false;
 }
 

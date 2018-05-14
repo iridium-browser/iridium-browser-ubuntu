@@ -10,15 +10,16 @@
 
 #include "libANGLE/renderer/d3d/d3d9/TextureStorage9.h"
 
-#include "libANGLE/formatutils.h"
+#include "common/utilities.h"
 #include "libANGLE/Texture.h"
+#include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/d3d/EGLImageD3D.h"
 #include "libANGLE/renderer/d3d/TextureD3D.h"
+#include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
+#include "libANGLE/renderer/d3d/d3d9/Renderer9.h"
+#include "libANGLE/renderer/d3d/d3d9/SwapChain9.h"
 #include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
 #include "libANGLE/renderer/d3d/d3d9/renderer9_utils.h"
-#include "libANGLE/renderer/d3d/d3d9/Renderer9.h"
-#include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
-#include "libANGLE/renderer/d3d/d3d9/SwapChain9.h"
 
 namespace rx
 {
@@ -144,7 +145,7 @@ TextureStorage9_2D::TextureStorage9_2D(Renderer9 *renderer, GLenum internalforma
 TextureStorage9_2D::~TextureStorage9_2D()
 {
     SafeRelease(mTexture);
-    for (auto &renderTarget : mRenderTargets)
+    for (RenderTargetD3D *renderTarget : mRenderTargets)
     {
         SafeDelete(renderTarget);
     }
@@ -446,7 +447,7 @@ TextureStorage9_Cube::TextureStorage9_Cube(Renderer9 *renderer, GLenum internalf
     : TextureStorage9(renderer, GetTextureUsage(internalformat, renderTarget))
 {
     mTexture = nullptr;
-    for (size_t i = 0; i < CUBE_FACE_COUNT; ++i)
+    for (size_t i = 0; i < gl::CUBE_FACE_COUNT; ++i)
     {
         mRenderTarget[i] = nullptr;
     }
@@ -467,7 +468,7 @@ TextureStorage9_Cube::~TextureStorage9_Cube()
 {
     SafeRelease(mTexture);
 
-    for (size_t i = 0; i < CUBE_FACE_COUNT; ++i)
+    for (size_t i = 0; i < gl::CUBE_FACE_COUNT; ++i)
     {
         SafeDelete(mRenderTarget[i]);
     }
@@ -515,9 +516,11 @@ gl::Error TextureStorage9_Cube::getRenderTarget(const gl::Context *context,
 {
     ASSERT(outRT);
     ASSERT(index.mipIndex == 0);
-    ASSERT(index.layerIndex >= 0 && static_cast<size_t>(index.layerIndex) < CUBE_FACE_COUNT);
 
-    if (mRenderTarget[index.layerIndex] == nullptr && isRenderTarget())
+    ASSERT(index.type == GL_TEXTURE_CUBE_MAP && gl::IsCubeMapTextureTarget(index.target));
+    const size_t renderTargetIndex = index.cubeMapFaceIndex();
+
+    if (mRenderTarget[renderTargetIndex] == nullptr && isRenderTarget())
     {
         IDirect3DBaseTexture9 *baseTexture = nullptr;
         gl::Error error                    = getBaseTexture(context, &baseTexture);
@@ -527,20 +530,19 @@ gl::Error TextureStorage9_Cube::getRenderTarget(const gl::Context *context,
         }
 
         IDirect3DSurface9 *surface = nullptr;
-        error = getSurfaceLevel(context, GL_TEXTURE_CUBE_MAP_POSITIVE_X + index.layerIndex,
-                                mTopLevel + index.mipIndex, false, &surface);
+        error = getSurfaceLevel(context, index.target, mTopLevel + index.mipIndex, false, &surface);
         if (error.isError())
         {
             return error;
         }
 
         baseTexture->AddRef();
-        mRenderTarget[index.layerIndex] = new TextureRenderTarget9(
+        mRenderTarget[renderTargetIndex] = new TextureRenderTarget9(
             baseTexture, mTopLevel + index.mipIndex, surface, mInternalFormat,
             static_cast<GLsizei>(mTextureWidth), static_cast<GLsizei>(mTextureHeight), 1, 0);
     }
 
-    *outRT = mRenderTarget[index.layerIndex];
+    *outRT = mRenderTarget[renderTargetIndex];
     return gl::NoError();
 }
 
@@ -550,14 +552,14 @@ gl::Error TextureStorage9_Cube::generateMipmap(const gl::Context *context,
 {
     IDirect3DSurface9 *upper = nullptr;
     gl::Error error =
-        getSurfaceLevel(context, sourceIndex.type, sourceIndex.mipIndex, false, &upper);
+        getSurfaceLevel(context, sourceIndex.target, sourceIndex.mipIndex, false, &upper);
     if (error.isError())
     {
         return error;
     }
 
     IDirect3DSurface9 *lower = nullptr;
-    error = getSurfaceLevel(context, destIndex.type, destIndex.mipIndex, true, &lower);
+    error = getSurfaceLevel(context, destIndex.target, destIndex.mipIndex, true, &lower);
     if (error.isError())
     {
         SafeRelease(upper);
@@ -608,7 +610,7 @@ gl::Error TextureStorage9_Cube::copyToStorage(const gl::Context *context,
     TextureStorage9_Cube *dest9 = GetAs<TextureStorage9_Cube>(destStorage);
 
     int levels = getLevelCount();
-    for (int f = 0; f < static_cast<int>(CUBE_FACE_COUNT); f++)
+    for (int f = 0; f < static_cast<int>(gl::CUBE_FACE_COUNT); f++)
     {
         for (int i = 0; i < levels; i++)
         {

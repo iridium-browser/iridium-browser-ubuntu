@@ -7,11 +7,12 @@
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
-#include "components/safe_json/safe_json_parser.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/service_manager_connection.h"
 #include "net/base/load_flags.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request.h"
+#include "services/data_decoder/public/cpp/safe_json_parser.h"
 
 using content::BrowserThread;
 
@@ -23,28 +24,26 @@ const char kImageDecodeError[] = "Image decode failed";
 
 namespace extensions {
 
-WebstoreInstallHelper::WebstoreInstallHelper(
-    Delegate* delegate,
-    const std::string& id,
-    const std::string& manifest,
-    const GURL& icon_url,
-    net::URLRequestContextGetter* context_getter)
+WebstoreInstallHelper::WebstoreInstallHelper(Delegate* delegate,
+                                             const std::string& id,
+                                             const std::string& manifest,
+                                             const GURL& icon_url)
     : delegate_(delegate),
       id_(id),
       manifest_(manifest),
       icon_url_(icon_url),
-      context_getter_(context_getter),
       icon_decode_complete_(false),
       manifest_parse_complete_(false),
-      parse_error_(Delegate::UNKNOWN_ERROR) {
-}
+      parse_error_(Delegate::UNKNOWN_ERROR) {}
 
 WebstoreInstallHelper::~WebstoreInstallHelper() {}
 
-void WebstoreInstallHelper::Start() {
+void WebstoreInstallHelper::Start(
+    network::mojom::URLLoaderFactory* loader_factory) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  safe_json::SafeJsonParser::Parse(
+  data_decoder::SafeJsonParser::Parse(
+      content::ServiceManagerConnection::GetForProcess()->GetConnector(),
       manifest_, base::Bind(&WebstoreInstallHelper::OnJSONParseSucceeded, this),
       base::Bind(&WebstoreInstallHelper::OnJSONParseFailed, this));
 
@@ -73,7 +72,7 @@ void WebstoreInstallHelper::Start() {
             destination: GOOGLE_OWNED_SERVICE
           }
           policy {
-            cookies_allowed: false
+            cookies_allowed: NO
             setting:
               "There's no direct Chromium's setting to disable this, but you "
               "could uninstall all extensions and not install (or begin the "
@@ -82,13 +81,12 @@ void WebstoreInstallHelper::Start() {
               "Not implemented, considered not useful."
           })");
 
-    icon_fetcher_.reset(
-        new chrome::BitmapFetcher(icon_url_, this, traffic_annotation));
+    icon_fetcher_.reset(new BitmapFetcher(icon_url_, this, traffic_annotation));
     icon_fetcher_->Init(
-        context_getter_, std::string(),
-        net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
+        std::string(),
+        net::URLRequest::REDUCE_REFERRER_GRANULARITY_ON_TRANSITION_CROSS_ORIGIN,
         net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES);
-    icon_fetcher_->Start();
+    icon_fetcher_->Start(loader_factory);
   }
 }
 

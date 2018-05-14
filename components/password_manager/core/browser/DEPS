@@ -11,10 +11,14 @@ include_rules = [
   "+crypto",
   "+google_apis",
   "+grit",
+  "+net",
   "+services/metrics/public/cpp",
 ]
 
 specific_include_rules = {
+  "password_autofill_manager_unittest\.cc": [
+    "+components/ukm",
+  ],
   "password_form_manager_unittest\.cc": [
     "+components/ukm",
   ],

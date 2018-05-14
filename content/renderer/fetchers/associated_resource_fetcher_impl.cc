@@ -127,20 +127,20 @@ AssociatedResourceFetcherImpl::~AssociatedResourceFetcherImpl() {
     loader_->Cancel();
 }
 
-void AssociatedResourceFetcherImpl::SetServiceWorkerMode(
-    blink::WebURLRequest::ServiceWorkerMode service_worker_mode) {
+void AssociatedResourceFetcherImpl::SetSkipServiceWorker(
+    bool skip_service_worker) {
   DCHECK(!request_.IsNull());
   DCHECK(!loader_);
 
-  request_.SetServiceWorkerMode(service_worker_mode);
+  request_.SetSkipServiceWorker(skip_service_worker);
 }
 
-void AssociatedResourceFetcherImpl::SetCachePolicy(
-    blink::WebCachePolicy policy) {
+void AssociatedResourceFetcherImpl::SetCacheMode(
+    blink::mojom::FetchCacheMode mode) {
   DCHECK(!request_.IsNull());
   DCHECK(!loader_);
 
-  request_.SetCachePolicy(policy);
+  request_.SetCacheMode(mode);
 }
 
 void AssociatedResourceFetcherImpl::SetLoaderOptions(
@@ -154,9 +154,9 @@ void AssociatedResourceFetcherImpl::SetLoaderOptions(
 void AssociatedResourceFetcherImpl::Start(
     blink::WebLocalFrame* frame,
     blink::WebURLRequest::RequestContext request_context,
-    blink::WebURLRequest::FetchRequestMode fetch_request_mode,
-    blink::WebURLRequest::FetchCredentialsMode fetch_credentials_mode,
-    blink::WebURLRequest::FrameType frame_type,
+    network::mojom::FetchRequestMode fetch_request_mode,
+    network::mojom::FetchCredentialsMode fetch_credentials_mode,
+    network::mojom::RequestContextFrameType frame_type,
     const Callback& callback) {
   DCHECK(!loader_);
   DCHECK(!client_);
@@ -166,7 +166,7 @@ void AssociatedResourceFetcherImpl::Start(
 
   request_.SetRequestContext(request_context);
   request_.SetFrameType(frame_type);
-  request_.SetFirstPartyForCookies(frame->GetDocument().FirstPartyForCookies());
+  request_.SetSiteForCookies(frame->GetDocument().SiteForCookies());
   request_.SetFetchRequestMode(fetch_request_mode);
   request_.SetFetchCredentialsMode(fetch_credentials_mode);
 

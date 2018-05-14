@@ -22,6 +22,7 @@
 <translation id="158809615184981282">Faerská klávesnica</translation>
 <translation id="1646136617204068573">maďarská klávesnica</translation>
 <translation id="164729547906544836">Tamilská klávesnica (itrans)</translation>
+<translation id="164969095109328410">Zariadenie Chrome</translation>
 <translation id="1829129547161959350">Tučniak</translation>
 <translation id="184633654410729720">Thajská klávesnica (Kedmanee)</translation>
 <translation id="1921986354447415460">Turecká klávesnica (typ F)</translation>
@@ -114,6 +115,7 @@
 <translation id="4694604912444486114">Opica</translation>
 <translation id="4711094779914110278">Turečtina</translation>
 <translation id="4725511304875193254">Corgi</translation>
+<translation id="4737050008115666127">Pristátie</translation>
 <translation id="4747271164117300400">Macedónčina</translation>
 <translation id="4749157430980974800">Gruzínska klávesnica</translation>
 <translation id="4755240240651974342">fínska klávesnica</translation>
@@ -125,6 +127,7 @@
 <translation id="4943368462779413526">Futbal</translation>
 <translation id="497244430928947428">Malajálamska klávesnica (fonetický prepis)</translation>
 <translation id="498902553138568924">Červený motýľ</translation>
+<translation id="5011233892417813670">Chromebook</translation>
 <translation id="5068919226082848014">Pizza</translation>
 <translation id="5098629044894065541">Hebrejčina</translation>
 <translation id="5123433949759960244">Basketbal</translation>
@@ -146,6 +149,7 @@
 <translation id="5465122519792752163">Klávesnica pre nepálčinu (InScript)</translation>
 <translation id="5469868506864199649">Taliančina</translation>
 <translation id="5500122897333236901">Islandčina</translation>
+<translation id="5508696409934741614">Bodky</translation>
 <translation id="5533555070048896610">Prepis (namaste → नमस्ते)</translation>
 <translation id="5605830556594064952">Americká klávesnica s rozložením klávesov Dvorak</translation>
 <translation id="5640179856859982418">švajčiarska klávesnica</translation>
@@ -157,7 +161,9 @@
 <translation id="5819442873484330149">Hangul 3 Set (konečné)</translation>
 <translation id="5838825566232597749">US Workman international – medzinárodná</translation>
 <translation id="5892290200158927959">Francúzska klávesnica BÉPO</translation>
+<translation id="5932901536148835538">Chromebit</translation>
 <translation id="6005282720244019462">latinskoamerická klávesnica</translation>
+<translation id="6012987430370760224">Klávesnica maráthčiny (fonetický prepis)</translation>
 <translation id="60357267506638014">Česká klávesnica QWERTY</translation>
 <translation id="6054173164583630569">francúzska klávesnica</translation>
 <translation id="6111770213269631447">Prepis (namaskar → নমস্কার)</translation>
@@ -183,17 +189,20 @@
 <translation id="6876155724392614295">Bicykel</translation>
 <translation id="6878261347041253038">Klávesnica dévanágarí (fonetický prepis)</translation>
 <translation id="6885780034956018177">Slimák</translation>
+<translation id="6915678159055240887">Chromebox</translation>
 <translation id="6918340160281024199">US Workman</translation>
 <translation id="6935521024859866267">Hore nohami</translation>
 <translation id="6937152069980083337">Japonská metóda vstupu Google (pre americkú klávesnicu)</translation>
 <translation id="6939777852457331078">Klávesnica US Workman</translation>
 <translation id="6970230597523682626">Bulharčina</translation>
+<translation id="714034171374937760">Chromebase</translation>
 <translation id="7170467426996704624">Prepis (salam → ሰላም)</translation>
 <translation id="7172053773111046550">estónska klávesnica</translation>
 <translation id="719009910964971313">Klávesnica US Programmer Dvorak</translation>
 <translation id="7222624196722476520">Bulharská fonetická klávesnica</translation>
 <translation id="7348749398828259943">Medzinárodná klávesnica US Workman</translation>
 <translation id="7389722738210761877">Thajská klávesnica (TIS 820-2531)</translation>
+<translation id="7396038720194014279">Hindská klávesnica (fonetický prepis)</translation>
 <translation id="7417453074306512035">Etiópska klávesnica</translation>
 <translation id="7419631653042041064">katalánska klávesnica</translation>
 <translation id="7434823369735508263">americká klávesnica s rozložením klávesov dvorak</translation>
@@ -201,12 +210,14 @@
 <translation id="7474889694310679759">kanadskoanglická klávesnica</translation>
 <translation id="751507702149411736">Bieloruština</translation>
 <translation id="7547811415869834682">Holandčina</translation>
+<translation id="7603724359189955920">Mriežky</translation>
 <translation id="770015031906360009">Gréčtina</translation>
 <translation id="7706319470528945664">portugalská klávesnica</translation>
 <translation id="7774365994322694683">Vták</translation>
 <translation id="7825423931463735974">Tamilská klávesnica (Tamil99)</translation>
 <translation id="7853966320808728790">Francúzština – BÉPO</translation>
 <translation id="7896906914454843592">Americká klávesnica s rozšíreným rozložením klávesov</translation>
+<translation id="7898607018410277265">Gudžarátska klávesnica (nový fonetický prepis)</translation>
 <translation id="7917972308273378936">litovská klávesnica</translation>
 <translation id="7943385054491506837">Americká klávesnica s rozložením klávesov Colemak</translation>
 <translation id="7969525169268594403">Slovinčina</translation>
@@ -230,6 +241,7 @@
 <translation id="8432745813735585631">americká klávesnica s rozložením klávesov Colemak</translation>
 <translation id="8437209419043462667">Americká klávesnica</translation>
 <translation id="8467473010914675605">Kórejská metóda vstupu</translation>
+<translation id="8477649328507734757">Kruhy</translation>
 <translation id="8521441079177373948">Anglická klávesnica</translation>
 <translation id="8551494947769799688">Lotyština</translation>
 <translation id="8561206103590473338">Slon</translation>
@@ -248,4 +260,5 @@
 <translation id="913758436357682283">Mjanmarská klávesnica Myansan</translation>
 <translation id="9153744823707037316">Maticová metóda vstupu</translation>
 <translation id="9206487995878691001">Metóda vstupu Cangjie</translation>
+<translation id="9219908252191632183">Mesačná krajina</translation>
 </translationbundle>

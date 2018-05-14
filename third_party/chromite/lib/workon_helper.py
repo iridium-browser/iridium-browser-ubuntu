@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2015 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -103,7 +104,10 @@ def _WriteLinesToFile(path, lines, line_prefix, line_suffix):
   """
   contents = ''.join(
       ['%s%s%s\n' % (line_prefix, line, line_suffix) for line in lines])
-  osutils.WriteFile(path, contents, makedirs=True)
+  if not contents:
+    osutils.SafeUnlink(path)
+  else:
+    osutils.WriteFile(path, contents, makedirs=True)
 
 
 def GetWorkonPath(source_root=constants.CHROOT_SOURCE_ROOT, sub_path=None):

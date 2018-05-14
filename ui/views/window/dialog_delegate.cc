@@ -21,6 +21,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "ui/views/window/dialog_client_view.h"
+#include "ui/views/window/dialog_observer.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/shell.h"
@@ -31,11 +32,20 @@ namespace views {
 ////////////////////////////////////////////////////////////////////////////////
 // DialogDelegate:
 
-DialogDelegate::DialogDelegate() : supports_custom_frame_(true) {
+DialogDelegate::DialogDelegate()
+    : supports_custom_frame_(true),
+      // TODO(crbug.com/733040): Most subclasses assume they must set their own
+      // margins explicitly, so we set them to 0 here for now to avoid doubled
+      // margins.
+      margins_(0) {
   UMA_HISTOGRAM_BOOLEAN("Dialog.DialogDelegate.Create", true);
+  creation_time_ = base::TimeTicks::Now();
 }
 
-DialogDelegate::~DialogDelegate() {}
+DialogDelegate::~DialogDelegate() {
+  UMA_HISTOGRAM_LONG_TIMES("Dialog.DialogDelegate.Duration",
+                           base::TimeTicks::Now() - creation_time_);
+}
 
 // static
 Widget* DialogDelegate::CreateDialogWidget(WidgetDelegate* delegate,
@@ -203,7 +213,7 @@ NonClientFrameView* DialogDelegate::CreateDialogFrameView(Widget* widget) {
   BubbleFrameView* frame = new BubbleFrameView(
       LayoutProvider::Get()->GetInsetsMetric(INSETS_DIALOG_TITLE),
       gfx::Insets());
-  const BubbleBorder::Shadow kShadow = BubbleBorder::SMALL_SHADOW;
+  const BubbleBorder::Shadow kShadow = BubbleBorder::DIALOG_SHADOW;
   std::unique_ptr<BubbleBorder> border(
       new BubbleBorder(BubbleBorder::FLOAT, kShadow, gfx::kPlaceholderColor));
   border->set_use_theme_background_color(true);
@@ -226,8 +236,21 @@ DialogClientView* DialogDelegate::GetDialogClientView() {
   return GetWidget()->client_view()->AsDialogClientView();
 }
 
-ui::AXRole DialogDelegate::GetAccessibleWindowRole() const {
-  return ui::AX_ROLE_DIALOG;
+void DialogDelegate::AddObserver(DialogObserver* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void DialogDelegate::RemoveObserver(DialogObserver* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
+void DialogDelegate::DialogModelChanged() {
+  for (DialogObserver& observer : observer_list_)
+    observer.OnDialogModelChanged();
+}
+
+ax::mojom::Role DialogDelegate::GetAccessibleWindowRole() const {
+  return ax::mojom::Role::kDialog;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -260,7 +283,7 @@ View* DialogDelegateView::GetContentsView() {
 void DialogDelegateView::ViewHierarchyChanged(
     const ViewHierarchyChangedDetails& details) {
   if (details.is_add && details.child == this && GetWidget())
-    NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, true);
+    NotifyAccessibilityEvent(ax::mojom::Event::kAlert, true);
 }
 
 }  // namespace views

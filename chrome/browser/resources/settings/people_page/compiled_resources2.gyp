@@ -140,6 +140,7 @@
       'target_name': 'password_prompt_dialog',
       'dependencies': [
         '../compiled_resources2.gyp:route',
+        '<(DEPTH)/third_party/polymer/v1_0/components-chromium/paper-input/compiled_resources2.gyp:paper-input-extracted',
         '<(EXTERNS_GYP):quick_unlock_private',
         'lock_screen_constants',
       ],
@@ -150,6 +151,7 @@
       'dependencies': [
         '../compiled_resources2.gyp:route',
         '../settings_page/compiled_resources2.gyp:settings_animated_pages',
+        '<(DEPTH)/ui/webui/resources/cr_elements/chromeos/cr_picture/compiled_resources2.gyp:cr_png_behavior',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:assert',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:i18n_behavior',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:icon',
@@ -250,6 +252,20 @@
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:i18n_behavior',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:web_ui_listener_behavior',
         'import_data_browser_proxy',
+      ],
+      'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
+    },
+    {
+      'target_name': 'sync_account_control',
+      'dependencies': [
+        '../compiled_resources2.gyp:route',
+        '../prefs/compiled_resources2.gyp:prefs_behavior',
+        '<(DEPTH)/ui/webui/resources/cr_elements/cr_action_menu/compiled_resources2.gyp:cr_action_menu',
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:load_time_data',
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:icon',
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:web_ui_listener_behavior',
+        'profile_info_browser_proxy',
+        'sync_browser_proxy',
       ],
       'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
     },

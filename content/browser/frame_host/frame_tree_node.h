@@ -20,6 +20,7 @@
 #include "content/common/content_export.h"
 #include "content/common/frame_owner_properties.h"
 #include "content/common/frame_replication_state.h"
+#include "third_party/WebKit/public/common/frame/frame_policy.h"
 #include "third_party/WebKit/public/platform/WebInsecureRequestPolicy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -66,6 +67,8 @@ class CONTENT_EXPORT FrameTreeNode {
                 blink::WebTreeScopeType scope,
                 const std::string& name,
                 const std::string& unique_name,
+                bool is_created_by_script,
+                const base::UnguessableToken& devtools_frame_token,
                 const FrameOwnerProperties& frame_owner_properties);
 
   ~FrameTreeNode();
@@ -82,6 +85,13 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Clears process specific-state in this node to prepare for a new process.
   void ResetForNewProcess();
+
+  // Clears any state in this node which was set by the document itself (CSP
+  // Headers, Feature Policy Headers, and CSP-set sandbox flags), and notifies
+  // proxies as appropriate. Invoked after committing navigation to a new
+  // document (since the new document comes with a fresh set of CSP and
+  // Feature-Policy HTTP headers).
+  void ResetForNavigation();
 
   FrameTree* frame_tree() const {
     return frame_tree_;
@@ -105,6 +115,11 @@ class CONTENT_EXPORT FrameTreeNode {
 
   const std::string& unique_name() const {
     return replication_state_.unique_name;
+  }
+
+  // See comment on the member declaration.
+  const base::UnguessableToken& devtools_frame_token() const {
+    return devtools_frame_token_;
   }
 
   size_t child_count() const {
@@ -135,7 +150,7 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Returns the URL of the last committed page in the current frame.
   const GURL& current_url() const {
-    return current_frame_host()->last_committed_url();
+    return current_frame_host()->GetLastCommittedURL();
   }
 
   // Sets the last committed URL for this frame and updates
@@ -177,73 +192,52 @@ class CONTENT_EXPORT FrameTreeNode {
   // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name, const std::string& unique_name);
 
-  // Set the frame's feature policy header, clearing any existing header.
-  void SetFeaturePolicyHeader(const ParsedFeaturePolicyHeader& parsed_header);
-
-  // Clear any feature policy header associated with the frame.
-  void ResetFeaturePolicyHeader();
-
   // Add CSP headers to replication state, notify proxies about the update.
   void AddContentSecurityPolicies(
       const std::vector<ContentSecurityPolicyHeader>& headers);
-
-  // Discards previous CSP headers and notifies proxies about the update.
-  // Typically invoked after committing navigation to a new document (since the
-  // new document comes with a fresh set of CSP http headers).
-  void ResetCspHeaders();
 
   // Sets the current insecure request policy, and notifies proxies about the
   // update.
   void SetInsecureRequestPolicy(blink::WebInsecureRequestPolicy policy);
 
-  // Returns the currently active sandbox flags for this frame.  This includes
-  // flags inherited from parent frames and the currently active flags from the
-  // <iframe> element hosting this frame.  This does not include flags that
-  // have been updated in an <iframe> element but have not taken effect yet;
-  // use pending_sandbox_flags() for those.
-  blink::WebSandboxFlags effective_sandbox_flags() const {
-    return replication_state_.sandbox_flags;
+  // Sets the current set of insecure urls to upgrade, and notifies proxies
+  // about the update.
+  void SetInsecureNavigationsSet(
+      const std::vector<uint32_t>& insecure_navigations_set);
+
+  // Returns the latest frame policy (sandbox flags and container policy) for
+  // this frame. This includes flags inherited from parent frames and the latest
+  // flags from the <iframe> element hosting this frame. The returned policies
+  // may not yet have taken effect, since "sandbox" and "allow" attribute
+  // updates in an <iframe> element take effect on next navigation. To retrieve
+  // the currently active policy for this frame, use effective_frame_policy().
+  const blink::FramePolicy& pending_frame_policy() const {
+    return pending_frame_policy_;
   }
 
-  // Returns the latest sandbox flags for this frame.  This includes flags
-  // inherited from parent frames and the latest flags from the <iframe>
-  // element hosting this frame.  The returned flags may not yet have taken
-  // effect, since sandbox flag updates in an <iframe> element take effect on
-  // next navigation.  To retrieve the currently active sandbox flags for this
-  // frame, use effective_sandbox_flags().
-  blink::WebSandboxFlags pending_sandbox_flags() const {
-    return pending_sandbox_flags_;
+  // Update this frame's sandbox flags and container policy.  This is called
+  // when a parent frame updates the "sandbox" attribute in the <iframe> element
+  // for this frame, or any of the attributes which affect the container policy
+  // ("allowfullscreen", "allowpaymentrequest", "allow", and "src".)
+  // These policies won't take effect until next navigation.  If this frame's
+  // parent is itself sandboxed, the parent's sandbox flags are combined with
+  // those in |frame_policy|.
+  // Attempting to change the container policy on the main frame will have no
+  // effect.
+  void SetPendingFramePolicy(blink::FramePolicy frame_policy);
+
+  // Returns the currently active frame policy for this frame, including the
+  // sandbox flags which were present at the time the document was loaded, and
+  // the feature policy container policy, which is set by the iframe's
+  // allowfullscreen, allowpaymentrequest, and allow attributes, along with the
+  // origin of the iframe's src attribute (which may be different from the URL
+  // of the document currently loaded into the frame). This does not include
+  // policy changes that have been made by updating the containing iframe
+  // element attributes since the frame was last navigated; use
+  // pending_frame_policy() for those.
+  const blink::FramePolicy& effective_frame_policy() const {
+    return replication_state_.frame_policy;
   }
-
-  const ParsedFeaturePolicyHeader& pending_container_policy() const {
-    return pending_container_policy_;
-  }
-
-  // Update this frame's sandbox flags.  This is used when a parent frame
-  // updates sandbox flags in the <iframe> element for this frame.  These flags
-  // won't take effect until next navigation.  If this frame's parent is itself
-  // sandboxed, the parent's sandbox flags are combined with |sandbox_flags|.
-  void SetPendingSandboxFlags(blink::WebSandboxFlags sandbox_flags);
-
-  // Returns the currently active container policy for this frame, which is set
-  // by the iframe allowfullscreen, allowpaymentrequest, and allow attributes,
-  // along with the origin of the iframe's src attribute (which may be different
-  // from the URL of the document currently loaded into the frame). This does
-  // not include policy changes that have been made by updating the containing
-  // iframe element attributes since the frame was last navigated.
-  const ParsedFeaturePolicyHeader& effective_container_policy() const {
-    return replication_state_.container_policy;
-  }
-
-  // Update this frame's container policy. This is used when a parent frame
-  // updates feature-policy attributes in the <iframe> element for this frame.
-  // These attributes include allow, allowfullscreen, allowpaymentrequest, and
-  // src. Updates to the container policy will not take effect until next
-  // navigation.
-  // This method must only be called on a subframe; changing the container
-  // policy on the main frame is not allowed.
-  void SetPendingContainerPolicy(
-      const ParsedFeaturePolicyHeader& container_policy);
 
   // Set any pending sandbox flags and container policy as active, and return
   // true if either was changed.
@@ -284,10 +278,13 @@ class CONTENT_EXPORT FrameTreeNode {
   // Returns true if this node is in a loading state.
   bool IsLoading() const;
 
-  // Returns this node's loading progress.
-  double loading_progress() const { return loading_progress_; }
-
   NavigationRequest* navigation_request() { return navigation_request_.get(); }
+
+  // Transfers the ownership of the NavigationRequest to |render_frame_host|.
+  // From ReadyToCommit to DidCommit, the NavigationRequest is owned by the
+  // RenderFrameHost that is committing the navigation.
+  void TransferNavigationRequestOwnership(
+      RenderFrameHostImpl* render_frame_host);
 
   // PlzNavigate
   // Takes ownership of |navigation_request| and makes it the current
@@ -305,13 +302,6 @@ class CONTENT_EXPORT FrameTreeNode {
   // |inform_renderer| is true, an IPC will be sent to the renderer process to
   // inform it that the navigation it requested was cancelled.
   void ResetNavigationRequest(bool keep_state, bool inform_renderer);
-
-  // Returns true if this node is in a state where the loading progress is being
-  // tracked.
-  bool has_started_loading() const;
-
-  // Resets this node's loading progress.
-  void reset_loading_progress();
 
   // A RenderFrameHost in this node started loading.
   // |to_different_document| will be true unless the load is a fragment
@@ -351,6 +341,34 @@ class CONTENT_EXPORT FrameTreeNode {
   FrameTreeNodeBlameContext& blame_context() { return blame_context_; }
 
   void OnSetHasReceivedUserGesture();
+  void OnSetHasReceivedUserGestureBeforeNavigation(bool value);
+
+  // Returns the sandbox flags currently in effect for this frame. This includes
+  // flags inherited from parent frames, the currently active flags from the
+  // <iframe> element hosting this frame, as well as any flags set from a
+  // Content-Security-Policy HTTP header. This does not include flags that have
+  // have been updated in an <iframe> element but have not taken effect yet; use
+  // pending_frame_policy() for those. To see the flags which will take effect
+  // on navigation (which does not include the CSP-set flags), use
+  // effective_frame_policy().
+  blink::WebSandboxFlags active_sandbox_flags() const {
+    return replication_state_.active_sandbox_flags;
+  }
+
+  // Updates the active sandbox flags in this frame, in response to a
+  // Content-Security-Policy header adding additional flags, in addition to
+  // those given to this frame by its parent, or in response to the
+  // Feature-Policy header being set. Note that on navigation, these updates
+  // will be cleared, and the flags in the pending frame policy will be applied
+  // to the frame.
+  void UpdateFramePolicyHeaders(
+      blink::WebSandboxFlags sandbox_flags,
+      const blink::ParsedFeaturePolicy& parsed_header);
+
+  // Returns whether the frame received a user gesture.
+  bool has_received_user_gesture() const {
+    return replication_state_.has_received_user_gesture;
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
@@ -383,7 +401,7 @@ class CONTENT_EXPORT FrameTreeNode {
   const int frame_tree_node_id_;
 
   // The parent node of this frame. |nullptr| if this node is the root.
-  FrameTreeNode* parent_;
+  FrameTreeNode* const parent_;
 
   // The frame that opened this frame, if any.  Will be set to null if the
   // opener is closed, or if this frame disowns its opener by setting its
@@ -419,18 +437,27 @@ class CONTENT_EXPORT FrameTreeNode {
   // proxies for this frame.
   FrameReplicationState replication_state_;
 
-  // Track the pending sandbox flags for this frame.  When a parent frame
-  // dynamically updates sandbox flags in the <iframe> element for a child
-  // frame, these updated flags are stored here and are transferred into
-  // replication_state_.sandbox_flags when they take effect on the next frame
-  // navigation.
-  blink::WebSandboxFlags pending_sandbox_flags_;
+  // Track the pending sandbox flags and container policy for this frame. When a
+  // parent frame dynamically updates 'sandbox', 'allow', 'allowfullscreen',
+  // 'allowpaymentrequest' or 'src' attributes, the updated policy for the frame
+  // is stored here, and transferred into replication_state_.frame_policy when
+  // they take effect on the next frame navigation.
+  blink::FramePolicy pending_frame_policy_;
 
-  // Tracks the computed container policy for this frame. When the iframe
-  // allowfullscreen, allowpaymentrequest, allow or src attributes are changed,
-  // the updated policy for the frame is stored here, and transferred into
-  // replication_state_.container_policy on the next frame navigation.
-  ParsedFeaturePolicyHeader pending_container_policy_;
+  // Whether the frame was created by javascript.  This is useful to prune
+  // history entries when the frame is removed (because frames created by
+  // scripts are never recreated with the same unique name - see
+  // https://crbug.com/500260).
+  bool is_created_by_script_;
+
+  // Used for devtools instrumentation and trace-ability. The token is
+  // propagated to Blink's LocalFrame and both Blink and content/
+  // can tag calls and requests with this token in order to attribute them
+  // to the context frame.
+  // |devtools_frame_token_| is only defined by the browser process and is never
+  // sent back from the renderer in the control calls. It should be never used
+  // to look up the FrameTreeNode instance.
+  base::UnguessableToken devtools_frame_token_;
 
   // Tracks the scrolling and margin properties for this frame.  These
   // properties affect the child renderer but are stored on its parent's
@@ -439,9 +466,6 @@ class CONTENT_EXPORT FrameTreeNode {
   //
   // Note that dynamic updates only take effect on the next frame navigation.
   FrameOwnerProperties frame_owner_properties_;
-
-  // Used to track this node's loading progress (from 0 to 1).
-  double loading_progress_;
 
   // PlzNavigate
   // Owns an ongoing NavigationRequest until it is ready to commit. It will then

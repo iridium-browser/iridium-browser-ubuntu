@@ -45,6 +45,7 @@
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
+#include "ui/views/view_properties.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -78,7 +79,9 @@ class ZoomValue : public views::Label {
       : Label(base::string16(),
               views::style::CONTEXT_LABEL,
               views::style::STYLE_PRIMARY),
-        max_width_(GetLabelMaxWidth(web_contents)) {}
+        max_width_(GetLabelMaxWidth(web_contents)) {
+    SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  }
   ~ZoomValue() override {}
 
   // views::Label:
@@ -88,7 +91,7 @@ class ZoomValue : public views::Label {
 
  private:
   int GetLabelMaxWidth(const content::WebContents* web_contents) const {
-    int border_width = border() ? border()->GetInsets().width() : 0;
+    const int border_width = border() ? border()->GetInsets().width() : 0;
     int max_w = 0;
     auto* zoom_controller = zoom::ZoomController::FromWebContents(web_contents);
     DCHECK(zoom_controller);
@@ -150,7 +153,7 @@ void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
   // initiated by an extension, then the bubble can be reused and only the label
   // text needs to be updated.
   if (zoom_bubble_ && zoom_bubble_->GetAnchorView() == anchor_view && !client) {
-    DCHECK_EQ(web_contents, zoom_bubble_->web_contents_);
+    DCHECK_EQ(web_contents, zoom_bubble_->web_contents());
     zoom_bubble_->Refresh();
     return;
   }
@@ -177,9 +180,9 @@ void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
 
   views::Widget* zoom_bubble_widget =
       views::BubbleDialogDelegateView::CreateBubble(zoom_bubble_);
-  if (anchor_view) {
-    zoom_bubble_widget->AddObserver(
-        browser_view->GetLocationBarView()->zoom_view());
+  if (zoom_bubble_widget && anchor_view) {
+    browser_view->GetLocationBarView()->zoom_view()->OnBubbleWidgetCreated(
+        zoom_bubble_widget);
   }
 #else
   gfx::NativeView parent =
@@ -221,16 +224,18 @@ ZoomBubbleView::ZoomBubbleView(
     DisplayReason reason,
     ImmersiveModeController* immersive_mode_controller)
     : LocationBarBubbleDelegateView(anchor_view, anchor_point, web_contents),
+      WebContentsObserver(web_contents),
       auto_close_duration_(kBubbleCloseDelayDefault),
       image_button_(nullptr),
       label_(nullptr),
       zoom_out_button_(nullptr),
       zoom_in_button_(nullptr),
       reset_button_(nullptr),
-      web_contents_(web_contents),
       auto_close_(reason == AUTOMATIC),
       ignore_close_bubble_(false),
-      immersive_mode_controller_(immersive_mode_controller) {
+      immersive_mode_controller_(immersive_mode_controller),
+      session_id_(
+          chrome::FindBrowserWithWebContents(web_contents)->session_id()) {
   set_notify_enter_exit_on_child(true);
   if (immersive_mode_controller_)
     immersive_mode_controller_->AddObserver(this);
@@ -268,17 +273,34 @@ void ZoomBubbleView::OnMouseExited(const ui::MouseEvent& event) {
 
 void ZoomBubbleView::Init() {
   // Set up the layout of the zoom bubble.
-  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  const int margin =
-      provider->GetDistanceMetric(views::DISTANCE_RELATED_BUTTON_HORIZONTAL);
-  views::BoxLayout* box_layout = new views::BoxLayout(
-      views::BoxLayout::kHorizontal, gfx::Insets(0, margin), margin);
-
+  const ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  const int spacing =
+      provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL);
+  auto box_layout = std::make_unique<views::BoxLayout>(
+      views::BoxLayout::kHorizontal,
+      provider->GetInsetsMetric(INSETS_TOAST) - margins(), spacing);
   box_layout->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   box_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_CENTER);
-  SetLayoutManager(box_layout);
+  SetLayoutManager(std::move(box_layout));
+
+  // Calculate child views margins in |this| client view.
+  const int label_vertical_spacing =
+      provider->GetDistanceMetric(DISTANCE_TOAST_LABEL_VERTICAL);
+  const gfx::Insets label_vertical_margin(
+      label_vertical_spacing - margins().top(), 0,
+      label_vertical_spacing - margins().bottom(), 0);
+
+  // Account for the apparent margins that vector buttons have around icons.
+  const int control_vertical_spacing =
+      provider->GetDistanceMetric(DISTANCE_TOAST_CONTROL_VERTICAL);
+  const gfx::Insets control_vertical_margin(
+      control_vertical_spacing - margins().top(), 0,
+      control_vertical_spacing - margins().bottom(), 0);
+  const gfx::Insets vector_button_margin(
+      control_vertical_margin -
+      provider->GetInsetsMetric(views::INSETS_VECTOR_IMAGE_BUTTON));
 
   // If this zoom change was initiated by an extension, that extension will be
   // attributed by showing its icon in the zoom bubble.
@@ -292,21 +314,34 @@ void ZoomBubbleView::Init() {
     AddChildView(image_button_);
   }
 
+  // Add zoom label with the new zoom percent.
+  label_ = new ZoomValue(web_contents());
+  UpdateZoomPercent();
+  label_->SetProperty(views::kMarginsKey,
+                      new gfx::Insets(label_vertical_margin));
+  AddChildView(label_);
+
+  // Add extra padding between the zoom percent label and the buttons.
+  constexpr int kPercentLabelPadding = 64;
+  auto* label_padding_view = new views::View();
+  label_padding_view->SetPreferredSize(gfx::Size(
+      kPercentLabelPadding - spacing * 2, label_->GetPreferredSize().height()));
+  AddChildView(label_padding_view);
+
   // Add Zoom Out ("-") button.
   std::unique_ptr<views::Button> zoom_out_button =
       CreateZoomButton(this, kRemoveIcon, IDS_ACCNAME_ZOOM_MINUS2);
   zoom_out_button_ = zoom_out_button.get();
+  zoom_out_button_->SetProperty(views::kMarginsKey,
+                                new gfx::Insets(vector_button_margin));
   AddChildView(zoom_out_button.release());
-
-  // Add zoom label with the new zoom percent.
-  label_ = new ZoomValue(web_contents_);
-  UpdateZoomPercent();
-  AddChildView(label_);
 
   // Add Zoom In ("+") button.
   std::unique_ptr<views::Button> zoom_in_button =
       CreateZoomButton(this, kAddIcon, IDS_ACCNAME_ZOOM_PLUS2);
   zoom_in_button_ = zoom_in_button.get();
+  zoom_in_button_->SetProperty(views::kMarginsKey,
+                               new gfx::Insets(vector_button_margin));
   AddChildView(zoom_in_button.release());
 
   // Add "Reset" button.
@@ -325,9 +360,8 @@ void ZoomBubbleView::WindowClosing() {
   bool this_bubble = zoom_bubble_ == this;
   if (this_bubble)
     zoom_bubble_ = nullptr;
+
   UpdateZoomIconVisibility();
-  if (this_bubble)
-    web_contents_ = nullptr;
 }
 
 void ZoomBubbleView::CloseBubble() {
@@ -335,7 +369,7 @@ void ZoomBubbleView::CloseBubble() {
     return;
 
   // Widget's Close() is async, but we don't want to use zoom_bubble_ after
-  // this. Additionally web_contents_ may have been destroyed.
+  // this. Additionally web_contents() may have been destroyed.
   zoom_bubble_ = nullptr;
   LocationBarBubbleDelegateView::CloseBubble();
 }
@@ -352,17 +386,17 @@ void ZoomBubbleView::ButtonPressed(views::Button* sender,
 
   if (sender == image_button_) {
     DCHECK(extension_info_.icon_image) << "Invalid button press.";
-    Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+    Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
     chrome::AddSelectedTabWithURL(
         browser, GURL(base::StringPrintf("chrome://extensions?id=%s",
                                          extension_info_.id.c_str())),
         ui::PAGE_TRANSITION_FROM_API);
   } else if (sender == zoom_out_button_) {
-    zoom::PageZoom::Zoom(web_contents_, content::PAGE_ZOOM_OUT);
+    zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_OUT);
   } else if (sender == zoom_in_button_) {
-    zoom::PageZoom::Zoom(web_contents_, content::PAGE_ZOOM_IN);
+    zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_IN);
   } else if (sender == reset_button_) {
-    zoom::PageZoom::Zoom(web_contents_, content::PAGE_ZOOM_RESET);
+    zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_RESET);
   } else {
     NOTREACHED();
   }
@@ -383,12 +417,21 @@ void ZoomBubbleView::OnExtensionIconImageChanged(
   image_button_->SchedulePaint();
 }
 
+void ZoomBubbleView::OnVisibilityChanged(content::Visibility visibility) {
+  if (visibility == content::Visibility::HIDDEN)
+    CloseBubble();
+}
+
+void ZoomBubbleView::WebContentsDestroyed() {
+  CloseBubble();
+}
+
 void ZoomBubbleView::SetExtensionInfo(const extensions::Extension* extension) {
   DCHECK(extension);
   extension_info_.id = extension->id();
   extension_info_.name = extension->name();
 
-  ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   const gfx::ImageSkia& default_extension_icon_image =
       *rb.GetImageSkiaNamed(IDR_EXTENSIONS_FAVICON);
   int icon_size = gfx::kFaviconSize;
@@ -402,13 +445,9 @@ void ZoomBubbleView::SetExtensionInfo(const extensions::Extension* extension) {
   bool has_default_sized_icon =
       !icons.Get(gfx::kFaviconSize, ExtensionIconSet::MATCH_EXACTLY).empty();
   if (has_default_sized_icon) {
-    extension_info_.icon_image.reset(
-        new extensions::IconImage(web_contents_->GetBrowserContext(),
-                                  extension,
-                                  icons,
-                                  icon_size,
-                                  default_extension_icon_image,
-                                  this));
+    extension_info_.icon_image.reset(new extensions::IconImage(
+        web_contents()->GetBrowserContext(), extension, icons, icon_size,
+        default_extension_icon_image, this));
     return;
   }
 
@@ -419,21 +458,23 @@ void ZoomBubbleView::SetExtensionInfo(const extensions::Extension* extension) {
 
   icon_size = browser_action->default_icon.map().begin()->first;
   extension_info_.icon_image.reset(
-      new extensions::IconImage(web_contents_->GetBrowserContext(),
-                                extension,
-                                browser_action->default_icon,
-                                icon_size,
-                                default_extension_icon_image,
-                                this));
+      new extensions::IconImage(web_contents()->GetBrowserContext(), extension,
+                                browser_action->default_icon, icon_size,
+                                default_extension_icon_image, this));
 }
 
 void ZoomBubbleView::UpdateZoomPercent() {
   label_->SetText(base::FormatPercent(
-      zoom::ZoomController::FromWebContents(web_contents_)->GetZoomPercent()));
+      zoom::ZoomController::FromWebContents(web_contents())->GetZoomPercent()));
+  label_->NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
 }
 
 void ZoomBubbleView::UpdateZoomIconVisibility() {
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents_);
+  // Note that we can't rely on web_contents() here, as it may have been
+  // destroyed by the time we get this call. Also note parent_window() (if set)
+  // may also be destroyed: the call to WindowClosing() may be triggered by
+  // parent window destruction tearing down its child windows.
+  Browser* browser = chrome::FindBrowserWithID(session_id_.id());
   if (browser && browser->window() && browser->window()->GetLocationBar())
     browser->window()->GetLocationBar()->UpdateZoomViewVisibility();
 }

@@ -27,8 +27,7 @@
 
 #include <stdio.h>
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
-#include "core/css/StylePropertySet.h"
+#include "core/css/CSSPropertyValueSet.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/CharacterData.h"
 #include "core/dom/Document.h"
@@ -37,39 +36,43 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/NodeWithIndex.h"
 #include "core/dom/Text.h"
+#include "core/dom/events/Event.h"
 #include "core/editing/CaretDisplayItemClient.h"
 #include "core/editing/EditingUtilities.h"
 #include "core/editing/Editor.h"
+#include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameCaret.h"
 #include "core/editing/GranularityStrategy.h"
-#include "core/editing/InputMethodController.h"
 #include "core/editing/LayoutSelection.h"
+#include "core/editing/Position.h"
 #include "core/editing/SelectionController.h"
 #include "core/editing/SelectionEditor.h"
 #include "core/editing/SelectionModifier.h"
+#include "core/editing/SelectionTemplate.h"
 #include "core/editing/TextAffinity.h"
+#include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleSelection.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/commands/TypingCommand.h"
+#include "core/editing/ime/InputMethodController.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/editing/serializers/Serialization.h"
-#include "core/editing/spellcheck/SpellChecker.h"
-#include "core/events/Event.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLBodyElement.h"
 #include "core/html/HTMLFrameElementBase.h"
-#include "core/html/HTMLInputElement.h"
-#include "core/html/HTMLSelectElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLSelectElement.h"
+#include "core/html_names.h"
 #include "core/input/ContextMenuAllowedScope.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/HitTestRequest.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutEmbeddedContent.h"
-#include "core/layout/api/LayoutViewItem.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
-#include "core/page/EditorClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/FrameTree.h"
 #include "core/page/Page.h"
@@ -81,6 +84,7 @@
 #include "platform/text/UnicodeUtilities.h"
 #include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/CString.h"
+#include "public/platform/WebScrollIntoViewParams.h"
 
 #define EDIT_DEBUG 0
 
@@ -100,9 +104,10 @@ FrameSelection::FrameSelection(LocalFrame& frame)
       x_pos_for_vertical_arrow_navigation_(NoXPosForVerticalArrowNavigation()),
       focused_(frame.GetPage() &&
                frame.GetPage()->GetFocusController().FocusedFrame() == frame),
+      is_directional_(ShouldAlwaysUseDirectionalSelection(frame_)),
       frame_caret_(new FrameCaret(frame, *selection_editor_)) {}
 
-FrameSelection::~FrameSelection() {}
+FrameSelection::~FrameSelection() = default;
 
 const DisplayItemClient& FrameSelection::CaretDisplayItemClientForTesting()
     const {
@@ -114,21 +119,16 @@ Document& FrameSelection::GetDocument() const {
   return *LifecycleContext();
 }
 
-bool FrameSelection::IsHandleVisible() const {
-  return GetSelectionInDOMTree().IsHandleVisible();
-}
-
-const VisibleSelection& FrameSelection::ComputeVisibleSelectionInDOMTree()
-    const {
+VisibleSelection FrameSelection::ComputeVisibleSelectionInDOMTree() const {
   return selection_editor_->ComputeVisibleSelectionInDOMTree();
 }
 
-const VisibleSelectionInFlatTree&
-FrameSelection::ComputeVisibleSelectionInFlatTree() const {
+VisibleSelectionInFlatTree FrameSelection::ComputeVisibleSelectionInFlatTree()
+    const {
   return selection_editor_->ComputeVisibleSelectionInFlatTree();
 }
 
-const SelectionInDOMTree& FrameSelection::GetSelectionInDOMTree() const {
+SelectionInDOMTree FrameSelection::GetSelectionInDOMTree() const {
   return selection_editor_->GetSelectionInDOMTree();
 }
 
@@ -138,28 +138,24 @@ Element* FrameSelection::RootEditableElementOrDocumentElement() const {
   return selection_root ? selection_root : GetDocument().documentElement();
 }
 
-// TODO(yosin): We should move |rootEditableElementOrTreeScopeRootNodeOf()| to
-// "EditingUtilities.cpp"
-ContainerNode* RootEditableElementOrTreeScopeRootNodeOf(
-    const Position& position) {
-  Element* selection_root = RootEditableElementOf(position);
-  if (selection_root)
-    return selection_root;
-
-  Node* const node = position.ComputeContainerNode();
-  return node ? &node->GetTreeScope().RootNode() : 0;
+size_t FrameSelection::CharacterIndexForPoint(const IntPoint& point) const {
+  const EphemeralRange range = GetFrame()->GetEditor().RangeForPoint(point);
+  if (range.IsNull())
+    return kNotFound;
+  Element* const editable = RootEditableElementOrDocumentElement();
+  DCHECK(editable);
+  return PlainTextRange::Create(*editable, range).Start();
 }
 
-const VisibleSelection&
-FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated() const {
+VisibleSelection FrameSelection::ComputeVisibleSelectionInDOMTreeDeprecated()
+    const {
   // TODO(editing-dev): Hoist updateStyleAndLayoutIgnorePendingStylesheets
   // to caller. See http://crbug.com/590369 for more details.
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
   return ComputeVisibleSelectionInDOMTree();
 }
 
-const VisibleSelectionInFlatTree& FrameSelection::GetSelectionInFlatTree()
-    const {
+VisibleSelectionInFlatTree FrameSelection::GetSelectionInFlatTree() const {
   return ComputeVisibleSelectionInFlatTree();
 }
 
@@ -174,72 +170,76 @@ void FrameSelection::MoveCaretSelection(const IntPoint& point) {
   const VisiblePosition position =
       VisiblePositionForContentsPoint(point, GetFrame());
   SelectionInDOMTree::Builder builder;
-  builder.SetIsDirectional(GetSelectionInDOMTree().IsDirectional());
-  builder.SetIsHandleVisible(true);
   if (position.IsNotNull())
     builder.Collapse(position.ToPositionWithAffinity());
-  SetSelection(builder.Build(),
-               kCloseTyping | kClearTypingStyle | kUserTriggered);
+  SetSelection(builder.Build(), SetSelectionOptions::Builder()
+                                    .SetShouldCloseTyping(true)
+                                    .SetShouldClearTypingStyle(true)
+                                    .SetSetSelectionBy(SetSelectionBy::kUser)
+                                    .SetShouldShowHandle(true)
+                                    .SetIsDirectional(IsDirectional())
+                                    .Build());
 }
 
-void FrameSelection::SetSelection(const SelectionInDOMTree& passed_selection,
-                                  SetSelectionOptions options,
-                                  CursorAlignOnScroll align,
-                                  TextGranularity granularity) {
-  if (SetSelectionDeprecated(passed_selection, options, granularity))
-    DidSetSelectionDeprecated(options, align);
+void FrameSelection::SetSelection(const SelectionInDOMTree& selection,
+                                  const SetSelectionOptions& data) {
+  if (SetSelectionDeprecated(selection, data))
+    DidSetSelectionDeprecated(data);
+}
+
+void FrameSelection::SetSelectionAndEndTyping(
+    const SelectionInDOMTree& selection) {
+  SetSelection(selection, SetSelectionOptions::Builder()
+                              .SetShouldCloseTyping(true)
+                              .SetShouldClearTypingStyle(true)
+                              .Build());
 }
 
 bool FrameSelection::SetSelectionDeprecated(
-    const SelectionInDOMTree& passed_selection,
-    SetSelectionOptions options,
-    TextGranularity granularity) {
-  DCHECK(IsAvailable());
-  passed_selection.AssertValidFor(GetDocument());
+    const SelectionInDOMTree& new_selection,
+    const SetSelectionOptions& passed_options) {
+  SetSelectionOptions::Builder options_builder(passed_options);
+  if (ShouldAlwaysUseDirectionalSelection(frame_)) {
+    options_builder.SetIsDirectional(true);
+  }
+  SetSelectionOptions options = options_builder.Build();
 
-  SelectionInDOMTree::Builder builder(passed_selection);
-  if (ShouldAlwaysUseDirectionalSelection(frame_))
-    builder.SetIsDirectional(true);
-  SelectionInDOMTree new_selection = builder.Build();
-  if (granularity_strategy_ &&
-      (options & FrameSelection::kDoNotClearStrategy) == 0)
+  if (granularity_strategy_ && !options.DoNotClearStrategy())
     granularity_strategy_->Clear();
-  bool close_typing = options & kCloseTyping;
-  bool should_clear_typing_style = options & kClearTypingStyle;
-  granularity_ = granularity;
+  granularity_ = options.Granularity();
 
   // TODO(yosin): We should move to call |TypingCommand::closeTyping()| to
   // |Editor| class.
-  if (close_typing)
+  if (options.ShouldCloseTyping())
     TypingCommand::CloseTyping(frame_);
 
-  if (should_clear_typing_style)
+  if (options.ShouldClearTypingStyle())
     frame_->GetEditor().ClearTypingStyle();
 
   const SelectionInDOMTree old_selection_in_dom_tree =
       selection_editor_->GetSelectionInDOMTree();
-  if (old_selection_in_dom_tree == new_selection)
+  const bool is_changed = old_selection_in_dom_tree != new_selection;
+  const bool should_show_handle = options.ShouldShowHandle();
+  if (!is_changed && is_handle_visible_ == should_show_handle &&
+      is_directional_ == options.IsDirectional())
     return false;
-  selection_editor_->SetSelection(new_selection);
+  if (is_changed)
+    selection_editor_->SetSelectionAndEndTyping(new_selection);
+  is_directional_ = options.IsDirectional();
+  should_shrink_next_tap_ = options.ShouldShrinkNextTap();
+  is_handle_visible_ = should_show_handle;
   ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 
   const Document& current_document = GetDocument();
-  // TODO(yosin): We should get rid of unsued |options| for
-  // |Editor::respondToChangedSelection()|.
-  // Note: Since, setting focus can modify DOM tree, we should use
-  // |oldSelection| before setting focus
-  frame_->GetEditor().RespondToChangedSelection(
-      old_selection_in_dom_tree.ComputeStartPosition(),
-      options & kCloseTyping ? TypingContinuation::kEnd
-                             : TypingContinuation::kContinue);
+  frame_->GetEditor().RespondToChangedSelection();
   DCHECK_EQ(current_document, GetDocument());
   return true;
 }
 
-void FrameSelection::DidSetSelectionDeprecated(SetSelectionOptions options,
-                                               CursorAlignOnScroll align) {
+void FrameSelection::DidSetSelectionDeprecated(
+    const SetSelectionOptions& options) {
   const Document& current_document = GetDocument();
-  if (!GetSelectionInDOMTree().IsNone() && !(options & kDoNotSetFocus)) {
+  if (!GetSelectionInDOMTree().IsNone() && !options.DoNotSetFocus()) {
     SetFocusedNodeIfNeeded();
     // |setFocusedNodeIfNeeded()| dispatches sync events "FocusOut" and
     // "FocusIn", |m_frame| may associate to another document.
@@ -260,7 +260,7 @@ void FrameSelection::DidSetSelectionDeprecated(SetSelectionOptions options,
 
   // TODO(yosin): Can we move this to at end of this function?
   // This may dispatch a synchronous focus-related events.
-  if (!(options & kDoNotSetFocus)) {
+  if (!options.DoNotSetFocus()) {
     SelectFrameElementInParentIfFullySelected();
     if (!IsAvailable() || GetDocument() != current_document) {
       // editing/selection/selectallchildren-crash.html and
@@ -269,10 +269,10 @@ void FrameSelection::DidSetSelectionDeprecated(SetSelectionOptions options,
       return;
     }
   }
-
-  EUserTriggered user_triggered = SelectionOptionsToUserTriggered(options);
-  NotifyTextControlOfSelectionChange(user_triggered);
-  if (user_triggered == kUserTriggered) {
+  const SetSelectionBy set_selection_by = options.GetSetSelectionBy();
+  NotifyTextControlOfSelectionChange(set_selection_by);
+  if (set_selection_by == SetSelectionBy::kUser) {
+    const CursorAlignOnScroll align = options.GetCursorAlignOnScroll();
     ScrollAlignment alignment;
 
     if (frame_->GetEditor()
@@ -341,15 +341,15 @@ static DispatchEventResult DispatchSelectStart(
 // When |userTriggered| is |NotUserTrigged|, return value specifies whether
 // selection is modified or not.
 bool FrameSelection::Modify(SelectionModifyAlteration alter,
-                            SelectionDirection direction,
+                            SelectionModifyDirection direction,
                             TextGranularity granularity,
-                            EUserTriggered user_triggered) {
-  SelectionModifier selection_modifier(*GetFrame(),
-                                       ComputeVisibleSelectionInDOMTree(),
+                            SetSelectionBy set_selection_by) {
+  SelectionModifier selection_modifier(*GetFrame(), GetSelectionInDOMTree(),
                                        x_pos_for_vertical_arrow_navigation_);
+  selection_modifier.SetSelectionIsDirectional(IsDirectional());
   const bool modified =
       selection_modifier.Modify(alter, direction, granularity);
-  if (user_triggered == kUserTriggered &&
+  if (set_selection_by == SetSelectionBy::kUser &&
       selection_modifier.Selection().IsRange() &&
       ComputeVisibleSelectionInDOMTree().IsCaret() &&
       DispatchSelectStart(ComputeVisibleSelectionInDOMTree()) !=
@@ -357,7 +357,7 @@ bool FrameSelection::Modify(SelectionModifyAlteration alter,
     return false;
   }
   if (!modified) {
-    if (user_triggered == kNotUserTriggered)
+    if (set_selection_by == SetSelectionBy::kSystem)
       return false;
     // If spatial navigation enabled, focus navigator will move focus to
     // another element. See snav-input.html and snav-textarea.html
@@ -368,16 +368,26 @@ bool FrameSelection::Modify(SelectionModifyAlteration alter,
     return true;
   }
 
-  const SetSelectionOptions options =
-      kCloseTyping | kClearTypingStyle | user_triggered;
-  SetSelection(selection_modifier.Selection().AsSelection(), options);
+  // For MacOS only selection is directionless at the beginning.
+  // Selection gets direction on extent.
+  const bool selection_is_directional =
+      alter == SelectionModifyAlteration::kExtend ||
+      ShouldAlwaysUseDirectionalSelection(frame_);
+
+  SetSelection(selection_modifier.Selection().AsSelection(),
+               SetSelectionOptions::Builder()
+                   .SetShouldCloseTyping(true)
+                   .SetShouldClearTypingStyle(true)
+                   .SetSetSelectionBy(set_selection_by)
+                   .SetIsDirectional(selection_is_directional)
+                   .Build());
 
   if (granularity == TextGranularity::kLine ||
       granularity == TextGranularity::kParagraph)
     x_pos_for_vertical_arrow_navigation_ =
         selection_modifier.XPosForVerticalArrowNavigation();
 
-  if (user_triggered == kUserTriggered)
+  if (set_selection_by == SetSelectionBy::kUser)
     granularity_ = TextGranularity::kCharacter;
 
   ScheduleVisualUpdateForPaintInvalidationIfNeeded();
@@ -389,7 +399,9 @@ void FrameSelection::Clear() {
   granularity_ = TextGranularity::kCharacter;
   if (granularity_strategy_)
     granularity_strategy_->Clear();
-  SetSelection(SelectionInDOMTree());
+  SetSelectionAndEndTyping(SelectionInDOMTree());
+  is_handle_visible_ = false;
+  is_directional_ = ShouldAlwaysUseDirectionalSelection(frame_);
 }
 
 bool FrameSelection::SelectionHasFocus() const {
@@ -492,14 +504,47 @@ bool FrameSelection::ShouldPaintCaret(const LayoutBlock& block) const {
   DCHECK_GE(GetDocument().Lifecycle().GetState(),
             DocumentLifecycle::kLayoutClean);
   bool result = frame_caret_->ShouldPaintCaret(block);
-  DCHECK(!result || (ComputeVisibleSelectionInDOMTree().IsCaret() &&
-                     ComputeVisibleSelectionInDOMTree().HasEditableStyle()));
+  DCHECK(!result ||
+         (ComputeVisibleSelectionInDOMTree().IsCaret() &&
+          IsEditablePosition(ComputeVisibleSelectionInDOMTree().Start())));
   return result;
 }
 
-IntRect FrameSelection::AbsoluteCaretBounds() {
+IntRect FrameSelection::AbsoluteCaretBounds() const {
   DCHECK(ComputeVisibleSelectionInDOMTree().IsValidFor(*frame_->GetDocument()));
   return frame_caret_->AbsoluteCaretBounds();
+}
+
+bool FrameSelection::ComputeAbsoluteBounds(IntRect& anchor,
+                                           IntRect& focus) const {
+  if (!IsAvailable() || GetSelectionInDOMTree().IsNone())
+    return false;
+
+  // TODO(editing-dev): The use of updateStyleAndLayoutIgnorePendingStylesheets
+  // needs to be audited.  See http://crbug.com/590369 for more details.
+  frame_->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+  if (ComputeVisibleSelectionInDOMTree().IsNone()) {
+    // plugins/mouse-capture-inside-shadow.html reaches here.
+    return false;
+  }
+
+  DocumentLifecycle::DisallowTransitionScope disallow_transition(
+      frame_->GetDocument()->Lifecycle());
+
+  if (ComputeVisibleSelectionInDOMTree().IsCaret()) {
+    anchor = focus = AbsoluteCaretBounds();
+  } else {
+    const EphemeralRange selected_range =
+        ComputeVisibleSelectionInDOMTree().ToNormalizedEphemeralRange();
+    if (selected_range.IsNull())
+      return false;
+    anchor = FirstRectForRange(EphemeralRange(selected_range.StartPosition()));
+    focus = FirstRectForRange(EphemeralRange(selected_range.EndPosition()));
+  }
+
+  if (!ComputeVisibleSelectionInDOMTree().IsBaseFirst())
+    std::swap(anchor, focus);
+  return true;
 }
 
 void FrameSelection::PaintCaret(GraphicsContext& context,
@@ -508,7 +553,7 @@ void FrameSelection::PaintCaret(GraphicsContext& context,
 }
 
 bool FrameSelection::Contains(const LayoutPoint& point) {
-  if (GetDocument().GetLayoutViewItem().IsNull())
+  if (!GetDocument().GetLayoutView())
     return false;
 
   // Treat a collapsed selection like no selection.
@@ -519,7 +564,7 @@ bool FrameSelection::Contains(const LayoutPoint& point) {
 
   HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
   HitTestResult result(request, point);
-  GetDocument().GetLayoutViewItem().HitTest(result);
+  GetDocument().GetLayoutView()->HitTest(result);
   Node* inner_node = result.InnerNode();
   if (!inner_node || !inner_node->GetLayoutObject())
     return false;
@@ -603,7 +648,7 @@ void FrameSelection::SelectFrameElementInParentIfFullySelected() {
       Position(owner_element_parent, owner_element_node_index));
   VisiblePosition after_owner_element = CreateVisiblePosition(
       Position(owner_element_parent, owner_element_node_index + 1),
-      VP_UPSTREAM_IF_POSSIBLE);
+      TextAffinity::kUpstreamIfPossible);
 
   SelectionInDOMTree::Builder builder;
   builder
@@ -619,8 +664,11 @@ void FrameSelection::SelectFrameElementInParentIfFullySelected() {
   page->GetFocusController().SetFocusedFrame(parent);
   // setFocusedFrame can dispatch synchronous focus/blur events.  The document
   // tree might be modified.
-  if (new_selection.IsNonOrphanedCaretOrRange())
-    ToLocalFrame(parent)->Selection().SetSelection(new_selection.AsSelection());
+  if (!new_selection.IsNone() &&
+      new_selection.IsValidFor(*(ToLocalFrame(parent)->GetDocument()))) {
+    ToLocalFrame(parent)->Selection().SetSelectionAndEndTyping(
+        new_selection.AsSelection());
+  }
 }
 
 // Returns a shadow tree node for legacy shadow trees, a child of the
@@ -631,10 +679,9 @@ static Node* NonBoundaryShadowTreeRootNode(const Position& position) {
              : nullptr;
 }
 
-void FrameSelection::SelectAll(EUserTriggered user_triggered) {
-  if (isHTMLSelectElement(GetDocument().FocusedElement())) {
-    HTMLSelectElement* select_element =
-        toHTMLSelectElement(GetDocument().FocusedElement());
+void FrameSelection::SelectAll(SetSelectionBy set_selection_by) {
+  if (auto* select_element =
+          ToHTMLSelectElementOrNull(GetDocument().FocusedElement())) {
     if (select_element->CanSelectAll()) {
       select_element->SelectAll();
       return;
@@ -643,7 +690,7 @@ void FrameSelection::SelectAll(EUserTriggered user_triggered) {
 
   Node* root = nullptr;
   Node* select_start_target = nullptr;
-  if (user_triggered == kUserTriggered && IsHidden()) {
+  if (set_selection_by == SetSelectionBy::kUser && IsHidden()) {
     // Hidden selection appears as no selection to user, in which case user-
     // triggered SelectAll should act as if there is no selection.
     root = GetDocument().documentElement();
@@ -683,19 +730,53 @@ void FrameSelection::SelectAll(EUserTriggered user_triggered) {
       return;
   }
 
-  // TODO(editing-dev): Should we pass in user_triggered?
-  SetSelection(SelectionInDOMTree::Builder()
-                   .SelectAllChildren(*root)
-                   .SetIsHandleVisible(IsHandleVisible())
+  // TODO(editing-dev): Should we pass in set_selection_by?
+  SetSelection(SelectionInDOMTree::Builder().SelectAllChildren(*root).Build(),
+               SetSelectionOptions::Builder()
+                   .SetShouldCloseTyping(true)
+                   .SetShouldClearTypingStyle(true)
+                   .SetShouldShowHandle(IsHandleVisible())
                    .Build());
   SelectFrameElementInParentIfFullySelected();
-  // TODO(editing-dev): Should we pass in user_triggered?
-  NotifyTextControlOfSelectionChange(kUserTriggered);
+  // TODO(editing-dev): Should we pass in set_selection_by?
+  NotifyTextControlOfSelectionChange(SetSelectionBy::kUser);
   if (IsHandleVisible()) {
     ContextMenuAllowedScope scope;
     frame_->GetEventHandler().ShowNonLocatedContextMenu(nullptr,
                                                         kMenuSourceTouch);
   }
+}
+
+void FrameSelection::SelectAll() {
+  SelectAll(SetSelectionBy::kSystem);
+}
+
+// Implementation of |SVGTextControlElement::selectSubString()|
+void FrameSelection::SelectSubString(const Element& element,
+                                     int offset,
+                                     int length) {
+  // Find selection start
+  VisiblePosition start = VisiblePosition::FirstPositionInNode(element);
+  for (int i = 0; i < offset; ++i)
+    start = NextPositionOf(start);
+  if (start.IsNull())
+    return;
+
+  // Find selection end
+  VisiblePosition end(start);
+  for (int i = 0; i < length; ++i)
+    end = NextPositionOf(end);
+  if (end.IsNull())
+    return;
+
+  // TODO(editing-dev): We assume |start| and |end| are not null and we don't
+  // known when |start| and |end| are null. Once we get a such case, we check
+  // null for |start| and |end|.
+  SetSelectionAndEndTyping(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(start.DeepEquivalent(), end.DeepEquivalent())
+          .SetAffinity(start.Affinity())
+          .Build());
 }
 
 void FrameSelection::NotifyAccessibilityForSelectionChange() {
@@ -733,15 +814,13 @@ void FrameSelection::FocusedOrActiveStateChanged() {
   // Because LayoutObject::selectionBackgroundColor() and
   // LayoutObject::selectionForegroundColor() check if the frame is active,
   // we have to update places those colors were painted.
-  LayoutViewItem view = GetDocument().GetLayoutViewItem();
-  if (!view.IsNull())
+  auto* view = GetDocument().GetLayoutView();
+  if (view)
     layout_selection_->InvalidatePaintForSelection();
 
   // Caret appears in the active frame.
   if (active_and_focused)
     SetSelectionFromNone();
-  else
-    frame_->GetSpellChecker().SpellCheckAfterBlur();
   frame_caret_->SetCaretVisibility(active_and_focused
                                        ? CaretVisibility::kVisible
                                        : CaretVisibility::kHidden);
@@ -805,18 +884,18 @@ void FrameSelection::DidLayout() {
 }
 
 void FrameSelection::UpdateAppearance() {
-  DCHECK(!frame_->ContentLayoutItem().IsNull());
+  DCHECK(frame_->ContentLayoutObject());
   frame_caret_->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
   layout_selection_->SetHasPendingSelection();
 }
 
 void FrameSelection::NotifyTextControlOfSelectionChange(
-    EUserTriggered user_triggered) {
+    SetSelectionBy set_selection_by) {
   TextControlElement* text_control =
       EnclosingTextControl(GetSelectionInDOMTree().Base());
   if (!text_control)
     return;
-  text_control->SelectionChanged(user_triggered == kUserTriggered);
+  text_control->SelectionChanged(set_selection_by == SetSelectionBy::kUser);
 }
 
 // Helper function that tells whether a particular node is an element that has
@@ -891,46 +970,31 @@ String FrameSelection::SelectedTextForClipboard() const {
                  .SetEmitsImageAltText(
                      frame_->GetSettings() &&
                      frame_->GetSettings()->GetSelectionIncludesAltImageText())
+                 .SetSkipsUnselectableContent(true)
                  .Build());
 }
 
-LayoutRect FrameSelection::Bounds() const {
+LayoutRect FrameSelection::AbsoluteUnclippedBounds() const {
   LocalFrameView* view = frame_->View();
-  if (!view)
-    return LayoutRect();
+  LayoutView* layout_view = frame_->ContentLayoutObject();
 
-  return Intersection(UnclippedBounds(),
-                      LayoutRect(view->VisibleContentRect()));
-}
-
-LayoutRect FrameSelection::UnclippedBounds() const {
-  LocalFrameView* view = frame_->View();
-  LayoutViewItem layout_view = frame_->ContentLayoutItem();
-
-  if (!view || layout_view.IsNull())
+  if (!view || !layout_view)
     return LayoutRect();
 
   view->UpdateLifecycleToLayoutClean();
-  return LayoutRect(layout_selection_->SelectionBounds());
+  return LayoutRect(layout_selection_->AbsoluteSelectionBounds());
 }
 
 IntRect FrameSelection::ComputeRectToScroll(
     RevealExtentOption reveal_extent_option) {
   const VisibleSelection& selection = ComputeVisibleSelectionInDOMTree();
-  LayoutRect rect;
-  switch (selection.GetSelectionType()) {
-    case kCaretSelection:
-      return AbsoluteCaretBounds();
-    case kRangeSelection: {
-      if (reveal_extent_option == kRevealExtent)
-        return AbsoluteCaretBoundsOf(CreateVisiblePosition(selection.Extent()));
-      layout_selection_->SetHasPendingSelection();
-      return layout_selection_->SelectionBounds();
-    }
-    default:
-      NOTREACHED();
-      return {};
-  }
+  if (selection.IsCaret())
+    return AbsoluteCaretBounds();
+  DCHECK(selection.IsRange());
+  if (reveal_extent_option == kRevealExtent)
+    return AbsoluteCaretBoundsOf(CreateVisiblePosition(selection.Extent()));
+  layout_selection_->SetHasPendingSelection();
+  return layout_selection_->AbsoluteSelectionBounds();
 }
 
 // TODO(editing-dev): This should be done in FlatTree world.
@@ -944,7 +1008,7 @@ void FrameSelection::RevealSelection(const ScrollAlignment& alignment,
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   const VisibleSelection& selection = ComputeVisibleSelectionInDOMTree();
-  if (selection.GetSelectionType() == kNoSelection)
+  if (selection.IsNone())
     return;
 
   // FIXME: This code only handles scrolling the startContainer's layer, but
@@ -954,9 +1018,14 @@ void FrameSelection::RevealSelection(const ScrollAlignment& alignment,
   const Position& start = selection.Start();
   DCHECK(start.AnchorNode());
   DCHECK(start.AnchorNode()->GetLayoutObject());
-  if (!start.AnchorNode()->GetLayoutObject()->ScrollRectToVisible(
-          LayoutRect(ComputeRectToScroll(reveal_extent_option)), alignment,
-          alignment))
+  // This function is needed to make sure that ComputeRectToScroll below has the
+  // sticky offset info available before the computation.
+  GetDocument().EnsurePaintLocationDataValidForNode(start.AnchorNode());
+  LayoutRect selection_rect =
+      LayoutRect(ComputeRectToScroll(reveal_extent_option));
+  if (selection_rect == LayoutRect() ||
+      !start.AnchorNode()->GetLayoutObject()->ScrollRectToVisible(
+          selection_rect, WebScrollIntoViewParams(alignment, alignment)))
     return;
 
   UpdateAppearance();
@@ -976,9 +1045,9 @@ void FrameSelection::SetSelectionFromNone() {
     return;
   if (HTMLBodyElement* body =
           Traversal<HTMLBodyElement>::FirstChild(*document_element)) {
-    SetSelection(SelectionInDOMTree::Builder()
-                     .Collapse(FirstPositionInOrBeforeNode(body))
-                     .Build());
+    SetSelectionAndEndTyping(SelectionInDOMTree::Builder()
+                                 .Collapse(FirstPositionInOrBeforeNode(*body))
+                                 .Build());
   }
 }
 
@@ -1008,7 +1077,7 @@ void FrameSelection::ShowTreeForThis() const {
 
 #endif
 
-DEFINE_TRACE(FrameSelection) {
+void FrameSelection::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
   visitor->Trace(layout_selection_);
   visitor->Trace(selection_editor_);
@@ -1026,9 +1095,15 @@ void FrameSelection::ScheduleVisualUpdateForPaintInvalidationIfNeeded() const {
     frame_view->ScheduleVisualUpdateForPaintInvalidationIfNeeded();
 }
 
-bool FrameSelection::SelectWordAroundPosition(const VisiblePosition& position) {
-  static const EWordSide kWordSideList[2] = {kRightWordIfOnBoundary,
-                                             kLeftWordIfOnBoundary};
+bool FrameSelection::SelectWordAroundCaret() {
+  const VisibleSelection& selection = ComputeVisibleSelectionInDOMTree();
+  // TODO(editing-dev): The use of VisibleSelection needs to be audited. See
+  // http://crbug.com/657237 for more details.
+  if (!selection.IsCaret())
+    return false;
+  const VisiblePosition& position = selection.VisibleStart();
+  static const EWordSide kWordSideList[2] = {kNextWordIfOnBoundary,
+                                             kPreviousWordIfOnBoundary};
   for (EWordSide word_side : kWordSideList) {
     // TODO(yoichio): We should have Position version of |start/endOfWord|
     // for avoiding unnecessary canonicalization.
@@ -1041,8 +1116,11 @@ bool FrameSelection::SelectWordAroundPosition(const VisiblePosition& position) {
                        .Collapse(start.ToPositionWithAffinity())
                        .Extend(end.DeepEquivalent())
                        .Build(),
-                   kCloseTyping | kClearTypingStyle,
-                   CursorAlignOnScroll::kIfNeeded, TextGranularity::kWord);
+                   SetSelectionOptions::Builder()
+                       .SetShouldCloseTyping(true)
+                       .SetShouldClearTypingStyle(true)
+                       .SetGranularity(TextGranularity::kWord)
+                       .Build());
       return true;
     }
   }
@@ -1055,7 +1133,7 @@ GranularityStrategy* FrameSelection::GetGranularityStrategy() {
   // initialize it right in the constructor - the correct settings may not be
   // set yet.
   SelectionStrategy strategy_type = SelectionStrategy::kCharacter;
-  Settings* settings = frame_ ? frame_->GetSettings() : 0;
+  Settings* settings = frame_ ? frame_->GetSettings() : nullptr;
   if (settings &&
       settings->GetSelectionStrategy() == SelectionStrategy::kDirection)
     strategy_type = SelectionStrategy::kDirection;
@@ -1065,9 +1143,9 @@ GranularityStrategy* FrameSelection::GetGranularityStrategy() {
     return granularity_strategy_.get();
 
   if (strategy_type == SelectionStrategy::kDirection)
-    granularity_strategy_ = WTF::MakeUnique<DirectionGranularityStrategy>();
+    granularity_strategy_ = std::make_unique<DirectionGranularityStrategy>();
   else
-    granularity_strategy_ = WTF::MakeUnique<CharacterGranularityStrategy>();
+    granularity_strategy_ = std::make_unique<CharacterGranularityStrategy>();
   return granularity_strategy_.get();
 }
 
@@ -1075,31 +1153,38 @@ void FrameSelection::MoveRangeSelectionExtent(const IntPoint& contents_point) {
   if (ComputeVisibleSelectionInDOMTree().IsNone())
     return;
 
-  const SetSelectionOptions kOptions =
-      FrameSelection::kCloseTyping | FrameSelection::kClearTypingStyle |
-      FrameSelection::kDoNotClearStrategy | kUserTriggered;
   SetSelection(
       SelectionInDOMTree::Builder(
           GetGranularityStrategy()->UpdateExtent(contents_point, frame_))
-          .SetIsHandleVisible(true)
           .Build(),
-      kOptions);
+      SetSelectionOptions::Builder()
+          .SetShouldCloseTyping(true)
+          .SetShouldClearTypingStyle(true)
+          .SetDoNotClearStrategy(true)
+          .SetSetSelectionBy(SetSelectionBy::kUser)
+          .SetShouldShowHandle(true)
+          .Build());
 }
 
-// TODO(yosin): We should make |FrameSelection::moveRangeSelection()| to take
-// two |IntPoint| instead of two |VisiblePosition| like
-// |moveRangeSelectionExtent()|.
-void FrameSelection::MoveRangeSelection(const VisiblePosition& base_position,
-                                        const VisiblePosition& extent_position,
+void FrameSelection::MoveRangeSelection(const IntPoint& base_point,
+                                        const IntPoint& extent_point,
                                         TextGranularity granularity) {
-  SelectionInDOMTree new_selection =
+  const VisiblePosition& base_position =
+      VisiblePositionForContentsPoint(base_point, GetFrame());
+  const VisiblePosition& extent_position =
+      VisiblePositionForContentsPoint(extent_point, GetFrame());
+  MoveRangeSelectionInternal(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtentDeprecated(base_position.DeepEquivalent(),
                                       extent_position.DeepEquivalent())
           .SetAffinity(base_position.Affinity())
-          .SetIsHandleVisible(IsHandleVisible())
-          .Build();
+          .Build(),
+      granularity);
+}
 
+void FrameSelection::MoveRangeSelectionInternal(
+    const SelectionInDOMTree& new_selection,
+    TextGranularity granularity) {
   if (new_selection.IsNone())
     return;
 
@@ -1117,9 +1202,12 @@ void FrameSelection::MoveRangeSelection(const VisiblePosition& base_position,
                              visible_selection.Start());
   }
   builder.SetAffinity(visible_selection.Affinity());
-  builder.SetIsHandleVisible(IsHandleVisible());
-  SetSelection(builder.Build(), kCloseTyping | kClearTypingStyle,
-               CursorAlignOnScroll::kIfNeeded, granularity);
+  SetSelection(builder.Build(), SetSelectionOptions::Builder()
+                                    .SetShouldCloseTyping(true)
+                                    .SetShouldClearTypingStyle(true)
+                                    .SetGranularity(granularity)
+                                    .SetShouldShowHandle(IsHandleVisible())
+                                    .Build());
 }
 
 void FrameSelection::SetCaretVisible(bool caret_is_visible) {
@@ -1147,19 +1235,24 @@ void FrameSelection::ClearDocumentCachedRange() {
   selection_editor_->ClearDocumentCachedRange();
 }
 
-std::pair<int, int> FrameSelection::LayoutSelectionStartEnd() {
-  return layout_selection_->SelectionStartEnd();
-}
-
-base::Optional<int> FrameSelection::LayoutSelectionStart() const {
+WTF::Optional<unsigned> FrameSelection::LayoutSelectionStart() const {
   return layout_selection_->SelectionStart();
 }
-base::Optional<int> FrameSelection::LayoutSelectionEnd() const {
+WTF::Optional<unsigned> FrameSelection::LayoutSelectionEnd() const {
   return layout_selection_->SelectionEnd();
 }
 
 void FrameSelection::ClearLayoutSelection() {
   layout_selection_->ClearSelection();
+}
+
+std::pair<unsigned, unsigned> FrameSelection::LayoutSelectionStartEndForNG(
+    const NGPhysicalTextFragment& text_fragment) const {
+  return layout_selection_->SelectionStartEndForNG(text_fragment);
+}
+
+bool FrameSelection::IsDirectional() const {
+  return is_directional_;
 }
 
 }  // namespace blink

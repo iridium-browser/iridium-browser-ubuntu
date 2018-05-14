@@ -22,33 +22,30 @@ namespace sh
 namespace
 {
 
-void AddFieldUseStatements(const ShaderVariable &var,
-                           TIntermSequence *sequence,
-                           const TSymbolTable &symbolTable)
+void AddNodeUseStatements(TIntermTyped *node, TIntermSequence *sequence)
 {
-    TString name = TString(var.name.c_str());
-    if (var.isArray())
+    if (node->isArray())
     {
-        size_t pos = name.find_last_of('[');
-        if (pos != TString::npos)
-        {
-            name = name.substr(0, pos);
-        }
-    }
-    TIntermSymbol *symbol = ReferenceGlobalVariable(name, symbolTable);
-    if (var.isArray())
-    {
-        for (unsigned int i = 0u; i < var.arraySize; ++i)
+        for (unsigned int i = 0u; i < node->getOutermostArraySize(); ++i)
         {
             TIntermBinary *element =
-                new TIntermBinary(EOpIndexDirect, symbol->deepCopy(), CreateIndexNode(i));
-            sequence->insert(sequence->begin(), element);
+                new TIntermBinary(EOpIndexDirect, node->deepCopy(), CreateIndexNode(i));
+            AddNodeUseStatements(element, sequence);
         }
     }
     else
     {
-        sequence->insert(sequence->begin(), symbol);
+        sequence->insert(sequence->begin(), node);
     }
+}
+
+void AddFieldUseStatements(const ShaderVariable &var,
+                           TIntermSequence *sequence,
+                           const TSymbolTable &symbolTable)
+{
+    ASSERT(var.name.find_last_of('[') == std::string::npos);
+    TIntermSymbol *symbol = ReferenceGlobalVariable(ImmutableString(var.name), symbolTable);
+    AddNodeUseStatements(symbol, sequence);
 }
 
 void InsertUseCode(const InterfaceBlock &block, TIntermTyped *blockNode, TIntermSequence *sequence)
@@ -76,8 +73,8 @@ void InsertUseCode(TIntermSequence *sequence,
         }
         else if (block.arraySize > 0u)
         {
-            TString name(block.instanceName.c_str());
-            TIntermSymbol *arraySymbol = ReferenceGlobalVariable(name, symbolTable);
+            TIntermSymbol *arraySymbol =
+                ReferenceGlobalVariable(ImmutableString(block.instanceName), symbolTable);
             for (unsigned int i = 0u; i < block.arraySize; ++i)
             {
                 TIntermBinary *elementSymbol =
@@ -87,8 +84,8 @@ void InsertUseCode(TIntermSequence *sequence,
         }
         else
         {
-            TString name(block.instanceName.c_str());
-            TIntermSymbol *blockSymbol = ReferenceGlobalVariable(name, symbolTable);
+            TIntermSymbol *blockSymbol =
+                ReferenceGlobalVariable(ImmutableString(block.instanceName), symbolTable);
             InsertUseCode(block, blockSymbol, sequence);
         }
     }

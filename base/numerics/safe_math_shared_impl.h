@@ -21,7 +21,8 @@
 #if !defined(__native_client__) &&                         \
     ((defined(__clang__) &&                                \
       ((__clang_major__ > 3) ||                            \
-       (__clang_major__ == 3 && __clang_minor__ >= 4))))
+       (__clang_major__ == 3 && __clang_minor__ >= 4))) || \
+     (defined(__GNUC__) && __GNUC__ >= 5))
 #include "base/numerics/safe_math_clang_gcc_impl.h"
 #define BASE_HAS_OPTIMIZED_SAFE_MATH (1)
 #else
@@ -95,7 +96,7 @@ struct ClampedMulFastOp {
 };
 
 template <typename T>
-struct ClampedAbsFastOp {
+struct ClampedNegFastOp {
   static const bool is_supported = false;
   static constexpr T Do(T) {
     // Force a compile failure if instantiated.
@@ -200,12 +201,13 @@ struct ResultType {
 // The following macros are just boilerplate for the standard arithmetic
 // operator overloads and variadic function templates. A macro isn't the nicest
 // solution, but it beats rewriting these over and over again.
-#define BASE_NUMERIC_ARITHMETIC_VARIADIC(CLASS, CL_ABBR, OP_NAME)              \
-  template <typename L, typename R, typename... Args>                          \
-  CLASS##Numeric<typename ResultType<CLASS##OP_NAME##Op, L, R, Args...>::type> \
-      CL_ABBR##OP_NAME(const L lhs, const R rhs, const Args... args) {         \
-    return CL_ABBR##MathOp<CLASS##OP_NAME##Op, L, R, Args...>(lhs, rhs,        \
-                                                              args...);        \
+#define BASE_NUMERIC_ARITHMETIC_VARIADIC(CLASS, CL_ABBR, OP_NAME)       \
+  template <typename L, typename R, typename... Args>                   \
+  constexpr CLASS##Numeric<                                             \
+      typename ResultType<CLASS##OP_NAME##Op, L, R, Args...>::type>     \
+      CL_ABBR##OP_NAME(const L lhs, const R rhs, const Args... args) {  \
+    return CL_ABBR##MathOp<CLASS##OP_NAME##Op, L, R, Args...>(lhs, rhs, \
+                                                              args...); \
   }
 
 #define BASE_NUMERIC_ARITHMETIC_OPERATORS(CLASS, CL_ABBR, OP_NAME, OP, CMP_OP) \
@@ -213,7 +215,8 @@ struct ResultType {
   template <typename L, typename R,                                            \
             typename std::enable_if<Is##CLASS##Op<L, R>::value>::type* =       \
                 nullptr>                                                       \
-  CLASS##Numeric<typename MathWrapper<CLASS##OP_NAME##Op, L, R>::type>         \
+  constexpr CLASS##Numeric<                                                    \
+      typename MathWrapper<CLASS##OP_NAME##Op, L, R>::type>                    \
   operator OP(const L lhs, const R rhs) {                                      \
     return decltype(lhs OP rhs)::template MathOp<CLASS##OP_NAME##Op>(lhs,      \
                                                                      rhs);     \
@@ -221,7 +224,8 @@ struct ResultType {
   /* Assignment arithmetic operator implementation from CLASS##Numeric. */     \
   template <typename L>                                                        \
   template <typename R>                                                        \
-  CLASS##Numeric<L>& CLASS##Numeric<L>::operator CMP_OP(const R rhs) {         \
+  constexpr CLASS##Numeric<L>& CLASS##Numeric<L>::operator CMP_OP(             \
+      const R rhs) {                                                           \
     return MathOp<CLASS##OP_NAME##Op>(rhs);                                    \
   }                                                                            \
   /* Variadic arithmetic functions that return CLASS##Numeric. */              \

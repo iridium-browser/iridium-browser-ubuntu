@@ -47,6 +47,8 @@ class NavigatorStorageQuota final
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorStorageQuota);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorStorageQuota& From(Navigator&);
   static DeprecatedStorageQuota* webkitTemporaryStorage(Navigator&);
   static DeprecatedStorageQuota* webkitPersistentStorage(Navigator&);
@@ -56,11 +58,10 @@ class NavigatorStorageQuota final
   DeprecatedStorageQuota* webkitPersistentStorage() const;
   StorageManager* storage() const;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit NavigatorStorageQuota(Navigator&);
-  static const char* SupplementName();
 
   mutable Member<DeprecatedStorageQuota> temporary_storage_;
   mutable Member<DeprecatedStorageQuota> persistent_storage_;

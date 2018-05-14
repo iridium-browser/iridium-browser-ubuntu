@@ -29,7 +29,7 @@ RTCSessionDescriptionRequestPromiseImpl::
 }
 
 RTCSessionDescriptionRequestPromiseImpl::
-    ~RTCSessionDescriptionRequestPromiseImpl() {}
+    ~RTCSessionDescriptionRequestPromiseImpl() = default;
 
 void RTCSessionDescriptionRequestPromiseImpl::RequestSucceeded(
     const WebRTCSessionDescription& web_session_description) {
@@ -63,7 +63,7 @@ void RTCSessionDescriptionRequestPromiseImpl::Clear() {
   requester_.Clear();
 }
 
-DEFINE_TRACE(RTCSessionDescriptionRequestPromiseImpl) {
+void RTCSessionDescriptionRequestPromiseImpl::Trace(blink::Visitor* visitor) {
   visitor->Trace(resolver_);
   visitor->Trace(requester_);
   RTCSessionDescriptionRequest::Trace(visitor);

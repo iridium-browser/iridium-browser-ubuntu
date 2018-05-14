@@ -15,10 +15,9 @@ source_set("cpp") {
   public_deps = [
     "//base",
     "//cc",
-    "//cc/surfaces",
     "//components/viz/common",
     "//mojo/public/cpp/bindings",
-    "//services/service_manager/public/interfaces",
+    "//services/service_manager/public/mojom",
     "//services/ui/common:mus_common",
     "//services/ui/public/cpp/gpu",
     "//services/ui/public/interfaces",
@@ -33,10 +32,6 @@ source_set("cpp") {
     "//ui/display",
     "//ui/events",
     "//ui/gfx/geometry",
-  ]
-
-  data_deps = [
-    "//services/ui",
   ]
 
   defines = [ "GL_GLEXT_PROTOTYPES" ]
@@ -60,11 +55,10 @@ source_set("internal") {
   deps = [
     "//base",
     "//cc",
-    "//cc/surfaces",
     "//components/viz/common",
     "//mojo/public/cpp/bindings",
     "//services/service_manager/public/cpp",
-    "//services/service_manager/public/interfaces",
+    "//services/service_manager/public/mojom",
     "//services/ui/common:mus_common",
     "//services/ui/public/cpp/gpu",
     "//services/ui/public/interfaces",
@@ -72,10 +66,6 @@ source_set("internal") {
     "//ui/display",
     "//ui/events",
     "//ui/gfx/geometry",
-  ]
-
-  data_deps = [
-    "//services/ui",
   ]
 
   defines = [ "GL_GLEXT_PROTOTYPES" ]

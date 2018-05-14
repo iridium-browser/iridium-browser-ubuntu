@@ -11,7 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/sys_info.h"
+#include "base/process/process_metrics_iocounters.h"
 
 namespace base {
 
@@ -112,7 +112,7 @@ static int GetProcessCPU(pid_t pid) {
   return info.p_pctcpu;
 }
 
-double ProcessMetrics::GetCPUUsage() {
+double ProcessMetrics::GetPlatformIndependentCPUUsage() {
   TimeTicks time = TimeTicks::Now();
 
   if (last_cpu_ == 0) {
@@ -140,7 +140,6 @@ double ProcessMetrics::GetCPUUsage() {
 
 ProcessMetrics::ProcessMetrics(ProcessHandle process)
     : process_(process),
-      processor_count_(SysInfo::NumberOfProcessors()),
       last_system_time_(0),
       last_cpu_(0) {}
 

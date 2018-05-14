@@ -31,7 +31,6 @@
 #ifndef WebContextMenuData_h
 #define WebContextMenuData_h
 
-#include "WebHistoryItem.h"
 #include "WebMenuItemInfo.h"
 #include "public/platform/WebMenuSourceType.h"
 #include "public/platform/WebPoint.h"
@@ -48,6 +47,9 @@ namespace blink {
 
 // This struct is passed to WebViewClient::ShowContextMenu.
 struct WebContextMenuData {
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.blink_public.web
+  // GENERATED_JAVA_CLASS_NAME_OVERRIDE: WebContextMenuMediaType
   enum MediaType {
     // No special node is in context.
     kMediaTypeNone,
@@ -80,6 +82,9 @@ struct WebContextMenuData {
   // Whether the image in context is a null.
   bool has_image_contents;
 
+  // Whether the image in context is a Client-side Lo-Fi placeholder image.
+  bool is_placeholder_image;
+
   // If |media_type| is MediaTypeImage and |has_image_contents| is true, then
   // this contains the image's WebURLResponse.
   WebURLResponse image_response;
@@ -87,18 +92,11 @@ struct WebContextMenuData {
   // The absolute URL of the page in context.
   WebURL page_url;
 
-  // The absolute keyword search URL including the %s search tag when the
-  // "Add as search engine..." option is clicked (left empty if not used).
-  WebURL keyword_url;
-
   // The absolute URL of the subframe in context.
   WebURL frame_url;
 
   // The encoding for the frame in context.
   WebString frame_encoding;
-
-  // History state of the subframe in context.
-  WebHistoryItem frame_history_item;
 
   enum MediaFlags {
     kMediaNone = 0x0,
@@ -193,6 +191,14 @@ struct WebContextMenuData {
 
   // Selection in viewport coordinates.
   WebRect selection_rect;
+
+  // TODO(https://crbug.com/781914): Remove this field after we done with Blink
+  // side tracking.
+  // Global index of start position for the current selection.
+  // If the current element is editable, then it starts from the first
+  // character within the element, otherwise, it starts from the beginning of
+  // the current webpage.
+  int selection_start_offset;
 
   WebMenuSourceType source_type;
 

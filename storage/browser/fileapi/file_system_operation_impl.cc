@@ -40,19 +40,17 @@ namespace {
 // Takes ownership and destruct on the target thread.
 void Destruct(base::File file) {}
 
-void DidOpenFile(
-    scoped_refptr<FileSystemContext> context,
-    base::WeakPtr<FileSystemOperationImpl> operation,
-    const FileSystemOperationImpl::OpenFileCallback& callback,
-    base::File file,
-    const base::Closure& on_close_callback) {
+void DidOpenFile(scoped_refptr<FileSystemContext> context,
+                 base::WeakPtr<FileSystemOperationImpl> operation,
+                 const FileSystemOperationImpl::OpenFileCallback& callback,
+                 base::File file,
+                 base::OnceClosure on_close_callback) {
   if (!operation) {
     context->default_file_task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(&Destruct, base::Passed(&file)));
+        FROM_HERE, base::BindOnce(&Destruct, base::Passed(&file)));
     return;
   }
-  callback.Run(std::move(file), on_close_callback);
+  callback.Run(std::move(file), std::move(on_close_callback));
 }
 
 }  // namespace
@@ -65,8 +63,7 @@ FileSystemOperation* FileSystemOperation::Create(
                                      std::move(operation_context));
 }
 
-FileSystemOperationImpl::~FileSystemOperationImpl() {
-}
+FileSystemOperationImpl::~FileSystemOperationImpl() = default;
 
 void FileSystemOperationImpl::CreateFile(const FileSystemURL& url,
                                          bool exclusive,
@@ -417,11 +414,11 @@ void FileSystemOperationImpl::GetUsageAndQuotaThenRunTask(
 void FileSystemOperationImpl::DidGetUsageAndQuotaAndRunTask(
     const base::Closure& task,
     const base::Closure& error_callback,
-    storage::QuotaStatusCode status,
+    blink::mojom::QuotaStatusCode status,
     int64_t usage,
     int64_t quota) {
-  if (status != storage::kQuotaStatusOk) {
-    LOG(WARNING) << "Got unexpected quota error : " << status;
+  if (status != blink::mojom::QuotaStatusCode::kOk) {
+    LOG(WARNING) << "Got unexpected quota error : " << static_cast<int>(status);
     error_callback.Run();
     return;
   }
@@ -584,7 +581,7 @@ void FileSystemOperationImpl::DidWrite(
   if (complete && write_status != FileWriterDelegate::ERROR_WRITE_NOT_STARTED) {
     DCHECK(operation_context_);
     operation_context_->change_observers()->Notify(
-        &FileChangeObserver::OnModifyFile, std::make_tuple(url));
+        &FileChangeObserver::OnModifyFile, url);
   }
 
   StatusCallback cancel_callback = cancel_callback_;

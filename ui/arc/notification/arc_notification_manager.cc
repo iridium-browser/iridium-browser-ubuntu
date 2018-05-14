@@ -15,10 +15,25 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/arc_util.h"
+#include "ui/arc/notification/arc_notification_delegate.h"
 #include "ui/arc/notification/arc_notification_item_impl.h"
+#include "ui/arc/notification/arc_notification_view.h"
+#include "ui/message_center/views/message_view_factory.h"
 
 namespace arc {
 namespace {
+
+constexpr char kPlayStorePackageName[] = "com.android.vending";
+
+std::unique_ptr<message_center::MessageView> CreateCustomMessageView(
+    const message_center::Notification& notification) {
+  DCHECK_EQ(notification.notifier_id().type,
+            message_center::NotifierId::ARC_APPLICATION);
+  auto* arc_delegate =
+      static_cast<ArcNotificationDelegate*>(notification.delegate());
+  return arc_delegate->CreateCustomMessageView(notification);
+}
 
 // Singleton factory for ArcNotificationManager.
 class ArcNotificationManagerFactory
@@ -58,6 +73,12 @@ ArcNotificationManager::CreateForTesting(
       bridge_service, main_profile_id, message_center));
 }
 
+// static
+void ArcNotificationManager::SetCustomNotificationViewFactory() {
+  message_center::MessageViewFactory::SetCustomNotificationViewFactory(
+      base::Bind(&CreateCustomMessageView));
+}
+
 ArcNotificationManager::ArcNotificationManager(content::BrowserContext* context,
                                                ArcBridgeService* bridge_service)
     : ArcNotificationManager(bridge_service,
@@ -70,34 +91,25 @@ ArcNotificationManager::ArcNotificationManager(
     message_center::MessageCenter* message_center)
     : arc_bridge_service_(bridge_service),
       main_profile_id_(main_profile_id),
-      message_center_(message_center),
-      binding_(this) {
+      message_center_(message_center) {
+  arc_bridge_service_->notifications()->SetHost(this);
   arc_bridge_service_->notifications()->AddObserver(this);
+  if (!message_center::MessageViewFactory::HasCustomNotificationViewFactory())
+    SetCustomNotificationViewFactory();
 }
 
 ArcNotificationManager::~ArcNotificationManager() {
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->notifications()->RemoveObserver(this);
+  arc_bridge_service_->notifications()->RemoveObserver(this);
+  arc_bridge_service_->notifications()->SetHost(nullptr);
 }
 
-void ArcNotificationManager::OnInstanceReady() {
+void ArcNotificationManager::OnConnectionReady() {
   DCHECK(!ready_);
-
-  auto* notifications_instance =
-      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service_->notifications(), Init);
-  DCHECK(notifications_instance);
-
-  mojom::NotificationsHostPtr host_proxy;
-  binding_.Bind(mojo::MakeRequest(&host_proxy));
-  notifications_instance->Init(std::move(host_proxy));
+  // TODO(hidehiko): Replace this by ConnectionHolder::IsConnected().
   ready_ = true;
 }
 
-void ArcNotificationManager::OnInstanceClosed() {
+void ArcNotificationManager::OnConnectionClosed() {
   DCHECK(ready_);
   while (!items_.empty()) {
     auto it = items_.begin();
@@ -110,18 +122,38 @@ void ArcNotificationManager::OnInstanceClosed() {
 
 void ArcNotificationManager::OnNotificationPosted(
     mojom::ArcNotificationDataPtr data) {
+  if (ShouldIgnoreNotification(data.get())) {
+    VLOG(3) << "Posted notification was ignored.";
+    return;
+  }
+
   const std::string& key = data->key;
   auto it = items_.find(key);
   if (it == items_.end()) {
     // Show a notification on the primary logged-in user's desktop.
     // TODO(yoshiki): Reconsider when ARC supports multi-user.
-    auto item = base::MakeUnique<ArcNotificationItemImpl>(
+    auto item = std::make_unique<ArcNotificationItemImpl>(
         this, message_center_, key, main_profile_id_);
     // TODO(yoshiki): Use emplacement for performance when it's available.
     auto result = items_.insert(std::make_pair(key, std::move(item)));
     DCHECK(result.second);
     it = result.first;
   }
+  it->second->OnUpdatedFromAndroid(std::move(data));
+}
+
+void ArcNotificationManager::OnNotificationUpdated(
+    mojom::ArcNotificationDataPtr data) {
+  if (ShouldIgnoreNotification(data.get())) {
+    VLOG(3) << "Updated notification was ignored.";
+    return;
+  }
+
+  const std::string& key = data->key;
+  auto it = items_.find(key);
+  if (it == items_.end())
+    return;
+
   it->second->OnUpdatedFromAndroid(std::move(data));
 }
 
@@ -319,6 +351,14 @@ void ArcNotificationManager::OnToastPosted(mojom::ArcToastDataPtr data) {
 
 void ArcNotificationManager::OnToastCancelled(mojom::ArcToastDataPtr data) {
   ash::Shell::Get()->toast_manager()->Cancel(data->id);
+}
+
+bool ArcNotificationManager::ShouldIgnoreNotification(
+    arc::mojom::ArcNotificationData* data) {
+  // Notifications from Play Store are ignored in Public Session and Kiosk mode.
+  // TODO: Use centralized const for Play Store package.
+  return data->package_name.has_value() &&
+         *data->package_name == kPlayStorePackageName && IsRobotAccountMode();
 }
 
 }  // namespace arc

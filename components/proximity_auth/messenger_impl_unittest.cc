@@ -8,7 +8,6 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "components/cryptauth/connection.h"
 #include "components/cryptauth/cryptauth_test_util.h"
 #include "components/cryptauth/fake_connection.h"
@@ -64,9 +63,12 @@ class MockMessengerObserver : public MessengerObserver {
 class TestMessenger : public MessengerImpl {
  public:
   TestMessenger()
-      : MessengerImpl(base::MakeUnique<cryptauth::FakeConnection>(
+      : MessengerImpl(std::make_unique<cryptauth::FakeConnection>(
                           cryptauth::CreateClassicRemoteDeviceForTest()),
-                      base::MakeUnique<cryptauth::FakeSecureContext>()) {}
+                      std::make_unique<cryptauth::FakeSecureContext>()) {}
+  TestMessenger(std::unique_ptr<cryptauth::Connection> connection)
+      : MessengerImpl(std::move(connection),
+                      std::make_unique<cryptauth::FakeSecureContext>()) {}
   ~TestMessenger() override {}
 
   // Simple getters for the mock objects owned by |this| messenger.
@@ -92,6 +94,18 @@ TEST(ProximityAuthMessengerImplTest, SupportsSignIn_ProtocolVersionThreeZero) {
 
 TEST(ProximityAuthMessengerImplTest, SupportsSignIn_ProtocolVersionThreeOne) {
   TestMessenger messenger;
+  messenger.GetFakeSecureContext()->set_protocol_version(
+      cryptauth::SecureContext::PROTOCOL_VERSION_THREE_ONE);
+  EXPECT_TRUE(messenger.SupportsSignIn());
+}
+
+TEST(ProximityAuthMessengerImplTest, SupportsSignIn_EmptyBluetoothAddress) {
+  cryptauth::RemoteDevice ble_remote_device =
+      cryptauth::CreateLERemoteDeviceForTest();
+  ble_remote_device.bluetooth_address = "";
+
+  TestMessenger messenger(std::unique_ptr<cryptauth::Connection>(
+      new cryptauth::FakeConnection(ble_remote_device)));
   messenger.GetFakeSecureContext()->set_protocol_version(
       cryptauth::SecureContext::PROTOCOL_VERSION_THREE_ONE);
   EXPECT_TRUE(messenger.SupportsSignIn());

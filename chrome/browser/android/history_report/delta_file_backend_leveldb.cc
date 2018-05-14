@@ -8,9 +8,9 @@
 
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "chrome/browser/android/history_report/delta_file_commons.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/comparator.h"
@@ -91,10 +91,11 @@ DeltaFileBackend::DeltaFileBackend(const base::FilePath& dir)
 DeltaFileBackend::~DeltaFileBackend() {}
 
 bool DeltaFileBackend::Init() {
-  leveldb::Options options;
+  leveldb_env::Options options;
   options.create_if_missing = true;
   options.max_open_files = 0;  // Use minimum number of files.
   options.comparator = leveldb_cmp_.get();
+  options.write_buffer_size = 500 * 1024;
   std::string path = path_.value();
   leveldb::Status status = leveldb_env::OpenDB(options, path, &db_);
   if (status.IsCorruption()) {
@@ -195,7 +196,7 @@ std::unique_ptr<std::vector<DeltaFileEntryWithData>> DeltaFileBackend::Query(
     int64_t last_seq_no,
     int32_t limit) {
   if (!EnsureInitialized())
-    return base::MakeUnique<std::vector<DeltaFileEntryWithData>>();
+    return std::make_unique<std::vector<DeltaFileEntryWithData>>();
   std::string start;
   base::SStringPrintf(&start, "%" PRId64, last_seq_no + 1);
   leveldb::ReadOptions options;
@@ -235,6 +236,29 @@ std::string DeltaFileBackend::Dump() {
   dump.append(base::IntToString(num_entries));
   dump.append("]");
   return dump;
+}
+
+bool DeltaFileBackend::OnMemoryDump(
+    const base::trace_event::MemoryDumpArgs& args,
+    base::trace_event::ProcessMemoryDump* pmd) {
+  if (!db_)
+    return true;
+
+  // leveldb_env::DBTracker already records memory usage. Add ownership edge
+  // to the dump.
+  auto* tracker_dump =
+      leveldb_env::DBTracker::GetOrCreateAllocatorDump(pmd, db_.get());
+  if (!tracker_dump)
+    return true;
+
+  auto* dump = pmd->CreateAllocatorDump(
+      base::StringPrintf("history/delta_file_service/leveldb_0x%" PRIXPTR,
+                         reinterpret_cast<uintptr_t>(db_.get())));
+  dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
+                  base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+                  tracker_dump->GetSizeInternal());
+  pmd->AddOwnershipEdge(dump->guid(), tracker_dump->guid());
+  return true;
 }
 
 }  // namespace history_report

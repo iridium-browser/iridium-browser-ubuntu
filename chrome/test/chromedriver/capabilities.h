@@ -81,9 +81,6 @@ struct PerfLoggingPrefs {
 
   InspectorDomainStatus network;
   InspectorDomainStatus page;
-  // TODO(samuong): Timeline was removed in blink 189656 (chromium commit
-  // position 315092) so remove this option once we stop supporting M41.
-  InspectorDomainStatus timeline;
 
   std::string trace_categories;  // Non-empty string enables tracing.
   int buffer_usage_reporting_interval;  // ms between trace buffer usage events.
@@ -109,6 +106,10 @@ struct Capabilities {
 
   std::string android_process;
 
+  std::string android_device_socket;
+
+  std::string android_exec_name;
+
   bool android_use_running_app;
 
   base::FilePath binary;
@@ -130,6 +131,9 @@ struct Capabilities {
 
   std::vector<std::string> extensions;
 
+  // Time to wait for extension background page to appear. If 0, no waiting.
+  base::TimeDelta extension_load_timeout;
+
   // True if should always use DevTools for taking screenshots.
   // This is experimental and may be removed at a later point.
   bool force_devtools_screenshot;
@@ -148,6 +152,8 @@ struct Capabilities {
   std::string unexpected_alert_behaviour;
 
   bool network_emulation_enabled;
+
+  bool accept_insecure_certs;
 
   PerfLoggingPrefs perf_logging_prefs;
 

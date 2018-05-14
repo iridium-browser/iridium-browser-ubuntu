@@ -4,9 +4,11 @@
 
 #include "components/viz/common/resources/resource_format_utils.h"
 
+#include "base/logging.h"
+#include "base/macros.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
-#include "ui/gfx/gpu_memory_buffer.h"
+#include "ui/gfx/buffer_types.h"
 
 namespace viz {
 
@@ -16,8 +18,9 @@ SkColorType ResourceFormatToClosestSkColorType(ResourceFormat format) {
     case RGBA_4444:
       return kARGB_4444_SkColorType;
     case RGBA_8888:
+      return kRGBA_8888_SkColorType;
     case BGRA_8888:
-      return kN32_SkColorType;
+      return kBGRA_8888_SkColorType;
     case ALPHA_8:
       return kAlpha_8_SkColorType;
     case RGB_565:
@@ -27,6 +30,7 @@ SkColorType ResourceFormatToClosestSkColorType(ResourceFormat format) {
     case ETC1:
     case RED_8:
     case LUMINANCE_F16:
+    case R16_EXT:
       return kN32_SkColorType;
     case RGBA_F16:
       return kRGBA_F16_SkColorType;
@@ -45,6 +49,7 @@ int BitsPerPixel(ResourceFormat format) {
     case RGBA_4444:
     case RGB_565:
     case LUMINANCE_F16:
+    case R16_EXT:
       return 16;
     case ALPHA_8:
     case LUMINANCE_8:
@@ -57,7 +62,7 @@ int BitsPerPixel(ResourceFormat format) {
   return 0;
 }
 
-GLenum GLDataType(ResourceFormat format) {
+unsigned int GLDataType(ResourceFormat format) {
   DCHECK_LE(format, RESOURCE_FORMAT_MAX);
   static const GLenum format_gl_data_type[] = {
       GL_UNSIGNED_BYTE,           // RGBA_8888
@@ -70,6 +75,7 @@ GLenum GLDataType(ResourceFormat format) {
       GL_UNSIGNED_BYTE,           // RED_8
       GL_HALF_FLOAT_OES,          // LUMINANCE_F16
       GL_HALF_FLOAT_OES,          // RGBA_F16
+      GL_UNSIGNED_SHORT,          // R16_EXT
   };
   static_assert(arraysize(format_gl_data_type) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_type does not handle all cases.");
@@ -77,7 +83,7 @@ GLenum GLDataType(ResourceFormat format) {
   return format_gl_data_type[format];
 }
 
-GLenum GLDataFormat(ResourceFormat format) {
+unsigned int GLDataFormat(ResourceFormat format) {
   DCHECK_LE(format, RESOURCE_FORMAT_MAX);
   static const GLenum format_gl_data_format[] = {
       GL_RGBA,           // RGBA_8888
@@ -90,19 +96,25 @@ GLenum GLDataFormat(ResourceFormat format) {
       GL_RED_EXT,        // RED_8
       GL_LUMINANCE,      // LUMINANCE_F16
       GL_RGBA,           // RGBA_F16
+      GL_RED_EXT,        // R16_EXT
   };
   static_assert(arraysize(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_format does not handle all cases.");
   return format_gl_data_format[format];
 }
 
-GLenum GLInternalFormat(ResourceFormat format) {
+unsigned int GLInternalFormat(ResourceFormat format) {
   // In GLES2, the internal format must match the texture format. (It no longer
   // is true in GLES3, however it still holds for the BGRA extension.)
+  // GL_EXT_texture_norm16 follows GLES3 semantics and only exposes a sized
+  // internal format (GL_R16_EXT).
+  if (format == R16_EXT)
+    return GL_R16_EXT;
+
   return GLDataFormat(format);
 }
 
-GLenum GLCopyTextureInternalFormat(ResourceFormat format) {
+unsigned int GLCopyTextureInternalFormat(ResourceFormat format) {
   // In GLES2, valid formats for glCopyTexImage2D are: GL_ALPHA, GL_LUMINANCE,
   // GL_LUMINANCE_ALPHA, GL_RGB, or GL_RGBA.
   // Extensions typically used for glTexImage2D do not also work for
@@ -121,6 +133,7 @@ GLenum GLCopyTextureInternalFormat(ResourceFormat format) {
       GL_LUMINANCE,  // RED_8
       GL_LUMINANCE,  // LUMINANCE_F16
       GL_RGBA,       // RGBA_F16
+      GL_LUMINANCE,  // R16_EXT
   };
   static_assert(arraysize(format_gl_data_format) == (RESOURCE_FORMAT_MAX + 1),
                 "format_gl_data_format does not handle all cases.");
@@ -133,6 +146,8 @@ gfx::BufferFormat BufferFormat(ResourceFormat format) {
       return gfx::BufferFormat::BGRA_8888;
     case RED_8:
       return gfx::BufferFormat::R_8;
+    case R16_EXT:
+      return gfx::BufferFormat::R_16;
     case RGBA_4444:
       return gfx::BufferFormat::RGBA_4444;
     case RGBA_8888:
@@ -167,6 +182,57 @@ bool DoesResourceFormatSupportAlpha(ResourceFormat format) {
     case RGB_565:
     case ETC1:
     case RED_8:
+    case LUMINANCE_F16:
+    case R16_EXT:
+      return false;
+  }
+  NOTREACHED();
+  return false;
+}
+
+unsigned int TextureStorageFormat(ResourceFormat format) {
+  switch (format) {
+    case RGBA_8888:
+      return GL_RGBA8_OES;
+    case BGRA_8888:
+      return GL_BGRA8_EXT;
+    case RGBA_F16:
+      return GL_RGBA16F_EXT;
+    case RGBA_4444:
+      return GL_RGBA4;
+    case ALPHA_8:
+      return GL_ALPHA8_EXT;
+    case LUMINANCE_8:
+      return GL_LUMINANCE8_EXT;
+    case RGB_565:
+      return GL_RGB565;
+    case RED_8:
+      return GL_R8_EXT;
+    case LUMINANCE_F16:
+      return GL_LUMINANCE16F_EXT;
+    case R16_EXT:
+      return GL_R16_EXT;
+    case ETC1:
+      break;
+  }
+  NOTREACHED();
+  return GL_RGBA8_OES;
+}
+
+bool IsGpuMemoryBufferFormatSupported(ResourceFormat format) {
+  switch (format) {
+    case BGRA_8888:
+    case RED_8:
+    case R16_EXT:
+    case RGBA_4444:
+    case RGBA_8888:
+    case ETC1:
+    case RGBA_F16:
+      return true;
+    // These formats have no BufferFormat equivalent.
+    case ALPHA_8:
+    case LUMINANCE_8:
+    case RGB_565:
     case LUMINANCE_F16:
       return false;
   }

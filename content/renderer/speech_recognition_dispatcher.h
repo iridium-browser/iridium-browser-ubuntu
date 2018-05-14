@@ -9,25 +9,13 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/memory/shared_memory.h"
-#include "base/sync_socket.h"
 #include "content/public/common/speech_recognition_result.h"
 #include "content/public/renderer/render_view_observer.h"
-#include "media/media_features.h"
-#include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
-#include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebSpeechRecognitionHandle.h"
 #include "third_party/WebKit/public/web/WebSpeechRecognizer.h"
 
-namespace media {
-class AudioParameters;
-}
-
 namespace content {
 class RenderViewImpl;
-#if BUILDFLAG(ENABLE_WEBRTC)
-class SpeechRecognitionAudioSink;
-#endif
 struct SpeechRecognitionError;
 
 // SpeechRecognitionDispatcher is a delegate for methods used by WebKit for
@@ -43,6 +31,8 @@ class SpeechRecognitionDispatcher : public RenderViewObserver,
   void AbortAllRecognitions();
 
  private:
+  using HandleMap = std::map<int, blink::WebSpeechRecognitionHandle>;
+
   // RenderViewObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() override;
@@ -65,30 +55,17 @@ class SpeechRecognitionDispatcher : public RenderViewObserver,
   void OnRecognitionEnded(int request_id);
   void OnResultsRetrieved(int request_id,
                           const SpeechRecognitionResults& result);
-  void OnAudioReceiverReady(int session_id,
-                             const media::AudioParameters& params,
-                             const base::SharedMemoryHandle handle,
-                             const base::SyncSocket::TransitDescriptor socket);
-
-  void ResetAudioSink();
 
   int GetOrCreateIDForHandle(const blink::WebSpeechRecognitionHandle& handle);
   bool HandleExists(const blink::WebSpeechRecognitionHandle& handle);
+  HandleMap::iterator FindHandleInMap(
+      const blink::WebSpeechRecognitionHandle& handle);
   const blink::WebSpeechRecognitionHandle& GetHandleFromID(int handle_id);
 
   // The WebKit client class that we use to send events back to the JS world.
   blink::WebSpeechRecognizerClient* recognizer_client_;
 
-#if BUILDFLAG(ENABLE_WEBRTC)
-  // Media stream audio track that the speech recognition connects to.
-  // Accessed on the render thread.
-  blink::WebMediaStreamTrack audio_track_;
-
-  // Audio sink used to provide audio from the track.
-  std::unique_ptr<SpeechRecognitionAudioSink> speech_audio_sink_;
-#endif
-
-  typedef std::map<int, blink::WebSpeechRecognitionHandle> HandleMap;
+  // This maps between request id values and the Blink handle values.
   HandleMap handle_map_;
   int next_id_;
 

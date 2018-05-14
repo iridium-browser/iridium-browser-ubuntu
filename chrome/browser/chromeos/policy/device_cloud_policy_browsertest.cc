@@ -11,7 +11,6 @@
 #include "base/files/dir_reader_posix.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -24,7 +23,6 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
@@ -50,6 +48,7 @@
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_switches.h"
 #include "components/policy/policy_constants.h"
+#include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/policy/proto/chrome_extension_policy.pb.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "crypto/rsa_private_key.h"
@@ -71,7 +70,7 @@ namespace {
 class DeviceCloudPolicyBrowserTest : public InProcessBrowserTest {
  protected:
   DeviceCloudPolicyBrowserTest()
-      : mock_client_(base::MakeUnique<MockCloudPolicyClient>()) {}
+      : mock_client_(std::make_unique<MockCloudPolicyClient>()) {}
 
   std::unique_ptr<MockCloudPolicyClient> mock_client_;
 
@@ -181,7 +180,7 @@ class KeyRotationDeviceCloudPolicyTest : public DevicePolicyCrosBrowserTest {
     // The run loop will be terminated by TestPolicyChangedCallback() once the
     // policy value becomes equal to the awaited value.
     DCHECK(!policy_change_waiting_run_loop_);
-    policy_change_waiting_run_loop_ = base::MakeUnique<base::RunLoop>();
+    policy_change_waiting_run_loop_ = std::make_unique<base::RunLoop>();
     policy_change_waiting_run_loop_->Run();
   }
 
@@ -204,7 +203,7 @@ class KeyRotationDeviceCloudPolicyTest : public DevicePolicyCrosBrowserTest {
   }
 
   void StartObservingTestPolicy() {
-    policy_change_registrar_ = base::MakeUnique<PolicyChangeRegistrar>(
+    policy_change_registrar_ = std::make_unique<PolicyChangeRegistrar>(
         g_browser_process->platform_part()
             ->browser_policy_connector_chromeos()
             ->GetPolicyService(),

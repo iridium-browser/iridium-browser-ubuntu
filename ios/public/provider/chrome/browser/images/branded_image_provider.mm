@@ -26,10 +26,6 @@ UIImage* BrandedImageProvider::GetClearBrowsingDataSiteDataImage() {
   return nil;
 }
 
-UIImage* BrandedImageProvider::GetContextualSearchHeaderImage() {
-  return nil;
-}
-
 UIImage* BrandedImageProvider::GetSigninConfirmationSyncSettingsImage() {
   return nil;
 }
@@ -43,5 +39,9 @@ bool BrandedImageProvider::GetToolbarVoiceSearchButtonImageId(int* image_id) {
 }
 
 UIImage* BrandedImageProvider::GetWhatsNewIconImage(WhatsNewIcon type) {
+  return nil;
+}
+
+UIImage* BrandedImageProvider::GetToolbarSearchButtonImage() {
   return nil;
 }

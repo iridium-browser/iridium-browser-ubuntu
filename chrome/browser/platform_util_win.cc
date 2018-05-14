@@ -4,11 +4,14 @@
 
 #include "chrome/browser/platform_util.h"
 
+#include <windows.h>  // Must be in front of other Windows header files.
+
 #include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <stddef.h>
+#include <wrl/client.h>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -21,7 +24,6 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_co_mem.h"
-#include "base/win/scoped_comptr.h"
 #include "chrome/browser/platform_util_internal.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/win/shell.h"
@@ -35,13 +37,13 @@ namespace platform_util {
 namespace {
 
 void ShowItemInFolderOnWorkerThread(const base::FilePath& full_path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   base::FilePath dir = full_path.DirName().AsEndingWithSeparator();
   // ParseDisplayName will fail if the directory is "C:", it must be "C:\\".
   if (dir.empty())
     return;
 
-  base::win::ScopedComPtr<IShellFolder> desktop;
+  Microsoft::WRL::ComPtr<IShellFolder> desktop;
   HRESULT hr = SHGetDesktopFolder(desktop.GetAddressOf());
   if (FAILED(hr))
     return;
@@ -78,7 +80,7 @@ void ShowItemInFolderOnWorkerThread(const base::FilePath& full_path) {
 }
 
 void OpenExternalOnWorkerThread(const GURL& url) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   // Quote the input scheme to be sure that the command does not have
   // parameters unexpected by the external program. This url should already
   // have been escaped.
@@ -108,9 +110,10 @@ void OpenExternalOnWorkerThread(const GURL& url) {
 }  // namespace
 
 void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {
-  PostTaskWithTraits(FROM_HERE,
-                     {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
-                     base::Bind(&ShowItemInFolderOnWorkerThread, full_path));
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
+      ->PostTask(FROM_HERE,
+                 base::Bind(&ShowItemInFolderOnWorkerThread, full_path));
 }
 
 namespace internal {
@@ -132,9 +135,9 @@ void PlatformOpenVerifiedItem(const base::FilePath& path, OpenItemType type) {
 void OpenExternal(Profile* profile, const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  PostTaskWithTraits(FROM_HERE,
-                     {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
-                     base::Bind(&OpenExternalOnWorkerThread, url));
+  base::CreateCOMSTATaskRunnerWithTraits(
+      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
+      ->PostTask(FROM_HERE, base::Bind(&OpenExternalOnWorkerThread, url));
 }
 
 }  // namespace platform_util

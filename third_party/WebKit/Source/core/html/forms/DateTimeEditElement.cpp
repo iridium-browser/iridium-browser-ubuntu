@@ -26,14 +26,14 @@
 #include "core/html/forms/DateTimeEditElement.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
+#include "core/css/StyleChangeReason.h"
 #include "core/dom/Document.h"
-#include "core/dom/StyleChangeReason.h"
 #include "core/dom/Text.h"
 #include "core/events/MouseEvent.h"
 #include "core/html/forms/DateTimeFieldElements.h"
 #include "core/html/forms/DateTimeFieldsState.h"
 #include "core/html/shadow/ShadowElementNames.h"
+#include "core/html_names.h"
 #include "core/style/ComputedStyle.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/text/DateTimeFormat.h"
@@ -512,7 +512,7 @@ DateTimeNumericFieldElement::Step DateTimeEditBuilder::CreateStep(
 
 // ----------------------------
 
-DateTimeEditElement::EditControlOwner::~EditControlOwner() {}
+DateTimeEditElement::EditControlOwner::~EditControlOwner() = default;
 
 DateTimeEditElement::DateTimeEditElement(Document& document,
                                          EditControlOwner& edit_control_owner)
@@ -520,9 +520,9 @@ DateTimeEditElement::DateTimeEditElement(Document& document,
   SetHasCustomStyleCallbacks();
 }
 
-DateTimeEditElement::~DateTimeEditElement() {}
+DateTimeEditElement::~DateTimeEditElement() = default;
 
-DEFINE_TRACE(DateTimeEditElement) {
+void DateTimeEditElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(fields_);
   visitor->Trace(edit_control_owner_);
   HTMLDivElement::Trace(visitor);
@@ -563,11 +563,11 @@ DateTimeEditElement* DateTimeEditElement::Create(
   return container;
 }
 
-PassRefPtr<ComputedStyle> DateTimeEditElement::CustomStyleForLayoutObject() {
+scoped_refptr<ComputedStyle> DateTimeEditElement::CustomStyleForLayoutObject() {
   // FIXME: This is a kind of layout. We might want to introduce new
   // layoutObject.
-  RefPtr<ComputedStyle> original_style = OriginalStyleForLayoutObject();
-  RefPtr<ComputedStyle> style = ComputedStyle::Clone(*original_style);
+  scoped_refptr<ComputedStyle> original_style = OriginalStyleForLayoutObject();
+  scoped_refptr<ComputedStyle> style = ComputedStyle::Clone(*original_style);
   float width = 0;
   for (Node* child = FieldsWrapperElement()->firstChild(); child;
        child = child->nextSibling()) {
@@ -606,7 +606,7 @@ void DateTimeEditElement::DisabledStateChanged() {
 }
 
 DateTimeFieldElement* DateTimeEditElement::FieldAt(size_t field_index) const {
-  return field_index < fields_.size() ? fields_[field_index].Get() : 0;
+  return field_index < fields_.size() ? fields_[field_index].Get() : nullptr;
 }
 
 size_t DateTimeEditElement::FieldIndexOf(
@@ -728,7 +728,7 @@ void DateTimeEditElement::GetLayout(const LayoutParameters& layout_parameters,
   }
   Element* fields_wrapper = FieldsWrapperElement();
 
-  size_t focused_field_index = this->FocusedFieldIndex();
+  size_t focused_field_index = FocusedFieldIndex();
   DateTimeFieldElement* const focused_field = FieldAt(focused_field_index);
   const AtomicString focused_field_id =
       focused_field ? focused_field->ShadowPseudoId() : g_null_atom;

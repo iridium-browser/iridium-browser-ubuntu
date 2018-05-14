@@ -69,6 +69,7 @@
 #include "base/macros.h"
 #include "base/memory/shared_memory.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
 #include "media/audio/audio_device_thread.h"
 #include "media/audio/audio_output_ipc.h"
 #include "media/audio/scoped_task_runner_observer.h"
@@ -83,10 +84,9 @@ class OneShotTimer;
 
 namespace media {
 
-class MEDIA_EXPORT AudioOutputDevice
-    : NON_EXPORTED_BASE(public AudioRendererSink),
-      NON_EXPORTED_BASE(public AudioOutputIPCDelegate),
-      NON_EXPORTED_BASE(public ScopedTaskRunnerObserver) {
+class MEDIA_EXPORT AudioOutputDevice : public AudioRendererSink,
+                                       public AudioOutputIPCDelegate,
+                                       public ScopedTaskRunnerObserver {
  public:
   // NOTE: Clients must call Initialize() before using.
   AudioOutputDevice(
@@ -119,8 +119,7 @@ class MEDIA_EXPORT AudioOutputDevice
                           const media::AudioParameters& output_params,
                           const std::string& matched_device_id) override;
   void OnStreamCreated(base::SharedMemoryHandle handle,
-                       base::SyncSocket::Handle socket_handle,
-                       int length) override;
+                       base::SyncSocket::Handle socket_handle) override;
   void OnIPCClosed() override;
 
  protected:
@@ -146,7 +145,9 @@ class MEDIA_EXPORT AudioOutputDevice
   // be executed on that thread.  They use AudioOutputIPC to send IPC messages
   // upon state changes.
   void RequestDeviceAuthorizationOnIOThread();
-  void CreateStreamOnIOThread(const AudioParameters& params);
+  void InitializeOnIOThread(const AudioParameters& params,
+                            RenderCallback* callback);
+  void CreateStreamOnIOThread();
   void PlayOnIOThread();
   void PauseOnIOThread();
   void ShutDownOnIOThread();
@@ -158,6 +159,8 @@ class MEDIA_EXPORT AudioOutputDevice
       const media::AudioParameters& output_params,
       const std::string& matched_device_id,
       bool timed_out);
+
+  void NotifyRenderCallbackOfError();
 
   // base::MessageLoop::DestructionObserver implementation for the IO loop.
   // If the IO loop dies before we do, we shut down the audio thread from here.
@@ -179,6 +182,9 @@ class MEDIA_EXPORT AudioOutputDevice
   // State of Start() calls before OnDeviceAuthorized() is called.
   bool start_on_authorized_;
 
+  // For UMA stats. May only be accessed on the IO thread.
+  bool had_callback_error_ = false;
+
   // State of Play() / Pause() calls before OnStreamCreated() is called.
   bool play_on_start_;
 
@@ -186,7 +192,7 @@ class MEDIA_EXPORT AudioOutputDevice
   // Only used by Unified IO.
   int session_id_;
 
-  // ID of hardware output device to be used (provided session_id_ is zero)
+  // ID of hardware output device to be used (provided |session_id_| is zero)
   const std::string device_id_;
   const url::Origin security_origin_;
 
@@ -217,6 +223,9 @@ class MEDIA_EXPORT AudioOutputDevice
 
   const base::TimeDelta auth_timeout_;
   std::unique_ptr<base::OneShotTimer> auth_timeout_action_;
+
+  // Set when authorization starts, for UMA stats.
+  base::TimeTicks auth_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputDevice);
 };

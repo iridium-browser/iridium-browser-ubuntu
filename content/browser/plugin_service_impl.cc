@@ -32,11 +32,14 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/plugin_service_filter.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_context.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/webplugininfo.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 
 namespace content {
 namespace {
@@ -60,6 +63,19 @@ void WillLoadPluginsCallback(base::SequenceChecker* sequence_checker) {
 }  // namespace
 
 // static
+void PluginServiceImpl::RecordBrokerUsage(int render_process_id,
+                                          int render_frame_id) {
+  ukm::UkmRecorder* recorder = ukm::UkmRecorder::Get();
+  ukm::SourceId source_id = ukm::UkmRecorder::GetNewSourceID();
+  WebContents* web_contents = WebContents::FromRenderFrameHost(
+      RenderFrameHost::FromID(render_process_id, render_frame_id));
+  if (web_contents) {
+    recorder->UpdateSourceURL(source_id, web_contents->GetLastCommittedURL());
+    ukm::builders::Pepper_Broker(source_id).Record(recorder);
+  }
+}
+
+// static
 PluginService* PluginService::GetInstance() {
   return PluginServiceImpl::GetInstance();
 }
@@ -79,8 +95,7 @@ PluginServiceImpl* PluginServiceImpl::GetInstance() {
   return base::Singleton<PluginServiceImpl>::get();
 }
 
-PluginServiceImpl::PluginServiceImpl()
-    : filter_(NULL) {
+PluginServiceImpl::PluginServiceImpl() : filter_(nullptr) {
   plugin_list_sequence_checker_.DetachFromSequence();
 
   // Collect the total number of browser processes (which create
@@ -116,7 +131,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindPpapiPluginProcess(
       return *iter;
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 PpapiPluginProcessHost* PluginServiceImpl::FindPpapiBrokerProcess(
@@ -126,7 +141,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindPpapiBrokerProcess(
       return *iter;
   }
 
-  return NULL;
+  return nullptr;
 }
 
 PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
@@ -137,7 +152,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path)) {
     VLOG(1) << "Unable to load ppapi plugin: " << plugin_path.MaybeAsASCII();
-    return NULL;
+    return nullptr;
   }
 
   PpapiPluginProcessHost* plugin_host =
@@ -150,7 +165,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiPluginProcess(
   if (!info) {
     VLOG(1) << "Unable to find ppapi plugin registration for: "
             << plugin_path.MaybeAsASCII();
-    return NULL;
+    return nullptr;
   }
 
   // Record when PPAPI Flash process is started for the first time.
@@ -179,7 +194,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiBrokerProcess(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (filter_ && !filter_->CanLoadPlugin(render_process_id, plugin_path))
-    return NULL;
+    return nullptr;
 
   PpapiPluginProcessHost* plugin_host = FindPpapiBrokerProcess(plugin_path);
   if (plugin_host)
@@ -188,7 +203,7 @@ PpapiPluginProcessHost* PluginServiceImpl::FindOrStartPpapiBrokerProcess(
   // Validate that the plugin is actually registered.
   PepperPluginInfo* info = GetRegisteredPpapiPluginInfo(plugin_path);
   if (!info)
-    return NULL;
+    return nullptr;
 
   // TODO(ddorwin): Uncomment once out of process is supported.
   // DCHECK(info->is_out_of_process);
@@ -214,8 +229,13 @@ void PluginServiceImpl::OpenChannelToPpapiPlugin(
 
 void PluginServiceImpl::OpenChannelToPpapiBroker(
     int render_process_id,
+    int render_frame_id,
     const base::FilePath& path,
     PpapiPluginProcessHost::BrokerClient* client) {
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::BindOnce(&PluginServiceImpl::RecordBrokerUsage,
+                                         render_process_id, render_frame_id));
+
   PpapiPluginProcessHost* plugin_host = FindOrStartPpapiBrokerProcess(
       render_process_id, path);
   if (plugin_host) {

@@ -11,6 +11,7 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/resources/grit/ash_resources.h"
+#include "ash/shelf/shelf_context_menu_model.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
@@ -23,7 +24,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/settings_window_manager.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -126,30 +127,10 @@ void BrowserShortcutLauncherItemController::UpdateBrowserItemState() {
   DCHECK_GE(browser_index, 0);
   ash::ShelfItem browser_item = shelf_model_->items()[browser_index];
   ash::ShelfItemStatus browser_status = ash::STATUS_CLOSED;
-
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
-  if (browser && browser->window()->IsActive() &&
-      IsBrowserRepresentedInBrowserList(browser)) {
-    // Check if the active browser / tab is a browser which is not an app,
-    // a windowed app, a popup or any other item which is not a browser of
-    // interest.
-    browser_status = ash::STATUS_ACTIVE;
-    // If an app that has item is running in active WebContents, browser item
-    // status cannot be active.
-    content::WebContents* contents =
-        browser->tab_strip_model()->GetActiveWebContents();
-    if (contents &&
-        (ChromeLauncherController::instance()->GetShelfIDForWebContents(
-             contents) != browser_item.id))
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (IsBrowserRepresentedInBrowserList(browser)) {
       browser_status = ash::STATUS_RUNNING;
-  }
-
-  if (browser_status == ash::STATUS_CLOSED) {
-    for (auto* browser : *BrowserList::GetInstance()) {
-      if (IsBrowserRepresentedInBrowserList(browser)) {
-        browser_status = ash::STATUS_RUNNING;
-        break;
-      }
+      break;
     }
   }
 
@@ -166,7 +147,8 @@ void BrowserShortcutLauncherItemController::SetShelfIDForBrowserWindowContents(
   // content which might change and as such change the application type.
   // The browser window may not exist in unit tests.
   if (!browser || !browser->window() || !browser->window()->GetNativeWindow() ||
-      !IsBrowserFromActiveUser(browser) || IsSettingsBrowser(browser)) {
+      !multi_user_util::IsProfileFromActiveUser(browser->profile()) ||
+      IsSettingsBrowser(browser)) {
     return;
   }
 
@@ -237,7 +219,7 @@ ash::MenuItemList BrowserShortcutLauncherItemController::GetAppMenuItems(
       ash::mojom::MenuItemPtr item(ash::mojom::MenuItem::New());
       item->command_id = GetCommandId(browser_menu_items_.size(), kNoTab);
       item->label = GetBrowserListTitle(tab);
-      item->image = *GetBrowserListIcon(tab).ToSkBitmap();
+      item->image = GetBrowserListIcon(tab).AsImageSkia();
       items.push_back(std::move(item));
     } else {
       for (uint16_t i = 0; i < tab_strip->count() && i < kMaxItems; ++i) {
@@ -245,7 +227,7 @@ ash::MenuItemList BrowserShortcutLauncherItemController::GetAppMenuItems(
         ash::mojom::MenuItemPtr item(ash::mojom::MenuItem::New());
         item->command_id = GetCommandId(browser_menu_items_.size(), i);
         item->label = controller->GetAppListTitle(tab);
-        item->image = *controller->GetAppListIcon(tab).ToSkBitmap();
+        item->image = controller->GetAppListIcon(tab).AsImageSkia();
         items.push_back(std::move(item));
       }
     }
@@ -263,9 +245,21 @@ ash::MenuItemList BrowserShortcutLauncherItemController::GetAppMenuItems(
   return items;
 }
 
+std::unique_ptr<ui::MenuModel>
+BrowserShortcutLauncherItemController::GetContextMenu(int64_t display_id) {
+  ChromeLauncherController* controller = ChromeLauncherController::instance();
+  const ash::ShelfItem* item = controller->GetItem(shelf_id());
+  return LauncherContextMenu::Create(controller, item, display_id);
+}
+
 void BrowserShortcutLauncherItemController::ExecuteCommand(
-    uint32_t command_id,
-    int32_t event_flags) {
+    bool from_context_menu,
+    int64_t command_id,
+    int32_t event_flags,
+    int64_t display_id) {
+  if (from_context_menu && ExecuteContextMenuCommand(command_id, event_flags))
+    return;
+
   const uint16_t browser_index = GetBrowserIndex(command_id);
   // Check that the index is valid and the browser has not been closed.
   if (browser_index < browser_menu_items_.size() &&
@@ -355,7 +349,7 @@ BrowserShortcutLauncherItemController::ActivateOrAdvanceToNextBrowser() {
 bool BrowserShortcutLauncherItemController::IsBrowserRepresentedInBrowserList(
     Browser* browser) {
   // Only Ash desktop browser windows for the active user are represented.
-  if (!browser || !IsBrowserFromActiveUser(browser))
+  if (!browser || !multi_user_util::IsProfileFromActiveUser(browser->profile()))
     return false;
 
   // V1 App popup windows may have their own item.
@@ -376,7 +370,7 @@ BrowserShortcutLauncherItemController::GetListOfActiveBrowsers() {
   for (auto* browser : *BrowserList::GetInstance()) {
     // Make sure that the browser is from the current user, has a proper window,
     // and the window was already shown.
-    if (!IsBrowserFromActiveUser(browser))
+    if (!multi_user_util::IsProfileFromActiveUser(browser->profile()))
       continue;
     if (!browser->window()->GetNativeWindow()->IsVisible() &&
         !browser->window()->IsMinimized()) {

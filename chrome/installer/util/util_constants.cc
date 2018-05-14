@@ -152,19 +152,6 @@ const char kVerboseLogging[] = "verbose-logging";
 // Show the embedded EULA dialog.
 const char kShowEula[] = "show-eula";
 
-// Perform the inactive user toast experiment.
-const char kInactiveUserToast[] = "inactive-user-toast";
-
-// User toast experiment switch from system context to user context.
-const char kSystemLevelToast[] = "system-level-toast";
-
-// The group this experiment belongs to.
-const char kExperimentGroup[] = "experiment-group";
-
-// A handle value of the key to write the results of the toast experiment
-// to. See DuplicateGoogleUpdateSystemClientKey for details.
-const char kToastResultsKey[] = "toast-results-key";
-
 // Applies a binary patch to a file. The input, patch, and the output file are
 // specified as command line arguments following the --patch switch.
 // Ex: --patch=courgette --input_file='input' --patch_file='patch'
@@ -207,12 +194,15 @@ const wchar_t kInstallerDir[] = L"Installer";
 const wchar_t kInstallTempDir[] = L"Temp";
 const wchar_t kLnkExt[] = L".lnk";
 const wchar_t kNaClExe[] = L"nacl64.exe";
+const wchar_t kNotificationHelperExe[] = L"notification_helper.exe";
 const wchar_t kSetupExe[] = L"setup.exe";
 const wchar_t kUninstallStringField[] = L"UninstallString";
 const wchar_t kUninstallArgumentsField[] = L"UninstallArguments";
 const wchar_t kUninstallDisplayNameField[] = L"DisplayName";
 const char kUninstallMetricsName[] = "uninstall_metrics";
 const wchar_t kUninstallInstallationDate[] = L"installation_date";
+
+// Google Update installer result API.
 const wchar_t kInstallerError[] = L"InstallerError";
 const wchar_t kInstallerExtraCode1[] = L"InstallerExtraCode1";
 const wchar_t kInstallerResult[] = L"InstallerResult";
@@ -229,9 +219,6 @@ const wchar_t kChromeChannelStable[] = L"";
 const wchar_t kChromeChannelStableExplicit[] = L"stable";
 
 const size_t kMaxAppModelIdLength = 64U;
-
-const char kCourgette[] = "courgette";
-const char kBsdiff[] = "bsdiff";
 
 const char kSetupHistogramAllocatorName[] = "SetupMetrics";
 

@@ -13,12 +13,11 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 
 using content::RenderFrameHost;
-using content::RenderWidgetHost;
+using content::RenderProcessHost;
 using content::SiteInstance;
 using content::WebContents;
 
@@ -55,11 +54,10 @@ class WebContentsEntry : public content::WebContentsObserver {
                               RenderFrameHost* new_host) override;
   void RenderFrameCreated(RenderFrameHost*) override;
   void WebContentsDestroyed() override;
-  void RenderProcessGone(base::TerminationStatus status) override;
-  void OnRendererUnresponsive(RenderWidgetHost* render_widget_host) override;
+  void OnRendererUnresponsive(RenderProcessHost* render_process_host) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
-  void TitleWasSet(content::NavigationEntry* entry, bool explicit_set) override;
+  void TitleWasSet(content::NavigationEntry* entry) override;
 
   void RenderFrameReady(int process_routing_id, int frame_routing_id);
 
@@ -75,6 +73,10 @@ class WebContentsEntry : public content::WebContentsObserver {
 
   // Calls |on_task| for each task managed by this WebContentsEntry.
   void ForEachTask(const base::Callback<void(RendererTask*)>& on_task);
+
+  // Walks parents until hitting a process boundary. Returns the highest frame
+  // in the same SiteInstance as |render_frame_host|.
+  RenderFrameHost* FindLocalRoot(RenderFrameHost* render_frame_host) const;
 
   // The provider that owns this entry.
   WebContentsTaskProvider* provider_;
@@ -111,8 +113,8 @@ WebContentsEntry::~WebContentsEntry() {
 
 void WebContentsEntry::CreateAllTasks() {
   DCHECK(web_contents()->GetMainFrame());
-  web_contents()->ForEachFrame(base::Bind(&WebContentsEntry::CreateTaskForFrame,
-                                          base::Unretained(this)));
+  web_contents()->ForEachFrame(base::BindRepeating(
+      &WebContentsEntry::CreateTaskForFrame, base::Unretained(this)));
 }
 
 void WebContentsEntry::ClearAllTasks(bool notify_observer) {
@@ -135,11 +137,24 @@ void WebContentsEntry::ClearAllTasks(bool notify_observer) {
 
 RendererTask* WebContentsEntry::GetTaskForFrame(
     RenderFrameHost* render_frame_host) const {
-  auto itr = tasks_by_frames_.find(render_frame_host);
+  // Only local roots are in |tasks_by_frames_|.
+  auto itr = tasks_by_frames_.find(FindLocalRoot(render_frame_host));
   if (itr == tasks_by_frames_.end())
     return nullptr;
 
   return itr->second;
+}
+
+RenderFrameHost* WebContentsEntry::FindLocalRoot(
+    RenderFrameHost* render_frame_host) const {
+  SiteInstance* site_instance = render_frame_host->GetSiteInstance();
+  RenderFrameHost* candidate = render_frame_host;
+  while (RenderFrameHost* parent = candidate->GetParent()) {
+    if (parent->GetSiteInstance() != site_instance)
+      break;
+    candidate = parent;
+  }
+  return candidate;
 }
 
 void WebContentsEntry::RenderFrameDeleted(RenderFrameHost* render_frame_host) {
@@ -148,36 +163,40 @@ void WebContentsEntry::RenderFrameDeleted(RenderFrameHost* render_frame_host) {
 
 void WebContentsEntry::RenderFrameHostChanged(RenderFrameHost* old_host,
                                               RenderFrameHost* new_host) {
+  DCHECK(new_host->IsCurrent());
   ClearTaskForFrame(old_host);
   CreateTaskForFrame(new_host);
 }
 
 void WebContentsEntry::RenderFrameCreated(RenderFrameHost* render_frame_host) {
+  DCHECK(render_frame_host->IsRenderFrameLive());
+
   // Skip pending/speculative hosts. We'll create tasks for these if the
   // navigation commits, at which point RenderFrameHostChanged() will fire.
   if (!render_frame_host->IsCurrent())
     return;
 
-  // Task manager will have no separate entry for |render_frame_host| if it has
-  // the same site instance as its parent - quit early in this case.
-  if (render_frame_host->GetParent() &&
-      render_frame_host->GetParent()->GetSiteInstance() ==
-          render_frame_host->GetSiteInstance())
-    return;
-
-  // Postpone processing |render_frame_host| until its process has a PID.
-  render_frame_host->GetProcess()->PostTaskWhenProcessIsReady(base::Bind(
-      &WebContentsEntry::RenderFrameReady, weak_factory_.GetWeakPtr(),
-      render_frame_host->GetProcess()->GetID(),
-      render_frame_host->GetRoutingID()));
+  CreateTaskForFrame(render_frame_host);
 }
 
 void WebContentsEntry::RenderFrameReady(int render_process_id,
                                         int render_frame_id) {
+  // We get here when a RenderProcessHost we are tracking transitions to the
+  // IsReady state. This might mean we know its process ID.
   content::RenderFrameHost* render_frame_host =
       content::RenderFrameHost::FromID(render_process_id, render_frame_id);
-  if (render_frame_host)
-    CreateTaskForFrame(render_frame_host);
+  if (!render_frame_host)
+    return;
+
+  Task* task = GetTaskForFrame(render_frame_host);
+
+  if (!task)
+    return;
+
+  const base::ProcessId determine_pid_from_handle = base::kNullProcessId;
+  provider_->UpdateTaskProcessInfoAndNotifyObserver(
+      task, render_frame_host->GetProcess()->GetHandle(),
+      determine_pid_from_handle);
 }
 
 void WebContentsEntry::WebContentsDestroyed() {
@@ -185,17 +204,12 @@ void WebContentsEntry::WebContentsDestroyed() {
   provider_->DeleteEntry(web_contents());
 }
 
-void WebContentsEntry::RenderProcessGone(base::TerminationStatus status) {
-  ClearAllTasks(true);
-}
-
 void WebContentsEntry::OnRendererUnresponsive(
-    RenderWidgetHost* render_widget_host) {
-  // Find the first RenderFrameHost matching the RenderWidgetHost.
+    RenderProcessHost* render_process_host) {
+  // Find the first RenderFrameHost matching the RenderProcessHost.
   RendererTask* task = nullptr;
   for (const auto& pair : tasks_by_frames_) {
-    if (pair.first->GetView() == render_widget_host->GetView()) {
-      DCHECK_EQ(pair.first->GetProcess(), render_widget_host->GetProcess());
+    if (pair.first->GetProcess() == render_process_host) {
       task = pair.second;
       break;
     }
@@ -233,8 +247,7 @@ void WebContentsEntry::DidFinishNavigation(
   }));
 }
 
-void WebContentsEntry::TitleWasSet(content::NavigationEntry* entry,
-                                   bool explicit_set) {
+void WebContentsEntry::TitleWasSet(content::NavigationEntry* entry) {
   ForEachTask(base::Bind([](RendererTask* task) {
     task->UpdateTitle();
     task->UpdateFavicon();
@@ -242,14 +255,23 @@ void WebContentsEntry::TitleWasSet(content::NavigationEntry* entry,
 }
 
 void WebContentsEntry::CreateTaskForFrame(RenderFrameHost* render_frame_host) {
+  // Currently we do not track pending hosts, or pending delete hosts.
+  DCHECK(render_frame_host->IsCurrent());
   DCHECK(render_frame_host);
   DCHECK(!tasks_by_frames_.count(render_frame_host));
 
   content::SiteInstance* site_instance = render_frame_host->GetSiteInstance();
-  if (!site_instance->GetProcess()->HasConnection())
-    return;
+
+  // Exclude sad tabs and sad oopifs.
   if (!render_frame_host->IsRenderFrameLive())
     return;
+
+  // Exclude frames in the same SiteInstance as their parent; |tasks_by_frames_|
+  // only contains local roots.
+  if (render_frame_host->GetParent() &&
+      site_instance == render_frame_host->GetParent()->GetSiteInstance()) {
+    return;
+  }
 
   bool site_instance_exists =
       frames_by_site_instance_.count(site_instance) != 0;
@@ -257,8 +279,10 @@ void WebContentsEntry::CreateTaskForFrame(RenderFrameHost* render_frame_host) {
   bool site_instance_is_main = (site_instance == main_frame_site_instance_);
 
   RendererTask* new_task = nullptr;
-  // We don't create a task if there's one for this site_instance AND
-  // if this is not the main frame or we did record a main frame for the entry.
+
+  // We need to create a task if one doesn't already exist for this
+  // SiteInstance, or if the main frame navigates to a process that currently is
+  // represented by a SubframeTask.
   if (!site_instance_exists || (is_main_frame && !site_instance_is_main)) {
     if (is_main_frame) {
       const WebContentsTag* tag =
@@ -280,7 +304,7 @@ void WebContentsEntry::CreateTaskForFrame(RenderFrameHost* render_frame_host) {
     RendererTask* old_task = tasks_by_frames_[existing_rfh];
 
     if (!new_task) {
-      // We didn't create any new task, so we keep appending the old one.
+      // We didn't create any new task, so we keep using the old one.
       tasks_by_frames_[render_frame_host] = old_task;
     } else {
       // Overwrite all the existing old tasks with the new one, and delete the
@@ -298,6 +322,15 @@ void WebContentsEntry::CreateTaskForFrame(RenderFrameHost* render_frame_host) {
   if (new_task) {
     tasks_by_frames_[render_frame_host] = new_task;
     provider_->NotifyObserverTaskAdded(new_task);
+
+    // If we don't know the OS process handle yet (e.g., because this task is
+    // still launching), update the task when it becomes available.
+    if (new_task->process_id() == base::kNullProcessId) {
+      render_frame_host->GetProcess()->PostTaskWhenProcessIsReady(base::Bind(
+          &WebContentsEntry::RenderFrameReady, weak_factory_.GetWeakPtr(),
+          render_frame_host->GetProcess()->GetID(),
+          render_frame_host->GetRoutingID()));
+    }
   }
 }
 
@@ -320,6 +353,9 @@ void WebContentsEntry::ClearTaskForFrame(RenderFrameHost* render_frame_host) {
     if (site_instance == main_frame_site_instance_)
       main_frame_site_instance_ = nullptr;
   }
+
+  // Whenever we have a task, we should have a main frame site instance.
+  DCHECK(tasks_by_frames_.empty() == (main_frame_site_instance_ == nullptr));
 }
 
 void WebContentsEntry::ForEachTask(
@@ -335,9 +371,7 @@ void WebContentsEntry::ForEachTask(
 
 ////////////////////////////////////////////////////////////////////////////////
 
-WebContentsTaskProvider::WebContentsTaskProvider()
-    : is_updating_(false) {
-}
+WebContentsTaskProvider::WebContentsTaskProvider() : is_updating_(false) {}
 
 WebContentsTaskProvider::~WebContentsTaskProvider() {
   if (is_updating_) {
@@ -380,18 +414,14 @@ void WebContentsTaskProvider::OnWebContentsTagRemoved(
   entries_map_.erase(itr);  // Deletes the WebContentsEntry.
 }
 
-Task* WebContentsTaskProvider::GetTaskOfUrlRequest(int origin_pid,
-                                                   int child_id,
-                                                   int route_id) {
-  // If an origin PID was specified then the URL request originated in a plugin
-  // working on the WebContents' behalf, so ignore it.
-  if (origin_pid)
-    return nullptr;
-
+Task* WebContentsTaskProvider::GetTaskOfUrlRequest(int child_id, int route_id) {
   content::RenderFrameHost* rfh =
       content::RenderFrameHost::FromID(child_id, route_id);
   content::WebContents* web_contents =
       content::WebContents::FromRenderFrameHost(rfh);
+
+  if (!web_contents)
+    return nullptr;
 
   auto itr = entries_map_.find(web_contents);
   if (itr == entries_map_.end()) {

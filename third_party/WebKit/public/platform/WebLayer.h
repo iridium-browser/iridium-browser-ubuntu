@@ -34,9 +34,9 @@
 #include "WebFloatPoint.h"
 #include "WebFloatPoint3D.h"
 #include "WebFloatSize.h"
+#include "WebOverscrollBehavior.h"
 #include "WebPoint.h"
 #include "WebRect.h"
-#include "WebScrollBoundaryBehavior.h"
 #include "WebSize.h"
 #include "WebString.h"
 #include "WebTouchInfo.h"
@@ -60,9 +60,7 @@ struct WebLayerStickyPositionConstraint;
 
 class WebLayer {
  public:
-  virtual ~WebLayer() {}
-
-  static constexpr int kInvalidLayerId = cc::Layer::INVALID_ID;
+  virtual ~WebLayer() = default;
 
   // Returns a positive ID that will be unique across all WebLayers allocated in
   // this process.
@@ -91,6 +89,13 @@ class WebLayer {
 
   virtual void SetOpacity(float) = 0;
   virtual float Opacity() const = 0;
+  // If set to true, content opaqueness cannot be changed using
+  // WebLayer::SetOpaque. However, it can still be modified using
+  // SetContentsOpaque on the cc::Layer. This is a roundabout way of allowing
+  // creators of WebLayers to specify opaqueness without
+  // CompositedLayerMapping/PaintArtifactCompositor clobbering it later. This
+  // will be addressed once WebLayer is removed.
+  virtual void SetContentsOpaqueIsFixed(bool) = 0;
 
   virtual void SetBlendMode(WebBlendMode) = 0;
   virtual WebBlendMode BlendMode() const = 0;
@@ -98,8 +103,7 @@ class WebLayer {
   virtual void SetIsRootForIsolatedGroup(bool) = 0;
   virtual bool IsRootForIsolatedGroup() = 0;
 
-  virtual void SetShouldHitTest(bool) = 0;
-  virtual bool ShouldHitTest() = 0;
+  virtual void SetHitTestableWithoutDrawsContent(bool) = 0;
 
   virtual void SetOpaque(bool) = 0;
   virtual bool Opaque() const = 0;
@@ -174,6 +178,8 @@ class WebLayer {
   // bounds.
   virtual void SetScrollable(const WebSize& scroll_container_bounds) = 0;
   virtual bool Scrollable() const = 0;
+  virtual WebSize ScrollContainerBoundsForTesting() const = 0;
+
   virtual void SetUserScrollable(bool horizontal, bool vertical) = 0;
   virtual bool UserScrollableHorizontal() const = 0;
   virtual bool UserScrollableVertical() const = 0;
@@ -191,9 +197,13 @@ class WebLayer {
 
   virtual void SetTouchEventHandlerRegion(const WebVector<WebTouchInfo>&) = 0;
   virtual WebVector<WebRect> TouchEventHandlerRegion() const = 0;
+  virtual WebVector<WebRect> TouchEventHandlerRegionForTouchActionForTesting(
+      WebTouchAction) const = 0;
 
   virtual void SetIsContainerForFixedPositionLayers(bool) = 0;
   virtual bool IsContainerForFixedPositionLayers() const = 0;
+
+  virtual void SetIsResizedByBrowserControls(bool) = 0;
 
   // This function sets layer position constraint. The constraint will be used
   // to adjust layer position during threaded scrolling.
@@ -213,11 +223,22 @@ class WebLayer {
   // deleting the scroll client.
   virtual void SetScrollClient(WebLayerScrollClient*) = 0;
 
+  // Sets a synthetic impl-side scroll offset which will end up reporting this
+  // call back to blink via the |WebLayerScrollClient| callback.
+  virtual void SetScrollOffsetFromImplSideForTesting(
+      const gfx::ScrollOffset&) = 0;
+
   // The scroll-boundary-behavior allows developers to specify whether the
   // scroll should be propagated to its ancestors at the beginning of the
   // scroll, and whether the overscroll should cause UI affordance such as
   // glow/bounce etc.
-  virtual void SetScrollBoundaryBehavior(const WebScrollBoundaryBehavior&) = 0;
+  virtual void SetOverscrollBehavior(const WebOverscrollBehavior&) = 0;
+
+  // SnapContainerData contains the necessary information a layer needs to
+  // perform snapping. The CSS scroll snap could enforce the scroll positions
+  // that a scroll container's scroll port may end at after a scrolling
+  // operation has completed.
+  virtual void SetSnapContainerData(base::Optional<cc::SnapContainerData>) = 0;
 
   // Sets the cc-side layer client.
   virtual void SetLayerClient(cc::LayerClient*) = 0;
@@ -228,9 +249,6 @@ class WebLayer {
 
   virtual void SetElementId(const cc::ElementId&) = 0;
   virtual cc::ElementId GetElementId() const = 0;
-
-  virtual void SetCompositorMutableProperties(uint32_t) = 0;
-  virtual uint32_t CompositorMutableProperties() const = 0;
 
   virtual void SetHasWillChangeTransformHint(bool) = 0;
 

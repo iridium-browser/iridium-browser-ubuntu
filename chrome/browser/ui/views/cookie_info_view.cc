@@ -122,46 +122,53 @@ void CookieInfoView::AddLabelRow(int layout_id,
 // CookieInfoView, private:
 
 void CookieInfoView::Init() {
+  constexpr int kLabelValuePadding = 96;
+
   // Ensure we don't run this more than once and leak memory.
   DCHECK(!name_label_);
   name_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_NAME_LABEL));
-  name_value_field_ = new views::Textfield;
+  name_value_field_ = new views::Textfield();
+  name_value_field_->SetAssociatedLabel(name_label_);
   content_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_CONTENT_LABEL));
-  content_value_field_ = new views::Textfield;
+  content_value_field_ = new views::Textfield();
+  content_value_field_->SetAssociatedLabel(content_label_);
   domain_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_DOMAIN_LABEL));
-  domain_value_field_ = new views::Textfield;
+  domain_value_field_ = new views::Textfield();
+  domain_value_field_->SetAssociatedLabel(domain_label_);
   path_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_PATH_LABEL));
-  path_value_field_ = new views::Textfield;
+  path_value_field_ = new views::Textfield();
+  path_value_field_->SetAssociatedLabel(path_label_);
   send_for_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_LABEL));
-  send_for_value_field_ = new views::Textfield;
+  send_for_value_field_ = new views::Textfield();
+  send_for_value_field_->SetAssociatedLabel(send_for_label_);
   created_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_CREATED_LABEL));
-  created_value_field_ = new views::Textfield;
+  created_value_field_ = new views::Textfield();
+  created_value_field_->SetAssociatedLabel(created_label_);
   expires_label_ = new views::Label(
       l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_LABEL));
-  expires_value_field_ = new views::Textfield;
+  expires_value_field_ = new views::Textfield();
+  expires_value_field_->SetAssociatedLabel(expires_label_);
 
-  views::GridLayout* layout = new views::GridLayout(this);
-  SetLayoutManager(layout);
+  views::GridLayout* layout =
+      SetLayoutManager(std::make_unique<views::GridLayout>(this));
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  const gfx::Insets button_row_insets =
-      provider->GetInsetsMetric(views::INSETS_DIALOG_BUTTON_ROW);
-  SetBorder(views::CreateEmptyBorder(0, button_row_insets.left(), 0,
-                                     button_row_insets.right()));
+  const gfx::Insets& dialog_insets =
+      provider->GetInsetsMetric(views::INSETS_DIALOG);
+  SetBorder(views::CreateEmptyBorder(0, dialog_insets.left(), 0,
+                                     dialog_insets.right()));
 
   int three_column_layout_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(three_column_layout_id);
   column_set->AddColumn(provider->GetControlLabelGridAlignment(),
                         views::GridLayout::CENTER, 0,
                         views::GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(
-      0,
-      provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
+  column_set->AddPaddingColumn(0, kLabelValuePadding);
   column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::CENTER,
                         0, views::GridLayout::USE_PREF, 0, 0);
   column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER,

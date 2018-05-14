@@ -10,18 +10,11 @@ from recipe_engine import recipe_api
 class GitApi(recipe_api.RecipeApi):
   _GIT_HASH_RE = re.compile('[0-9a-f]{40}', re.IGNORECASE)
 
-  def __init__(self, *args, **kwargs):
-    super(GitApi, self).__init__(*args, **kwargs)
-    self.initialized_win_git = False
-
   def __call__(self, *args, **kwargs):
     """Return a git command step."""
     name = kwargs.pop('name', 'git ' + args[0])
     infra_step = kwargs.pop('infra_step', True)
     git_cmd = ['git']
-    if self.m.platform.is_win:
-      self.ensure_win_git_tooling()
-      git_cmd = [self.package_repo_resource('git.bat')]
     options = kwargs.pop('git_config_options', {})
     for k, v in sorted(options.iteritems()):
       git_cmd.extend(['-c', '%s=%s' % (k, v)])
@@ -35,19 +28,6 @@ class GitApi(recipe_api.RecipeApi):
         raise
       else:
         return f.result
-
-  def ensure_win_git_tooling(self):
-    """Ensures that depot_tools/git.bat actually exists."""
-    if not self.m.platform.is_win or self.initialized_win_git:
-      return
-    with self.m.context(cwd=self.package_repo_resource()):
-      self.m.python(
-          'ensure git tooling on windows',
-          self.package_repo_resource('bootstrap', 'win', 'git_bootstrap.py'),
-          ['--verbose'],
-          infra_step=True,
-          timeout=300)
-    self.initialized_win_git = True
 
   def fetch_tags(self, remote_name=None, **kwargs):
     """Fetches all tags from the remote."""
@@ -134,7 +114,7 @@ class GitApi(recipe_api.RecipeApi):
                set_got_revision=False, remote_name=None,
                display_fetch_size=None, file_name=None,
                submodule_update_recursive=True,
-               use_git_cache=False):
+               use_git_cache=False, progress=True):
     """Performs a full git checkout and returns sha1 of checked out revision.
 
     Args:
@@ -166,6 +146,7 @@ class GitApi(recipe_api.RecipeApi):
              to a local path, may cause problem with scripts that do
              "git fetch origin" or "git push origin".
            * arbitrary refs such refs/whatever/not-fetched-by-default-to-cache
+       progress (bool): wether to show progress for fetch or not
 
     Returns: If the checkout was successful, this returns the commit hash of
       the checked-out-repo. Otherwise this returns None.
@@ -196,11 +177,6 @@ class GitApi(recipe_api.RecipeApi):
       git_setup_args += ['--remote', remote_name]
     else:
       remote_name = 'origin'
-
-    if self.m.platform.is_win:
-      self.ensure_win_git_tooling()
-      git_setup_args += [
-          '--git_cmd_path', self.package_repo_resource('git.bat')]
 
     step_suffix = '' if step_suffix is  None else ' (%s)' % step_suffix
     self.m.python(
@@ -262,6 +238,9 @@ class GitApi(recipe_api.RecipeApi):
       fetch_args = [x for x in (fetch_remote, fetch_ref) if x]
       if recursive:
         fetch_args.append('--recurse-submodules')
+
+      if progress:
+        fetch_args.append('--progress')
 
       fetch_env = {'PATH': path}
       fetch_stderr = None

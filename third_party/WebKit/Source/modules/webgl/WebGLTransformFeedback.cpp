@@ -21,7 +21,6 @@ WebGLTransformFeedback::WebGLTransformFeedback(WebGL2RenderingContextBase* ctx,
       object_(0),
       type_(type),
       target_(0),
-      bound_transform_feedback_buffer_(this, nullptr),
       program_(nullptr) {
   GLint max_attribs = ctx->GetMaxTransformFeedbackSeparateAttribs();
   DCHECK_GE(max_attribs, 0);
@@ -107,8 +106,7 @@ bool WebGLTransformFeedback::SetBoundIndexedTransformFeedbackBuffer(
     bound_indexed_transform_feedback_buffers_[index]->OnDetached(
         Context()->ContextGL());
   }
-  bound_indexed_transform_feedback_buffers_[index] =
-      TraceWrapperMember<WebGLBuffer>(this, buffer);
+  bound_indexed_transform_feedback_buffers_[index] = buffer;
   // This also sets the generic binding point in the OpenGL state.
   SetBoundTransformFeedbackBuffer(buffer);
   return true;
@@ -151,14 +149,15 @@ void WebGLTransformFeedback::UnbindBuffer(WebGLBuffer* buffer) {
   }
 }
 
-DEFINE_TRACE(WebGLTransformFeedback) {
+void WebGLTransformFeedback::Trace(blink::Visitor* visitor) {
   visitor->Trace(bound_transform_feedback_buffer_);
   visitor->Trace(bound_indexed_transform_feedback_buffers_);
   visitor->Trace(program_);
   WebGLContextObject::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(WebGLTransformFeedback) {
+void WebGLTransformFeedback::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(bound_transform_feedback_buffer_);
   for (auto& buf : bound_indexed_transform_feedback_buffers_) {
     visitor->TraceWrappers(buf);

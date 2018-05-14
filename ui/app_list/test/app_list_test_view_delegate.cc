@@ -5,49 +5,39 @@
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "ash/app_list/model/app_list_model.h"
+#include "ash/public/cpp/menu_utils.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_switches.h"
-#include "ui/app_list/test/app_list_test_model.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace app_list {
 namespace test {
 
 AppListTestViewDelegate::AppListTestViewDelegate()
-    : dismiss_count_(0),
-      stop_speech_recognition_count_(0),
-      open_search_result_count_(0),
-      next_profile_app_count_(0),
-      model_(new AppListTestModel) {
-  model_->SetFoldersEnabled(true);
+    : model_(std::make_unique<AppListTestModel>()),
+      search_model_(std::make_unique<SearchModel>()) {
 }
 
 AppListTestViewDelegate::~AppListTestViewDelegate() {}
-
-int AppListTestViewDelegate::GetStopSpeechRecognitionCountAndReset() {
-  int count = stop_speech_recognition_count_;
-  stop_speech_recognition_count_ = 0;
-  return count;
-}
 
 AppListModel* AppListTestViewDelegate::GetModel() {
   return model_.get();
 }
 
-SpeechUIModel* AppListTestViewDelegate::GetSpeechUI() {
-  return &speech_ui_;
+SearchModel* AppListTestViewDelegate::GetSearchModel() {
+  return search_model_.get();
 }
 
-void AppListTestViewDelegate::OpenSearchResult(SearchResult* result,
-                                               bool auto_launch,
+void AppListTestViewDelegate::OpenSearchResult(const std::string& result_id,
                                                int event_flags) {
-  const AppListModel::SearchResults* results = model_->results();
+  const SearchModel::SearchResults* results = search_model_->results();
   for (size_t i = 0; i < results->item_count(); ++i) {
-    if (results->GetItemAt(i) == result) {
+    if (results->GetItemAt(i)->id() == result_id) {
       open_search_result_counts_[i]++;
       break;
     }
@@ -55,42 +45,40 @@ void AppListTestViewDelegate::OpenSearchResult(SearchResult* result,
   ++open_search_result_count_;
 }
 
-base::TimeDelta AppListTestViewDelegate::GetAutoLaunchTimeout() {
-  return auto_launch_timeout_;
-}
-
-void AppListTestViewDelegate::AutoLaunchCanceled() {
-  auto_launch_timeout_ = base::TimeDelta();
-}
-
 void AppListTestViewDelegate::Dismiss() {
   ++dismiss_count_;
 }
 
-void AppListTestViewDelegate::StopSpeechRecognition() {
-  ++stop_speech_recognition_count_;
-}
-
-views::View* AppListTestViewDelegate::CreateStartPageWebView(
-    const gfx::Size& size) {
-  return NULL;
-}
-std::vector<views::View*> AppListTestViewDelegate::CreateCustomPageWebViews(
-    const gfx::Size& size) {
-  return std::vector<views::View*>();
-}
-
-bool AppListTestViewDelegate::IsSpeechRecognitionEnabled() {
-  return false;
-}
-
 void AppListTestViewDelegate::ReplaceTestModel(int item_count) {
-  model_.reset(new AppListTestModel);
+  model_ = std::make_unique<AppListTestModel>();
   model_->PopulateApps(item_count);
+  search_model_ = std::make_unique<SearchModel>();
 }
 
 void AppListTestViewDelegate::SetSearchEngineIsGoogle(bool is_google) {
-  model_->SetSearchEngineIsGoogle(is_google);
+  search_model_->SetSearchEngineIsGoogle(is_google);
+}
+
+void AppListTestViewDelegate::ActivateItem(const std::string& id,
+                                           int event_flags) {
+  app_list::AppListItem* item = model_->FindItem(id);
+  if (!item)
+    return;
+  DCHECK(!item->is_folder());
+  static_cast<AppListTestModel::AppListTestItem*>(item)->Activate(event_flags);
+}
+
+void AppListTestViewDelegate::GetContextMenuModel(
+    const std::string& id,
+    GetContextMenuModelCallback callback) {
+  app_list::AppListItem* item = model_->FindItem(id);
+  // TODO(stevenjb/jennyz): Implement this for folder items
+  ui::MenuModel* menu = nullptr;
+  if (item && !item->is_folder()) {
+    menu = static_cast<AppListTestModel::AppListTestItem*>(item)
+               ->GetContextMenuModel();
+  }
+  std::move(callback).Run(ash::menu_utils::GetMojoMenuItemsFromModel(menu));
 }
 
 }  // namespace test

@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -59,14 +60,8 @@ void ExecuteCommandLines(system_logs::SystemLogsResponse* response) {
   command = base::CommandLine((base::FilePath("/usr/bin/printenv")));
   commands.emplace_back("env", command);
 
-#if defined(USE_X11)
-  command = base::CommandLine(base::FilePath("/usr/bin/xrandr"));
-  command.AppendArg("--verbose");
-  commands.emplace_back("xrandr", command);
-#elif defined(USE_OZONE)
   command = base::CommandLine(base::FilePath("/usr/bin/modetest"));
   commands.emplace_back("modetest", command);
-#endif
 
   // Get a list of file sizes for the whole system (excluding the names of the
   // files in the Downloads directory for privay reasons).
@@ -103,15 +98,16 @@ CommandLineLogSource::CommandLineLogSource() : SystemLogsSource("CommandLine") {
 CommandLineLogSource::~CommandLineLogSource() {
 }
 
-void CommandLineLogSource::Fetch(const SysLogsSourceCallback& callback) {
+void CommandLineLogSource::Fetch(SysLogsSourceCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
-  SystemLogsResponse* response = new SystemLogsResponse;
+  auto response = std::make_unique<SystemLogsResponse>();
+  SystemLogsResponse* response_ptr = response.get();
   base::PostTaskWithTraitsAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::Bind(&ExecuteCommandLines, response),
-      base::Bind(callback, base::Owned(response)));
+      base::BindOnce(&ExecuteCommandLines, response_ptr),
+      base::BindOnce(std::move(callback), std::move(response)));
 }
 
 }  // namespace system_logs

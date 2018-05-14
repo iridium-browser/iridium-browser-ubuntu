@@ -199,6 +199,14 @@ DeviceHandler.Notification.FORMAT_FAIL = new DeviceHandler.Notification(
     'FORMATTING_FINISHED_FAILURE_MESSAGE');
 
 /**
+ * @type {DeviceHandler.Notification}
+ * @const
+ */
+DeviceHandler.Notification.RENAME_FAIL = new DeviceHandler.Notification(
+    'renameFail', 'RENAMING_OF_DEVICE_FAILED_TITLE',
+    'RENAMING_OF_DEVICE_FINISHED_FAILURE_MESSAGE');
+
+/**
  * Shows the notification for the device path.
  * @param {string} devicePath Device path.
  * @param {string=} opt_message Message overrides the default message.
@@ -281,6 +289,16 @@ DeviceHandler.Notification.prototype.makeId_ = function(devicePath) {
  * @private
  */
 DeviceHandler.prototype.onDeviceChanged_ = function(event) {
+  util.doIfPrimaryContext(() => {
+    this.onDeviceChangedInternal_(event);
+  });
+};
+
+/**
+ * @param {DeviceEvent} event Device event.
+ * @private
+ */
+DeviceHandler.prototype.onDeviceChangedInternal_ = function(event) {
   switch (event.type) {
     case 'disabled':
       DeviceHandler.Notification.DEVICE_EXTERNAL_STORAGE_DISABLED.show(
@@ -306,6 +324,9 @@ DeviceHandler.prototype.onDeviceChanged_ = function(event) {
     case 'format_fail':
       DeviceHandler.Notification.FORMAT_START.hide(event.devicePath);
       DeviceHandler.Notification.FORMAT_FAIL.show(event.devicePath);
+      break;
+    case 'rename_fail':
+      DeviceHandler.Notification.RENAME_FAIL.show(event.devicePath);
       break;
     default:
       console.error('Unknown event type: ' + event.type);
@@ -340,6 +361,12 @@ Object.freeze(DeviceHandler.MountStatus);
  * @private
  */
 DeviceHandler.prototype.onMountCompleted_ = function(event) {
+  util.doIfPrimaryContext(() => {
+    this.onMountCompletedInternal_(event);
+  });
+};
+
+DeviceHandler.prototype.onMountCompletedInternal_ = function(event) {
   var volume = event.volumeMetadata;
 
   if (event.status === 'success' && event.shouldNotify) {
@@ -487,14 +514,14 @@ DeviceHandler.prototype.onMount_ = function(event) {
             return importer.getMediaDirectory(root);
           })
       .then(
-          /**
+          (/**
            * @param {!DirectoryEntry} directory
            * @this {DeviceHandler}
            */
           function(directory) {
             return importer.isPhotosAppImportEnabled()
                 .then(
-                    /**
+                    (/**
                      * @param {boolean} appEnabled
                      * @this {DeviceHandler}
                      */
@@ -506,8 +533,8 @@ DeviceHandler.prototype.onMount_ = function(event) {
                         this.openMediaDirectory_(
                             metadata.volumeId, null, directory.fullPath);
                       }
-                    }.bind(this));
-          }.bind(this))
+                    }).bind(this));
+          }).bind(this))
       .catch(
         function(error) {
           if (metadata.deviceType && metadata.devicePath) {
@@ -534,6 +561,16 @@ DeviceHandler.prototype.onUnmount_ = function(event) {
  * @private
  */
 DeviceHandler.prototype.onNotificationClicked_ = function(id) {
+  util.doIfPrimaryContext(() => {
+    this.onNotificationClickedInternal_(id);
+  });
+};
+
+/**
+ * @param {string} id ID of the notification.
+ * @private
+ */
+DeviceHandler.prototype.onNotificationClickedInternal_ = function(id) {
   var pos = id.indexOf(':');
   var type = id.substr(0, pos);
   var devicePath = id.substr(pos + 1);

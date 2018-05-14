@@ -56,6 +56,7 @@
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
 #include "public/platform/WebVector.h"
+#include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 
 namespace blink {
 
@@ -79,16 +80,22 @@ void ApplicationCacheHost::WillStartLoading(ResourceRequest& request) {
   if (!IsApplicationCacheEnabled())
     return;
 
-  if (request.GetFrameType() == WebURLRequest::kFrameTypeTopLevel ||
-      request.GetFrameType() == WebURLRequest::kFrameTypeNested) {
-    WillStartLoadingMainResource(request);
-  } else {
-    WillStartLoadingResource(request);
-  }
+  if (request.GetFrameType() ==
+          network::mojom::RequestContextFrameType::kTopLevel ||
+      request.GetFrameType() ==
+          network::mojom::RequestContextFrameType::kNested)
+    WillStartLoadingMainResource(request.Url(), request.HttpMethod());
+
+  if (!host_)
+    return;
+
+  int host_id = host_->GetHostID();
+  if (host_id != WebApplicationCacheHost::kAppCacheNoHostId)
+    request.SetAppCacheHostID(host_id);
 }
 
-void ApplicationCacheHost::WillStartLoadingMainResource(
-    ResourceRequest& request) {
+void ApplicationCacheHost::WillStartLoadingMainResource(const KURL& url,
+                                                        const String& method) {
   // We defer creating the outer host object to avoid spurious
   // creation/destruction around creating empty documents. At this point, we're
   // initiating a main resource load for the document, so its for real.
@@ -100,8 +107,6 @@ void ApplicationCacheHost::WillStartLoadingMainResource(
   host_ = frame.Client()->CreateApplicationCacheHost(this);
   if (!host_)
     return;
-
-  WrappedResourceRequest wrapped(request);
 
   const WebApplicationCacheHost* spawning_host = nullptr;
   Frame* spawning_frame = frame.Tree().Parent();
@@ -117,7 +122,7 @@ void ApplicationCacheHost::WillStartLoadingMainResource(
             : nullptr;
   }
 
-  host_->WillStartMainResourceRequest(wrapped, spawning_host);
+  host_->WillStartMainResourceRequest(url, method, spawning_host);
 
   // NOTE: The semantics of this method, and others in this interface, are
   // subtly different than the method names would suggest. For example, in this
@@ -136,9 +141,8 @@ void ApplicationCacheHost::SelectCacheWithManifest(const KURL& manifest_url) {
 
   LocalFrame* frame = document_loader_->GetFrame();
   Document* document = frame->GetDocument();
-  if (document->IsSandboxed(kSandboxOrigin) ||
-      document->GetSecurityOrigin()->HasSuborigin()) {
-    // Prevent sandboxes and suborigins from establishing application caches.
+  if (document->IsSandboxed(kSandboxOrigin)) {
+    // Prevent sandboxes from establishing application caches.
     SelectCacheWithoutManifest();
     return;
   }
@@ -187,13 +191,6 @@ void ApplicationCacheHost::FailedLoadingMainResource() {
 void ApplicationCacheHost::FinishedLoadingMainResource() {
   if (host_)
     host_->DidFinishLoadingMainResource(true);
-}
-
-void ApplicationCacheHost::WillStartLoadingResource(ResourceRequest& request) {
-  if (host_) {
-    WrappedResourceRequest wrapped(request);
-    host_->WillStartSubResourceRequest(wrapped);
-  }
 }
 
 void ApplicationCacheHost::SetApplicationCache(
@@ -362,7 +359,7 @@ void ApplicationCacheHost::NotifyErrorEventListener(
                          message);
 }
 
-DEFINE_TRACE(ApplicationCacheHost) {
+void ApplicationCacheHost::Trace(blink::Visitor* visitor) {
   visitor->Trace(dom_application_cache_);
   visitor->Trace(document_loader_);
 }

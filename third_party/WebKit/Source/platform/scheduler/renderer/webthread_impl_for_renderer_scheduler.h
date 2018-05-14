@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_RENDERER_WEBTHREAD_IMPL_FOR_RENDERER_SCHEDULER_H_
 #define THIRD_PARTY_WEBKIT_SOURCE_PLATFORM_SCHEDULER_RENDERER_WEBTHREAD_IMPL_FOR_RENDERER_SCHEDULER_H_
 
+#include "base/memory/scoped_refptr.h"
 #include "base/message_loop/message_loop.h"
 #include "platform/PlatformExport.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/platform/scheduler/child/webthread_base.h"
 
 namespace blink {
@@ -18,7 +18,6 @@ namespace blink {
 namespace scheduler {
 class RendererSchedulerImpl;
 class WebSchedulerImpl;
-class WebTaskRunnerImpl;
 
 class PLATFORM_EXPORT WebThreadImplForRendererScheduler : public WebThreadBase {
  public:
@@ -28,10 +27,9 @@ class PLATFORM_EXPORT WebThreadImplForRendererScheduler : public WebThreadBase {
   // WebThread implementation.
   WebScheduler* Scheduler() const override;
   PlatformThreadId ThreadId() const override;
-  WebTaskRunner* GetWebTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() const override;
 
   // WebThreadBase implementation.
-  base::SingleThreadTaskRunner* GetTaskRunner() const override;
   SingleThreadIdleTaskRunner* GetIdleTaskRunner() const override;
   void Init() override;
 
@@ -49,7 +47,6 @@ class PLATFORM_EXPORT WebThreadImplForRendererScheduler : public WebThreadBase {
   scoped_refptr<SingleThreadIdleTaskRunner> idle_task_runner_;
   RendererSchedulerImpl* scheduler_;  // Not owned.
   PlatformThreadId thread_id_;
-  RefPtr<WebTaskRunnerImpl> web_task_runner_;
 };
 
 }  // namespace scheduler

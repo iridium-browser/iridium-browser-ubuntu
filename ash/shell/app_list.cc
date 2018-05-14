@@ -7,6 +7,12 @@
 #include <utility>
 #include <vector>
 
+#include "ash/app_list/model/app_list_item.h"
+#include "ash/app_list/model/app_list_item_list.h"
+#include "ash/app_list/model/app_list_model.h"
+#include "ash/app_list/model/search/search_box_model.h"
+#include "ash/app_list/model/search/search_model.h"
+#include "ash/app_list/model/search/search_result.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shell/example_factory.h"
@@ -16,17 +22,11 @@
 #include "base/files/file_path.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "ui/app_list/app_list_item.h"
-#include "ui/app_list/app_list_item_list.h"
-#include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_view_delegate.h"
-#include "ui/app_list/search_box_model.h"
-#include "ui/app_list/search_result.h"
-#include "ui/app_list/speech_ui_model.h"
+#include "ui/app_list/presenter/app_list.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/geometry/rect.h"
@@ -128,8 +128,7 @@ class WindowTypeShelfItem : public app_list::AppListItem {
     }
   }
 
-  // AppListItem
-  void Activate(int event_flags) override { ActivateItem(type_, event_flags); }
+  void Activate(int event_flags) { ActivateItem(type_, event_flags); }
 
  private:
   Type type_;
@@ -144,7 +143,7 @@ WindowTypeShelfItem::WindowTypeShelfItem(const std::string& id, Type type)
   SetName(title);
 }
 
-WindowTypeShelfItem::~WindowTypeShelfItem() {}
+WindowTypeShelfItem::~WindowTypeShelfItem() = default;
 
 // ExampleSearchResult is an app list search result. It provides what icon to
 // show, what should title and details text look like. It also carries the
@@ -198,9 +197,11 @@ class ExampleSearchResult : public app_list::SearchResult {
 
 class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
  public:
-  ExampleAppListViewDelegate() : model_(new app_list::AppListModel) {
+  ExampleAppListViewDelegate()
+      : model_(std::make_unique<app_list::AppListModel>()),
+        search_model_(std::make_unique<app_list::SearchModel>()) {
     PopulateApps();
-    DecorateSearchBox(model_->search_box());
+    DecorateSearchBox(search_model_->search_box());
   }
 
  private:
@@ -222,32 +223,30 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
   // Overridden from app_list::AppListViewDelegate:
   app_list::AppListModel* GetModel() override { return model_.get(); }
 
-  app_list::SpeechUIModel* GetSpeechUI() override { return &speech_ui_; }
+  app_list::SearchModel* GetSearchModel() override {
+    return search_model_.get();
+  }
 
-  void OpenSearchResult(app_list::SearchResult* result,
-                        bool auto_launch,
+  void OpenSearchResult(const std::string& result_id,
                         int event_flags) override {
     const ExampleSearchResult* example_result =
-        static_cast<const ExampleSearchResult*>(result);
+        static_cast<const ExampleSearchResult*>(
+            search_model_->FindSearchResult(result_id));
     WindowTypeShelfItem::ActivateItem(example_result->type(), event_flags);
   }
 
-  void InvokeSearchResultAction(app_list::SearchResult* result,
+  void InvokeSearchResultAction(const std::string& result_id,
                                 int action_index,
                                 int event_flags) override {
     NOTIMPLEMENTED();
   }
 
-  base::TimeDelta GetAutoLaunchTimeout() override { return base::TimeDelta(); }
-
-  void AutoLaunchCanceled() override {}
-
-  void StartSearch() override {
+  void StartSearch(const base::string16& raw_query) override {
     base::string16 query;
-    base::TrimWhitespace(model_->search_box()->text(), base::TRIM_ALL, &query);
+    base::TrimWhitespace(raw_query, base::TRIM_ALL, &query);
     query = base::i18n::ToLower(query);
 
-    model_->results()->DeleteAll();
+    search_model_->results()->DeleteAll();
     if (query.empty())
       return;
 
@@ -259,44 +258,46 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
           base::UTF8ToUTF16(WindowTypeShelfItem::GetTitle(type));
       if (base::i18n::StringSearchIgnoringCaseAndAccents(query, title, NULL,
                                                          NULL)) {
-        model_->results()->Add(
-            base::MakeUnique<ExampleSearchResult>(type, query));
+        search_model_->results()->Add(
+            std::make_unique<ExampleSearchResult>(type, query));
       }
     }
   }
 
-  void ViewInitialized() override {
+  void ViewShown(int64_t display_id) override {
     // Nothing needs to be done.
   }
 
   void Dismiss() override {
     DCHECK(ShellPort::HasInstance());
-    Shell::Get()->DismissAppList();
+    Shell::Get()->app_list()->Dismiss();
   }
 
   void ViewClosing() override {
     // Nothing needs to be done.
   }
 
-  void StartSpeechRecognition() override { NOTIMPLEMENTED(); }
-  void StopSpeechRecognition() override { NOTIMPLEMENTED(); }
-
-  views::View* CreateStartPageWebView(const gfx::Size& size) override {
-    return NULL;
+  void GetWallpaperProminentColors(
+      GetWallpaperProminentColorsCallback callback) override {
+    NOTIMPLEMENTED();
   }
 
-  std::vector<views::View*> CreateCustomPageWebViews(
-      const gfx::Size& size) override {
-    return std::vector<views::View*>();
+  void ActivateItem(const std::string& id, int event_flags) override {
+    WindowTypeShelfItem* item =
+        static_cast<WindowTypeShelfItem*>(model_->FindItem(id));
+    if (!item)
+      return;
+    item->Activate(event_flags);
   }
 
-  void CustomLauncherPageAnimationChanged(double progress) override {}
+  void GetContextMenuModel(const std::string& id,
+                           GetContextMenuModelCallback callback) override {
+    NOTIMPLEMENTED();
+  }
 
-  void CustomLauncherPagePopSubpage() override {}
-
-  bool IsSpeechRecognitionEnabled() override { return false; }
-
-  void GetWallpaperProminentColors(std::vector<SkColor>* colors) override {
+  void ContextMenuItemSelected(const std::string& id,
+                               int command_id,
+                               int event_flags) override {
     NOTIMPLEMENTED();
   }
 
@@ -310,7 +311,7 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
   }
 
   std::unique_ptr<app_list::AppListModel> model_;
-  app_list::SpeechUIModel speech_ui_;
+  std::unique_ptr<app_list::SearchModel> search_model_;
 
   DISALLOW_COPY_AND_ASSIGN(ExampleAppListViewDelegate);
 };

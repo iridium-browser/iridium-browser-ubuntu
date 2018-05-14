@@ -112,6 +112,12 @@ String16Vector String16VectorFromString16(
     bool break_on_space,
     WordStarts* word_starts);
 
+String16Vector String16VectorFromString16(
+    const base::string16& cleaned_uni_string,
+    bool break_on_space,
+    bool break_on_underscore,
+    WordStarts* word_starts);
+
 // Breaks the |uni_word| string down into its individual characters.
 // Note that this is temporarily intended to work on a single word, but
 // _will_ work on a string of words, perhaps with unexpected results.
@@ -152,6 +158,10 @@ struct HistoryInfoMapValue {
   HistoryInfoMapValue& operator=(HistoryInfoMapValue&& other);
   ~HistoryInfoMapValue();
 
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
+
   // This field is always populated.
   history::URLRow url_row;
 
@@ -173,6 +183,10 @@ struct RowWordStarts {
   RowWordStarts& operator=(const RowWordStarts& other);
   RowWordStarts& operator=(RowWordStarts&& other);
   ~RowWordStarts();
+
+  // Estimates dynamic memory usage.
+  // See base/trace_event/memory_usage_estimator.h for more info.
+  size_t EstimateMemoryUsage() const;
 
   // Clears both url_word_starts_ and title_word_starts_.
   void Clear();

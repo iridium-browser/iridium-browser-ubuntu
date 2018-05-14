@@ -70,6 +70,11 @@ NSString* const kAppLogoImageName = @"launchscreen_app_logo";
 NSString* const kCheckBoxImageName = @"checkbox";
 NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
 
+// Constants for the Terms of Service and Privacy Notice URLs in the
+// first run experience.
+const char kTermsOfServiceUrl[] = "internal://terms-of-service";
+const char kPrivacyNoticeUrl[] = "internal://privacy-notice";
+
 }  // namespace
 
 @interface WelcomeToChromeView () {
@@ -130,10 +135,6 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
 
 // Action triggered by the ok button.
 - (void)OKButtonWasTapped;
-
-// The TOS label button was tapped.
-// TODO(crbug.com/539961): Remove once link detection is fixed.
-- (void)TOSLinkWasTapped;
 
 @end
 
@@ -360,19 +361,35 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
   containerSize.height = CGFLOAT_MAX;
   self.TOSLabel.frame = {CGPointZero, containerSize};
   NSString* TOSText = l10n_util::GetNSString(IDS_IOS_FIRSTRUN_AGREE_TO_TERMS);
-  NSRange linkTextRange = NSMakeRange(NSNotFound, 0);
-  NSString* strippedText = ParseStringWithLink(TOSText, &linkTextRange);
-  DCHECK_NE(NSNotFound, static_cast<NSInteger>(linkTextRange.location));
-  DCHECK_NE(0u, linkTextRange.length);
+  NSRange tosLinkTextRange = NSMakeRange(NSNotFound, 0);
+  NSRange privacyLinkTextRange = NSMakeRange(NSNotFound, 0);
+  TOSText = ParseStringWithTag(TOSText, &tosLinkTextRange,
+                               @"BEGIN_LINK_TOS[ \t]*", @"[ \t]*END_LINK_TOS");
+  TOSText = ParseStringWithTag(TOSText, &privacyLinkTextRange,
+                               @"BEGIN_LINK_PRIVACY[ \t]*",
+                               @"[ \t]*END_LINK_PRIVACY");
 
-  self.TOSLabel.text = strippedText;
-  if (ios_internal::FixOrphanWord(self.TOSLabel)) {
+  DCHECK_NE(NSNotFound, static_cast<NSInteger>(tosLinkTextRange.location));
+  DCHECK_NE(0u, tosLinkTextRange.length);
+  DCHECK_NE(NSNotFound, static_cast<NSInteger>(privacyLinkTextRange.location));
+  DCHECK_NE(0u, privacyLinkTextRange.length);
+
+  self.TOSLabel.text = TOSText;
+  if (FixOrphanWord(self.TOSLabel)) {
     // If a newline is inserted, check whether it was added mid-link and adjust
-    // |linkTextRange| accordingly.
-    NSRange newlineRange =
-        [self.TOSLabel.text rangeOfString:@"\n" options:0 range:linkTextRange];
+    // |tosLinkTextRange| and |privacyLinkTextRange| accordingly.
+    NSRange newlineRange = [self.TOSLabel.text rangeOfString:@"\n"
+                                                     options:0
+                                                       range:tosLinkTextRange];
+    if (newlineRange.length) {
+      tosLinkTextRange.location++;
+      privacyLinkTextRange.location++;
+    }
+    newlineRange = [self.TOSLabel.text rangeOfString:@"\n"
+                                             options:0
+                                               range:privacyLinkTextRange];
     if (newlineRange.length)
-      linkTextRange.length++;
+      privacyLinkTextRange.location++;
   }
 
   __weak WelcomeToChromeView* weakSelf = self;
@@ -380,14 +397,21 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
     WelcomeToChromeView* strongSelf = weakSelf;
     if (!strongSelf)
       return;
-    [[strongSelf delegate] welcomeToChromeViewDidTapTOSLink:strongSelf];
+    if (url == kTermsOfServiceUrl) {
+      [[strongSelf delegate] welcomeToChromeViewDidTapTOSLink];
+    } else if (url == kPrivacyNoticeUrl) {
+      [[strongSelf delegate] welcomeToChromeViewDidTapPrivacyLink];
+    } else {
+      NOTREACHED();
+    }
   };
 
   _TOSLabelLinkController =
       [[LabelLinkController alloc] initWithLabel:_TOSLabel action:action];
-  [_TOSLabelLinkController
-      addLinkWithRange:linkTextRange
-                   url:GURL("internal://terms-of-service")];
+  [_TOSLabelLinkController addLinkWithRange:tosLinkTextRange
+                                        url:GURL(kTermsOfServiceUrl)];
+  [_TOSLabelLinkController addLinkWithRange:privacyLinkTextRange
+                                        url:GURL(kPrivacyNoticeUrl)];
   [_TOSLabelLinkController setLinkColor:UIColorFromRGB(kLinkColorRGB)];
 
   CGSize TOSLabelSize = [self.TOSLabel sizeThatFits:containerSize];
@@ -416,7 +440,7 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
       CGRectMake(optInLabelOriginX,
                  CGRectGetMaxY(self.TOSLabel.frame) + optInLabelTopPadding,
                  optInLabelSize.width, optInLabelSize.height));
-  ios_internal::FixOrphanWord(self.optInLabel);
+  FixOrphanWord(self.optInLabel);
 }
 
 - (void)layoutCheckBoxButton {
@@ -531,8 +555,9 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
 }
 
 - (void)configureOKButton {
-  self.OKButton.titleLabel.font = [[MDCTypography fontLoader]
+  UIFont* font = [[MDCTypography fontLoader]
       mediumFontOfSize:kOKButtonTitleLabelFontSize[self.cr_widthSizeClass]];
+  [self.OKButton setTitleFont:font forState:UIControlStateNormal];
   CGSize size = [self.OKButton
       sizeThatFits:CGSizeMake(CGFLOAT_MAX,
                               kOKButtonHeight[self.cr_widthSizeClass])];
@@ -552,10 +577,6 @@ NSString* const kCheckBoxCheckedImageName = @"checkbox_checked";
 
 - (void)OKButtonWasTapped {
   [self.delegate welcomeToChromeViewDidTapOKButton:self];
-}
-
-- (void)TOSLinkWasTapped {
-  [self.delegate welcomeToChromeViewDidTapTOSLink:self];
 }
 
 @end

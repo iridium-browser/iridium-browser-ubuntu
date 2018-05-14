@@ -5,7 +5,6 @@
 #include "chrome/browser/extensions/extension_web_ui.h"
 
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -31,7 +30,7 @@ namespace {
 
 std::unique_ptr<KeyedService> BuildOverrideRegistrar(
     content::BrowserContext* context) {
-  return base::MakeUnique<ExtensionWebUIOverrideRegistrar>(context);
+  return std::make_unique<ExtensionWebUIOverrideRegistrar>(context);
 }
 
 }  // namespace
@@ -156,6 +155,64 @@ TEST_F(ExtensionWebUITest, ExtensionURLOverride) {
   EXPECT_TRUE(ExtensionWebUI::HandleChromeURLOverrideReverse(&changed_url,
                                                              profile_.get()));
   EXPECT_EQ(kBookmarksUrl, changed_url);
+}
+
+TEST_F(ExtensionWebUITest, TestRemovingDuplicateEntriesForHosts) {
+  // Test that duplicate entries for a single extension are removed. This could
+  // happen because of https://crbug.com/782959.
+  std::unique_ptr<base::DictionaryValue> manifest_overrides =
+      DictionaryBuilder().Set("newtab", "newtab.html").Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension")
+          .MergeManifest(
+              DictionaryBuilder()
+                  .Set("chrome_url_overrides", std::move(manifest_overrides))
+                  .Build())
+          .Build();
+
+  const GURL newtab_url = extension->GetResourceURL("newtab.html");
+
+  PrefService* prefs = profile_->GetPrefs();
+  {
+    // Add multiple entries for the same extension.
+    DictionaryPrefUpdate update(prefs, ExtensionWebUI::kExtensionURLOverrides);
+    base::DictionaryValue* all_overrides = update.Get();
+    base::Value newtab_list(base::Value::Type::LIST);
+    {
+      base::Value newtab(base::Value::Type::DICTIONARY);
+      newtab.SetKey("entry", base::Value(newtab_url.spec()));
+      newtab.SetKey("active", base::Value(true));
+      newtab_list.GetList().push_back(std::move(newtab));
+    }
+    {
+      base::Value newtab(base::Value::Type::DICTIONARY);
+      newtab.SetKey(
+          "entry",
+          base::Value(extension->GetResourceURL("oldtab.html").spec()));
+      newtab.SetKey("active", base::Value(true));
+      newtab_list.GetList().push_back(std::move(newtab));
+    }
+
+    all_overrides->SetKey("newtab", std::move(newtab_list));
+  }
+
+  extension_service_->AddExtension(extension.get());
+  static_cast<TestExtensionSystem*>(ExtensionSystem::Get(profile_.get()))
+      ->SetReady();
+  base::RunLoop().RunUntilIdle();
+
+  // Duplicates should be removed (in response to ExtensionSystem::ready()).
+  // Only a single entry should remain.
+  const base::DictionaryValue* overrides =
+      prefs->GetDictionary(ExtensionWebUI::kExtensionURLOverrides);
+  ASSERT_TRUE(overrides);
+  const base::Value* newtab_overrides =
+      overrides->FindKeyOfType("newtab", base::Value::Type::LIST);
+  ASSERT_TRUE(newtab_overrides);
+  ASSERT_EQ(1u, newtab_overrides->GetList().size());
+  const base::Value& override_dict = newtab_overrides->GetList()[0];
+  EXPECT_EQ(newtab_url.spec(), override_dict.FindKey("entry")->GetString());
+  EXPECT_TRUE(override_dict.FindKey("active")->GetBool());
 }
 
 }  // namespace extensions

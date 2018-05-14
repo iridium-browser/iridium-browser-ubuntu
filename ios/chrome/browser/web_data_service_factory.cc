@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/keyed_service/core/service_access_type.h"
@@ -22,13 +21,6 @@
 #include "ios/web/public/web_thread.h"
 
 namespace ios {
-namespace {
-
-void DoNothingOnErrorCallback(WebDataServiceWrapper::ErrorType error_type,
-                              sql::InitStatus status,
-                              const std::string& diagnostics) {}
-
-}  // namespace
 
 // static
 WebDataServiceWrapper* WebDataServiceFactory::GetForBrowserState(
@@ -97,12 +89,11 @@ WebDataServiceFactory::~WebDataServiceFactory() {
 std::unique_ptr<KeyedService> WebDataServiceFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
   const base::FilePath& browser_state_path = context->GetStatePath();
-  return base::MakeUnique<WebDataServiceWrapper>(
+  return std::make_unique<WebDataServiceWrapper>(
       browser_state_path, GetApplicationContext()->GetApplicationLocale(),
       web::WebThread::GetTaskRunnerForThread(web::WebThread::UI),
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::DB),
       ios::sync_start_util::GetFlareForSyncableService(browser_state_path),
-      &DoNothingOnErrorCallback);
+      base::DoNothing());
 }
 
 web::BrowserState* WebDataServiceFactory::GetBrowserStateToUse(

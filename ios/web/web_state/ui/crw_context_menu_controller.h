@@ -10,6 +10,10 @@
 
 #import "ios/web/public/block_types.h"
 
+namespace web {
+class BrowserState;
+}  // namespace web
+
 @protocol CRWContextMenuDelegate;
 @protocol CRWJSInjectionEvaluator;
 
@@ -30,11 +34,18 @@
 //   event on |webView| and can have performance impact.
 // TODO(crbug.com/228179): This class only triggers context menu on mainFrame.
 - (instancetype)initWithWebView:(WKWebView*)webView
+                   browserState:(web::BrowserState*)browserState
              injectionEvaluator:(id<CRWJSInjectionEvaluator>)injectionEvaluator
                        delegate:(id<CRWContextMenuDelegate>)delegate
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
+
+// By default, this controller "hooks" long touches to suppress the system
+// default behavior (which shows the system context menu) and show its own
+// context menu instead. This method disables the hook for the current on-going
+// touch i.e., triggers the system default behavior.
+- (void)allowSystemUIForCurrentGesture;
 
 @end
 

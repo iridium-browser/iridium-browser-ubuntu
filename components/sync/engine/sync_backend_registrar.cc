@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "components/sync/model/change_processor.h"
 #include "components/sync/syncable/user_share.h"
 
@@ -231,7 +230,7 @@ ChangeProcessor* SyncBackendRegistrar::GetProcessor(ModelType type) const {
 
   // We can only check if |processor| exists, as otherwise the type is
   // mapped to GROUP_PASSIVE.
-  CHECK(IsCurrentThreadSafeForModel(type));
+  DCHECK(IsCurrentThreadSafeForModel(type));
   return processor;
 }
 

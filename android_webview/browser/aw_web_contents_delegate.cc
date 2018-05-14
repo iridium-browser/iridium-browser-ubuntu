@@ -259,7 +259,7 @@ bool AwWebContentsDelegate::IsFullscreenForTabOrPending(
   return is_fullscreen_;
 }
 
-static void FilesSelectedInChooser(
+static void JNI_AwWebContentsDelegate_FilesSelectedInChooser(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     jint process_id,
@@ -309,10 +309,6 @@ static void FilesSelectedInChooser(
   DVLOG(0) << "File Chooser result: mode = " << mode
            << ", file paths = " << base::JoinString(file_path_str, ":");
   rfh->FilesSelectedInChooser(files, mode);
-}
-
-bool RegisterAwWebContentsDelegate(JNIEnv* env) {
-  return RegisterNativesImpl(env);
 }
 
 }  // namespace android_webview

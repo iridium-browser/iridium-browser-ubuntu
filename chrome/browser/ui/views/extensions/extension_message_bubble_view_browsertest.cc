@@ -9,10 +9,9 @@
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_actions_bar_bubble_views.h"
 #include "ui/accessibility/ax_node_data.h"
-#include "ui/base/ui_base_switches.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
-#include "ui/views/controls/link.h"
-#include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/button/image_button.h"
 #include "ui/views/window/dialog_client_view.h"
 
 namespace {
@@ -49,10 +48,10 @@ class ExtensionMessageBubbleViewBrowserTest
   ~ExtensionMessageBubbleViewBrowserTest() override {}
 
   // ExtensionMessageBubbleBrowserTest:
-  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUp() override;
 
   // TestBrowserDialog:
-  void ShowDialog(const std::string& name) override;
+  void ShowUi(const std::string& name) override;
 
  private:
   // ExtensionMessageBubbleBrowserTest:
@@ -71,17 +70,15 @@ class ExtensionMessageBubbleViewBrowserTest
   DISALLOW_COPY_AND_ASSIGN(ExtensionMessageBubbleViewBrowserTest);
 };
 
-void ExtensionMessageBubbleViewBrowserTest::SetUpCommandLine(
-    base::CommandLine* command_line) {
-  ExtensionMessageBubbleBrowserTest::SetUpCommandLine(command_line);
+void ExtensionMessageBubbleViewBrowserTest::SetUp() {
   // MD is required on Mac to get a Views bubble. On other platforms, it should
   // not affect the behavior of the bubble (just the appearance), so enable for
   // all platforms.
-  command_line->AppendSwitch(switches::kExtendMdToSecondaryUi);
+  UseMdOnly();
+  SupportsTestUi::SetUp();
 }
 
-void ExtensionMessageBubbleViewBrowserTest::ShowDialog(
-    const std::string& name) {
+void ExtensionMessageBubbleViewBrowserTest::ShowUi(const std::string& name) {
   // When invoked this way, the dialog test harness must close the bubble.
   base::AutoReset<bool> guard(&block_close_, true);
 
@@ -125,15 +122,19 @@ void ExtensionMessageBubbleViewBrowserTest::CheckBubbleIsNotPresentNative(
 void ExtensionMessageBubbleViewBrowserTest::ClickLearnMoreButton(
     Browser* browser) {
   ToolbarActionsBarBubbleViews* bubble = GetViewsBubbleForBrowser(browser);
-  static_cast<views::LinkListener*>(bubble)->LinkClicked(
-      const_cast<views::Link*>(bubble->learn_more_button()), 0);
+  const views::ImageButton* learn_more = bubble->learn_more_button();
+  const gfx::Point origin;
+  static_cast<views::ButtonListener*>(bubble)->ButtonPressed(
+      const_cast<views::ImageButton*>(learn_more),
+      ui::MouseEvent(ui::ET_MOUSE_PRESSED, origin, origin,
+                     ui::EventTimeForNow(), 0, 0));
 
   // Clicking a button closes asynchronously. Since the close is asynchronous,
   // platform events may happen before the close completes and the dialog needs
   // to report a valid state.
   ui::AXNodeData node_data;
   bubble->GetWidget()->GetRootView()->GetAccessibleNodeData(&node_data);
-  EXPECT_EQ(ui::AX_ROLE_DIALOG, node_data.role);
+  EXPECT_EQ(ax::mojom::Role::kDialog, node_data.role);
 }
 
 void ExtensionMessageBubbleViewBrowserTest::ClickActionButton(
@@ -221,11 +222,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
   TestControlledStartupNotShownOnRestart();
 }
 
-// BrowserDialogTest for the warning bubble that appears when opening a new tab
-// and an extension is controlling it. Only shown on Windows.
+// BrowserUiTest for the warning bubble that appears when opening a new tab and
+// an extension is controlling it. Only shown on Windows.
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
-                       InvokeDialog_ntp_override) {
-  RunDialog();
+                       InvokeUi_ntp_override) {
+  ShowAndVerifyUi();
 }
 
 #endif  // defined(OS_WIN)
@@ -250,12 +251,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
   TestClickingDismissButton();
 }
 
-// BrowserDialogTest for the warning bubble that appears at startup when there
-// are extensions installed in developer mode. Can be invoked interactively with
-// --gtest_filter=BrowserDialogTest.Invoke.
+// BrowserUiTest for the warning bubble that appears at startup when there are
+// extensions installed in developer mode.
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleViewBrowserTest,
-                       InvokeDialog_devmode_warning) {
-  RunDialog();
+                       InvokeUi_devmode_warning) {
+  ShowAndVerifyUi();
 }
 
 class NtpExtensionBubbleViewBrowserTest
@@ -280,4 +280,9 @@ class NtpExtensionBubbleViewBrowserTest
 IN_PROC_BROWSER_TEST_F(NtpExtensionBubbleViewBrowserTest,
                        TestControlledNewTabPageMessageBubbleLearnMore) {
   TestControlledNewTabPageBubbleShown(true);
+}
+
+IN_PROC_BROWSER_TEST_F(NtpExtensionBubbleViewBrowserTest,
+                       TestBubbleClosedAfterExtensionUninstall) {
+  TestBubbleClosedAfterExtensionUninstall();
 }

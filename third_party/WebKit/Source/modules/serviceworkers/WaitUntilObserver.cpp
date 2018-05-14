@@ -15,7 +15,7 @@
 #include "platform/bindings/Microtask.h"
 #include "platform/wtf/Assertions.h"
 #include "public/platform/Platform.h"
-#include "public/platform/modules/serviceworker/WebServiceWorkerEventResult.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_event_status.mojom-blink.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -46,13 +46,13 @@ class WaitUntilObserver::ThenFunction final : public ScriptFunction {
       ScriptState* script_state,
       WaitUntilObserver* observer,
       ResolveType type,
-      std::unique_ptr<PromiseSettledCallback> callback) {
+      PromiseSettledCallback callback) {
     ThenFunction* self =
         new ThenFunction(script_state, observer, type, std::move(callback));
     return self->BindToV8Function();
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(observer_);
     ScriptFunction::Trace(visitor);
   }
@@ -61,7 +61,7 @@ class WaitUntilObserver::ThenFunction final : public ScriptFunction {
   ThenFunction(ScriptState* script_state,
                WaitUntilObserver* observer,
                ResolveType type,
-               std::unique_ptr<PromiseSettledCallback> callback)
+               PromiseSettledCallback callback)
       : ScriptFunction(script_state),
         observer_(observer),
         resolve_type_(type),
@@ -71,7 +71,7 @@ class WaitUntilObserver::ThenFunction final : public ScriptFunction {
     DCHECK(observer_);
     DCHECK(resolve_type_ == kFulfilled || resolve_type_ == kRejected);
     if (callback_)
-      (*callback_)(value);
+      callback_.Run(value);
     // According from step 4 of ExtendableEvent::waitUntil() in spec:
     // https://w3c.github.io/ServiceWorker/#dom-extendableevent-waituntil
     // "Upon fulfillment or rejection of f, queue a microtask to run these
@@ -101,7 +101,7 @@ class WaitUntilObserver::ThenFunction final : public ScriptFunction {
 
   Member<WaitUntilObserver> observer_;
   ResolveType resolve_type_;
-  std::unique_ptr<PromiseSettledCallback> callback_;
+  PromiseSettledCallback callback_;
 };
 
 WaitUntilObserver* WaitUntilObserver::Create(ExecutionContext* context,
@@ -131,12 +131,11 @@ void WaitUntilObserver::DidDispatchEvent(bool event_dispatch_failed) {
   MaybeCompleteEvent();
 }
 
-void WaitUntilObserver::WaitUntil(
-    ScriptState* script_state,
-    ScriptPromise script_promise,
-    ExceptionState& exception_state,
-    std::unique_ptr<PromiseSettledCallback> on_promise_fulfilled,
-    std::unique_ptr<PromiseSettledCallback> on_promise_rejected) {
+void WaitUntilObserver::WaitUntil(ScriptState* script_state,
+                                  ScriptPromise script_promise,
+                                  ExceptionState& exception_state,
+                                  PromiseSettledCallback on_promise_fulfilled,
+                                  PromiseSettledCallback on_promise_rejected) {
   if (pending_promises_ == 0) {
     switch (event_dispatch_state_) {
       case EventDispatchState::kInitial:
@@ -147,15 +146,15 @@ void WaitUntilObserver::WaitUntil(
                 script_state->GetIsolate())) {
           break;
         }
-      // Fall through:
-      // didDispatchEvent() is called after both the event handler
-      // execution finished and microtasks queued by the event handler execution
-      // finished, it's hard to get the precise time point between the 2
-      // execution phases.
-      // So even in EventDispatchState::kDispatching state at this time point,
-      // running microtask indicates that event handler execution has actually
-      // finished, in such case if there aren't any outstanding extend lifetime
-      // promises, we should throw here.
+        // didDispatchEvent() is called after both the event handler
+        // execution finished and microtasks queued by the event handler execution
+        // finished, it's hard to get the precise time point between the 2
+        // execution phases.
+        // So even in EventDispatchState::kDispatching state at this time point,
+        // running microtask indicates that event handler execution has actually
+        // finished, in such case if there aren't any outstanding extend lifetime
+        // promises, we should throw here.
+        FALLTHROUGH;
       case EventDispatchState::kDispatched:
       case EventDispatchState::kFailed:
         exception_state.ThrowDOMException(
@@ -175,9 +174,10 @@ void WaitUntilObserver::WaitUntil(
   // waitUntil() is being used, opening or closing a window must happen in a
   // timeframe specified by windowInteractionTimeout(), otherwise the calls
   // will fail.
-  if (type_ == kNotificationClick)
+  if (type_ == kNotificationClick) {
     consume_window_interaction_timer_.StartOneShot(WindowInteractionTimeout(),
-                                                   BLINK_FROM_HERE);
+                                                   FROM_HERE);
+  }
 
   IncrementPendingPromiseCount();
   script_promise.Then(
@@ -194,7 +194,7 @@ WaitUntilObserver::WaitUntilObserver(ExecutionContext* context,
       type_(type),
       event_id_(event_id),
       consume_window_interaction_timer_(
-          Platform::Current()->CurrentThread()->GetWebTaskRunner(),
+          Platform::Current()->CurrentThread()->GetTaskRunner(),
           this,
           &WaitUntilObserver::ConsumeWindowInteraction) {}
 
@@ -242,63 +242,68 @@ void WaitUntilObserver::MaybeCompleteEvent() {
 
   ServiceWorkerGlobalScopeClient* client =
       ServiceWorkerGlobalScopeClient::From(execution_context_);
-  WebServiceWorkerEventResult result =
+  mojom::ServiceWorkerEventStatus status =
       (event_dispatch_state_ == EventDispatchState::kFailed ||
        has_rejected_promise_)
-          ? kWebServiceWorkerEventResultRejected
-          : kWebServiceWorkerEventResultCompleted;
+          ? mojom::ServiceWorkerEventStatus::REJECTED
+          : mojom::ServiceWorkerEventStatus::COMPLETED;
   switch (type_) {
+    case kAbortPayment:
+      client->DidHandleAbortPaymentEvent(event_id_, status,
+                                         event_dispatch_time_);
+      break;
     case kActivate:
-      client->DidHandleActivateEvent(event_id_, result, event_dispatch_time_);
+      client->DidHandleActivateEvent(event_id_, status, event_dispatch_time_);
       break;
     case kCanMakePayment:
-      client->DidHandleCanMakePaymentEvent(event_id_, result,
+      client->DidHandleCanMakePaymentEvent(event_id_, status,
                                            event_dispatch_time_);
       break;
     case kFetch:
-      client->DidHandleFetchEvent(event_id_, result, event_dispatch_time_);
+      client->DidHandleFetchEvent(event_id_, status, event_dispatch_time_);
       break;
     case kInstall:
-      client->DidHandleInstallEvent(event_id_, result, event_dispatch_time_);
+      ToServiceWorkerGlobalScope(execution_context_)->SetIsInstalling(false);
+      client->DidHandleInstallEvent(event_id_, status, event_dispatch_time_);
       break;
     case kMessage:
-      client->DidHandleExtendableMessageEvent(event_id_, result,
+      client->DidHandleExtendableMessageEvent(event_id_, status,
                                               event_dispatch_time_);
       break;
     case kNotificationClick:
-      client->DidHandleNotificationClickEvent(event_id_, result,
+      client->DidHandleNotificationClickEvent(event_id_, status,
                                               event_dispatch_time_);
       consume_window_interaction_timer_.Stop();
       ConsumeWindowInteraction(nullptr);
       break;
     case kNotificationClose:
-      client->DidHandleNotificationCloseEvent(event_id_, result,
+      client->DidHandleNotificationCloseEvent(event_id_, status,
                                               event_dispatch_time_);
       break;
     case kPush:
-      client->DidHandlePushEvent(event_id_, result, event_dispatch_time_);
+      client->DidHandlePushEvent(event_id_, status, event_dispatch_time_);
       break;
     case kSync:
-      client->DidHandleSyncEvent(event_id_, result, event_dispatch_time_);
+      client->DidHandleSyncEvent(event_id_, status, event_dispatch_time_);
       break;
     case kPaymentRequest:
-      client->DidHandlePaymentRequestEvent(event_id_, result,
+      client->DidHandlePaymentRequestEvent(event_id_, status,
                                            event_dispatch_time_);
       break;
     case kBackgroundFetchAbort:
-      client->DidHandleBackgroundFetchAbortEvent(event_id_, result,
+      client->DidHandleBackgroundFetchAbortEvent(event_id_, status,
                                                  event_dispatch_time_);
       break;
     case kBackgroundFetchClick:
-      client->DidHandleBackgroundFetchClickEvent(event_id_, result,
+      client->DidHandleBackgroundFetchClickEvent(event_id_, status,
                                                  event_dispatch_time_);
       break;
     case kBackgroundFetchFail:
-      client->DidHandleBackgroundFetchFailEvent(event_id_, result,
+      client->DidHandleBackgroundFetchFailEvent(event_id_, status,
                                                 event_dispatch_time_);
       break;
     case kBackgroundFetched:
-      client->DidHandleBackgroundFetchedEvent(event_id_, result,
+      client->DidHandleBackgroundFetchedEvent(event_id_, status,
                                               event_dispatch_time_);
       break;
   }
@@ -311,7 +316,7 @@ void WaitUntilObserver::ConsumeWindowInteraction(TimerBase*) {
   execution_context_->ConsumeWindowInteraction();
 }
 
-DEFINE_TRACE(WaitUntilObserver) {
+void WaitUntilObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(execution_context_);
 }
 

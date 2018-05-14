@@ -27,6 +27,7 @@ class WebPointerProperties {
     kLeft,
     kMiddle,
     kRight,
+    kBarrel = kRight,  // Barrel is aliased per pointer event spec
     kBack,
     kForward,
     kEraser,
@@ -57,7 +58,9 @@ class WebPointerProperties {
       PointerType pointer_type_param = PointerType::kUnknown,
       Button button_param = Button::kNoButton,
       WebFloatPoint position_in_widget = WebFloatPoint(),
-      WebFloatPoint position_in_screen = WebFloatPoint())
+      WebFloatPoint position_in_screen = WebFloatPoint(),
+      int movement_x = 0,
+      int movement_y = 0)
       : id(id_param),
         force(std::numeric_limits<float>::quiet_NaN()),
         tilt_x(0),
@@ -66,17 +69,29 @@ class WebPointerProperties {
         twist(0),
         button(button_param),
         pointer_type(pointer_type_param),
-        movement_x(0),
-        movement_y(0),
+        movement_x(movement_x),
+        movement_y(movement_y),
         position_in_widget_(position_in_widget),
         position_in_screen_(position_in_screen) {}
 
   WebFloatPoint PositionInWidget() const { return position_in_widget_; }
   WebFloatPoint PositionInScreen() const { return position_in_screen_; }
 
-  // TODO(mustaq): Move the setters for position_in_widget_ and
-  // position_in_screen_ here from the subclasses when mouse event coordinate
-  // truncation is removed. crbug.com/456625
+  void SetPositionInWidget(float x, float y) {
+    position_in_widget_ = WebFloatPoint(x, y);
+  }
+
+  void SetPositionInScreen(float x, float y) {
+    position_in_screen_ = WebFloatPoint(x, y);
+  }
+
+  void SetPositionInWidget(const WebFloatPoint& point) {
+    position_in_widget_ = point;
+  }
+
+  void SetPositionInScreen(const WebFloatPoint& point) {
+    position_in_screen_ = point;
+  }
 
   PointerId id;
 

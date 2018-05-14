@@ -20,9 +20,9 @@
 #include "chrome/browser/ui/views/download/download_item_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/download/public/common/download_item.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
-#include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/page_navigator.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -38,7 +38,7 @@
 #include "ui/views/controls/link.h"
 #include "ui/views/mouse_watcher_view_host.h"
 
-using content::DownloadItem;
+using download::DownloadItem;
 
 namespace {
 
@@ -96,8 +96,9 @@ DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
       show_all_view_(nullptr),
       close_button_(views::CreateVectorImageButton(this)),
       parent_(parent),
-      mouse_watcher_(new views::MouseWatcherViewHost(this, gfx::Insets()),
-                     this) {
+      mouse_watcher_(
+          std::make_unique<views::MouseWatcherViewHost>(this, gfx::Insets()),
+          this) {
   // Start out hidden: the shelf might be created but never shown in some
   // cases, like when installing a theme. See DownloadShelf::AddDownload().
   SetVisible(false);
@@ -333,7 +334,7 @@ void DownloadShelfView::UpdateColorsFromTheme() {
       GetThemeProvider()->GetColor(ThemeProperties::COLOR_TOOLBAR)));
 
   views::SetImageFromVectorIcon(
-      close_button_, vector_icons::kCloseIcon,
+      close_button_, vector_icons::kClose16Icon,
       DownloadItemView::GetTextColorForThemeProvider(GetThemeProvider()));
 }
 

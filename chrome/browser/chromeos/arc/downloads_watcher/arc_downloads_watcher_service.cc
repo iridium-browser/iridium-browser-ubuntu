@@ -15,7 +15,6 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_path_watcher.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_util.h"
@@ -296,7 +295,7 @@ void ArcDownloadsWatcherService::DownloadsWatcher::Start() {
   last_notify_time_ = base::TimeTicks::Now();
   last_timestamp_map_ = BuildTimestampMap(downloads_dir_);
 
-  watcher_ = base::MakeUnique<base::FilePathWatcher>();
+  watcher_ = std::make_unique<base::FilePathWatcher>();
   // On Linux, base::FilePathWatcher::Watch() always returns true.
   watcher_->Watch(downloads_dir_, true,
                   base::Bind(&DownloadsWatcher::OnFilePathChanged,
@@ -379,20 +378,15 @@ ArcDownloadsWatcherService::~ArcDownloadsWatcherService() {
   StopWatchingDownloads();
   DCHECK(!watcher_);
 
-  // TODO(hidehiko): Currently, the lifetime of ArcBridgeService and
-  // BrowserContextKeyedService is not nested.
-  // If ArcServiceManager::Get() returns nullptr, it is already destructed,
-  // so do not touch it.
-  if (ArcServiceManager::Get())
-    arc_bridge_service_->file_system()->RemoveObserver(this);
+  arc_bridge_service_->file_system()->RemoveObserver(this);
 }
 
-void ArcDownloadsWatcherService::OnInstanceReady() {
+void ArcDownloadsWatcherService::OnConnectionReady() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   StartWatchingDownloads();
 }
 
-void ArcDownloadsWatcherService::OnInstanceClosed() {
+void ArcDownloadsWatcherService::OnConnectionClosed() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   StopWatchingDownloads();
 }
@@ -401,7 +395,7 @@ void ArcDownloadsWatcherService::StartWatchingDownloads() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   StopWatchingDownloads();
   DCHECK(!watcher_);
-  watcher_ = base::MakeUnique<DownloadsWatcher>(
+  watcher_ = std::make_unique<DownloadsWatcher>(
       context_, base::Bind(&ArcDownloadsWatcherService::OnDownloadsChanged,
                            weak_ptr_factory_.GetWeakPtr()));
   file_task_runner_->PostTask(FROM_HERE,

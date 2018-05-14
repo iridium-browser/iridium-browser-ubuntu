@@ -4,12 +4,12 @@
 
 // This file provides the ScrollAction object, which scrolls a page
 // to the bottom or for a specified distance:
-//   1. var action = new __ScrollAction(callback, opt_distance_func)
+//   1. var action = new __ScrollAction(callback, optDistanceFunc)
 //   2. action.start(scroll_options)
 'use strict';
 
 (function() {
-  var MAX_SCROLL_LENGTH_TIME_MS = 6250;
+  const MAX_SCROLL_LENGTH_TIME_MS = 6250;
 
   function ScrollGestureOptions(opt_options) {
     if (opt_options) {
@@ -40,72 +40,117 @@
   // This class scrolls a page from the top to the bottom once.
   //
   // The page is scrolled down by a single scroll gesture.
-  function ScrollAction(opt_callback, opt_distance_func) {
-    var self = this;
-
+  function ScrollAction(optCallback, optDistanceFunc) {
     this.beginMeasuringHook = function() {};
     this.endMeasuringHook = function() {};
 
-    this.callback_ = opt_callback;
-    this.distance_func_ = opt_distance_func;
+    this.callback_ = optCallback;
+    this.distance_func_ = optDistanceFunc;
   }
 
-  ScrollAction.prototype.getScrollDistanceDown_ = function() {
-    var clientHeight;
-    // clientHeight is "special" for the body element.
-    if (this.element_ == document.body)
-      clientHeight = __GestureCommon_GetWindowHeight();
-    else
-      clientHeight = this.element_.clientHeight;
+  ScrollAction.prototype.isScrollingViewport_ = function() {
+    const viewportElement = document.scrollingElement || document.body;
+    if (!viewportElement) {
+      return false;
+    }
 
-    return this.element_.scrollHeight -
-           this.element_.scrollTop -
-           clientHeight;
+    return this.element_ === viewportElement;
+  };
+
+  ScrollAction.prototype.getScrollDistanceDown_ = function() {
+    let clientHeight;
+    let scrollTop;
+
+    // clientHeight and scrollTop are "special" for the scrollingElement.
+    if (this.isScrollingViewport_()) {
+      if ('visualViewport' in window) {
+        clientHeight = window.visualViewport.height;
+        scrollTop = window.visualViewport.pageTop;
+      } else {
+        clientHeight = window.innerHeight;
+        scrollTop = window.scrollY;
+      }
+    } else {
+      clientHeight = this.element_.clientHeight;
+      scrollTop = this.element_.scrollTop;
+    }
+
+    return this.element_.scrollHeight - scrollTop - clientHeight;
   };
 
   ScrollAction.prototype.getScrollDistanceUp_ = function() {
+    if (this.isScrollingViewport_()) {
+      if ('visualViewport' in window) {
+        return window.visualViewport.pageTop;
+      }
+
+      return window.scrollY;
+    }
     return this.element_.scrollTop;
   };
 
   ScrollAction.prototype.getScrollDistanceRight_ = function() {
-    var clientWidth;
-    // clientWidth is "special" for the body element.
-    if (this.element_ == document.body)
-      clientWidth = __GestureCommon_GetWindowWidth();
-    else
-      clientWidth = this.element_.clientWidth;
+    let clientWidth;
+    let scrollLeft;
 
-    return this.element_.scrollWidth - this.element_.scrollLeft - clientWidth;
+    // clientWidth and scrollLeft are "special" for the scrollingElement.
+    if (this.isScrollingViewport_()) {
+      if ('visualViewport' in window) {
+        clientWidth = window.visualViewport.width;
+        scrollLeft = window.visualViewport.pageLeft;
+      } else {
+        clientWidth = window.innerWidth;
+        scrollLeft = window.scrollX;
+      }
+    } else {
+      clientWidth = this.element_.clientWidth;
+      scrollLeft = this.element_.scrollLeft;
+    }
+
+    return this.element_.scrollWidth - scrollLeft - clientWidth;
   };
 
   ScrollAction.prototype.getScrollDistanceLeft_ = function() {
+    if (this.isScrollingViewport_()) {
+      if ('visualViewport' in window) {
+        return window.visualViewport.pageLeft;
+      }
+
+      return window.scrollX;
+    }
     return this.element_.scrollLeft;
   };
 
+  // The distance returned is in CSS pixels. i.e. Is not scaled by pinch-zoom.
   ScrollAction.prototype.getScrollDistance_ = function() {
-    if (this.distance_func_)
+    if (this.distance_func_) {
       return this.distance_func_();
+    }
 
-    if (this.options_.direction_ == 'down') {
+    if (this.options_.direction_ === 'down') {
       return this.getScrollDistanceDown_();
-    } else if (this.options_.direction_ == 'up') {
+    } else if (this.options_.direction_ === 'up') {
       return this.getScrollDistanceUp_();
-    } else if (this.options_.direction_ == 'right') {
+    } else if (this.options_.direction_ === 'right') {
       return this.getScrollDistanceRight_();
-    } else if (this.options_.direction_ == 'left') {
+    } else if (this.options_.direction_ === 'left') {
       return this.getScrollDistanceLeft_();
-    } else if (this.options_.direction_ == 'upleft') {
-      return Math.min(this.getScrollDistanceUp_(),
-                      this.getScrollDistanceLeft_());
-    } else if (this.options_.direction_ == 'upright') {
-      return Math.min(this.getScrollDistanceUp_(),
-                      this.getScrollDistanceRight_());
-    } else if (this.options_.direction_ == 'downleft') {
-      return Math.min(this.getScrollDistanceDown_(),
-                      this.getScrollDistanceLeft_());
-    } else if (this.options_.direction_ == 'downright') {
-      return Math.min(this.getScrollDistanceDown_(),
-                      this.getScrollDistanceRight_());
+    } else if (this.options_.direction_ === 'upleft') {
+      return Math.min(
+          this.getScrollDistanceUp_(),
+          this.getScrollDistanceLeft_());
+    } else if (this.options_.direction_ === 'upright') {
+      return Math.min(
+          this.getScrollDistanceUp_(),
+          this.getScrollDistanceRight_());
+    } else if (this.options_.direction_ === 'downleft') {
+      return Math.min(
+          this.getScrollDistanceDown_(),
+          this.getScrollDistanceLeft_());
+    } else if (this.options_.direction_ === 'downright') {
+      return Math.min(
+          this.getScrollDistanceDown_(),
+          this.getScrollDistanceRight_());
     }
   };
 
@@ -120,28 +165,32 @@
   ScrollAction.prototype.startGesture_ = function() {
     this.beginMeasuringHook();
 
-    var max_scroll_length_pixels = (MAX_SCROLL_LENGTH_TIME_MS / 1000) *
+    const maxScrollLengthPixels = (MAX_SCROLL_LENGTH_TIME_MS / 1000) *
         this.options_.speed_;
-    var distance = Math.min(max_scroll_length_pixels,
-                            this.getScrollDistance_());
+    const distance =
+        Math.min(maxScrollLengthPixels, this.getScrollDistance_()) *
+        chrome.gpuBenchmarking.pageScaleFactor();
+    const speed =
+        this.options_.speed_ * chrome.gpuBenchmarking.pageScaleFactor();
 
-    var rect = __GestureCommon_GetBoundingVisibleRect(this.options_.element_);
-    var start_left =
+    const rect = __GestureCommon_GetBoundingVisibleRect(this.options_.element_);
+    const startLeft =
         rect.left + rect.width * this.options_.left_start_ratio_;
-    var start_top =
+    const startTop =
         rect.top + rect.height * this.options_.top_start_ratio_;
     chrome.gpuBenchmarking.smoothScrollBy(
-        distance, this.onGestureComplete_.bind(this), start_left, start_top,
+        distance, this.onGestureComplete_.bind(this), startLeft, startTop,
         this.options_.gesture_source_type_, this.options_.direction_,
-        this.options_.speed_);
+        speed);
   };
 
   ScrollAction.prototype.onGestureComplete_ = function() {
     this.endMeasuringHook();
 
     // We're done.
-    if (this.callback_)
+    if (this.callback_) {
       this.callback_();
+    }
   };
 
   window.__ScrollAction = ScrollAction;

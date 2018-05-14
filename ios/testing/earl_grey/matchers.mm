@@ -10,17 +10,12 @@
 
 namespace testing {
 
-id<GREYMatcher> ContextMenuItemWithText(NSString* text) {
-  // Both tablet and phone house context menu views inside an alert controller
-  // view (on tablet that view is itself inside a popover view).
-  id<GREYMatcher> context_menu_container =
-      grey_kindOfClass(NSClassFromString(@"_UIAlertControllerView"));
-
-  return grey_allOf(grey_ancestor(context_menu_container), grey_interactable(),
-                    grey_text(text), nil);
+id<GREYMatcher> ButtonWithAccessibilityLabel(NSString* label) {
+  return grey_allOf(grey_accessibilityLabel(label),
+                    grey_accessibilityTrait(UIAccessibilityTraitButton), nil);
 }
 
-id<GREYMatcher> ElementToDismissContextMenu(NSString* cancel_text) {
+id<GREYMatcher> ElementToDismissAlert(NSString* cancel_text) {
   UIUserInterfaceIdiom idiom = [[UIDevice currentDevice] userInterfaceIdiom];
   if (idiom == UIUserInterfaceIdiomPad) {
     // On iPad the context menu is dismissed by tapping on something
@@ -28,7 +23,7 @@ id<GREYMatcher> ElementToDismissContextMenu(NSString* cancel_text) {
     return grey_accessibilityID(@"PopoverDismissRegion");
   } else {
     // On iPhone the context menu is dismissed by tapping on the "Cancel" item.
-    return ContextMenuItemWithText(cancel_text);
+    return ButtonWithAccessibilityLabel(cancel_text);
   }
 }
 

@@ -171,6 +171,7 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
   RANGE_CHECK_HI(cfg, rc_undershoot_pct, 100);
   RANGE_CHECK_HI(cfg, rc_overshoot_pct, 100);
   RANGE_CHECK_HI(cfg, rc_2pass_vbr_bias_pct, 100);
+  RANGE_CHECK(cfg, rc_2pass_vbr_corpus_complexity, 0, 10000);
   RANGE_CHECK(cfg, kf_mode, VPX_KF_DISABLED, VPX_KF_AUTO);
   RANGE_CHECK_BOOL(cfg, rc_resize_allowed);
   RANGE_CHECK_HI(cfg, rc_dropframe_thresh, 100);
@@ -191,6 +192,13 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
                 (MAX_LAG_BUFFERS - 1));
   }
 
+  // For formation of valid ARF groups lag_in _frames should be 0 or greater
+  // than the max_gf_interval + 2
+  if (cfg->g_lag_in_frames > 0 && extra_cfg->max_gf_interval > 0 &&
+      cfg->g_lag_in_frames < extra_cfg->max_gf_interval + 2) {
+    ERROR("Set lag in frames to 0 (low delay) or >= (max-gf-interval + 2)");
+  }
+
   if (cfg->rc_resize_allowed == 1) {
     RANGE_CHECK(cfg, rc_scaled_width, 0, cfg->g_w);
     RANGE_CHECK(cfg, rc_scaled_height, 0, cfg->g_h);
@@ -206,7 +214,7 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
         level != LEVEL_4 && level != LEVEL_4_1 && level != LEVEL_5 &&
         level != LEVEL_5_1 && level != LEVEL_5_2 && level != LEVEL_6 &&
         level != LEVEL_6_1 && level != LEVEL_6_2 && level != LEVEL_UNKNOWN &&
-        level != LEVEL_MAX)
+        level != LEVEL_AUTO && level != LEVEL_MAX)
       ERROR("target_level is invalid");
   }
 
@@ -519,6 +527,7 @@ static vpx_codec_err_t set_encoder_config(
   oxcf->two_pass_vbrbias = cfg->rc_2pass_vbr_bias_pct;
   oxcf->two_pass_vbrmin_section = cfg->rc_2pass_vbr_minsection_pct;
   oxcf->two_pass_vbrmax_section = cfg->rc_2pass_vbr_maxsection_pct;
+  oxcf->vbr_corpus_complexity = cfg->rc_2pass_vbr_corpus_complexity;
 
   oxcf->auto_key =
       cfg->kf_mode == VPX_KF_AUTO && cfg->kf_min_dist != cfg->kf_max_dist;
@@ -629,6 +638,7 @@ static vpx_codec_err_t set_encoder_config(
   printf("two_pass_vbrbias: %d\n",  oxcf->two_pass_vbrbias);
   printf("two_pass_vbrmin_section: %d\n", oxcf->two_pass_vbrmin_section);
   printf("two_pass_vbrmax_section: %d\n", oxcf->two_pass_vbrmax_section);
+  printf("vbr_corpus_complexity: %d\n",  oxcf->vbr_corpus_complexity);
   printf("lag_in_frames: %d\n", oxcf->lag_in_frames);
   printf("enable_auto_arf: %d\n", oxcf->enable_auto_arf);
   printf("Version: %d\n", oxcf->Version);
@@ -1057,12 +1067,11 @@ static vpx_codec_frame_flags_t get_frame_pkt_flags(const VP9_COMP *cpi,
   vpx_codec_frame_flags_t flags = lib_flags << 16;
 
   if (lib_flags & FRAMEFLAGS_KEY ||
-      (cpi->use_svc &&
-       cpi->svc
-           .layer_context[cpi->svc.spatial_layer_id *
-                              cpi->svc.number_temporal_layers +
-                          cpi->svc.temporal_layer_id]
-           .is_key_frame))
+      (cpi->use_svc && cpi->svc
+                           .layer_context[cpi->svc.spatial_layer_id *
+                                              cpi->svc.number_temporal_layers +
+                                          cpi->svc.temporal_layer_id]
+                           .is_key_frame))
     flags |= VPX_FRAME_IS_KEY;
 
   if (cpi->droppable) flags |= VPX_FRAME_IS_DROPPABLE;
@@ -1203,7 +1212,7 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
            -1 != vp9_get_compressed_data(cpi, &lib_flags, &size, cx_data,
                                          &dst_time_stamp, &dst_end_time_stamp,
                                          !img)) {
-      if (size) {
+      if (size || (cpi->use_svc && cpi->svc.skip_enhancement_layer)) {
         vpx_codec_cx_pkt_t pkt;
 
 #if CONFIG_SPATIAL_SVC
@@ -1224,6 +1233,8 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
           ctx->pending_frame_magnitude |= size;
           cx_data += size;
           cx_data_sz -= size;
+          pkt.data.frame.width[cpi->svc.spatial_layer_id] = cpi->common.width;
+          pkt.data.frame.height[cpi->svc.spatial_layer_id] = cpi->common.height;
 
           if (ctx->output_cx_pkt_cb.output_cx_pkt) {
             pkt.kind = VPX_CODEC_CX_FRAME_PKT;
@@ -1250,9 +1261,11 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
         pkt.data.frame.duration = (unsigned long)ticks_to_timebase_units(
             timebase, dst_end_time_stamp - dst_time_stamp);
         pkt.data.frame.flags = get_frame_pkt_flags(cpi, lib_flags);
+        pkt.data.frame.width[cpi->svc.spatial_layer_id] = cpi->common.width;
+        pkt.data.frame.height[cpi->svc.spatial_layer_id] = cpi->common.height;
 
         if (ctx->pending_cx_data) {
-          ctx->pending_frame_sizes[ctx->pending_frame_count++] = size;
+          if (size) ctx->pending_frame_sizes[ctx->pending_frame_count++] = size;
           ctx->pending_frame_magnitude |= size;
           ctx->pending_cx_data_sz += size;
           // write the superframe only for the case when
@@ -1278,8 +1291,7 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
 
         cx_data += size;
         cx_data_sz -= size;
-#if VPX_ENCODER_ABI_VERSION > (5 + VPX_CODEC_ABI_VERSION)
-#if CONFIG_SPATIAL_SVC
+#if CONFIG_SPATIAL_SVC && defined(VPX_TEST_SPATIAL_SVC)
         if (cpi->use_svc && !ctx->output_cx_pkt_cb.output_cx_pkt) {
           vpx_codec_cx_pkt_t pkt_sizes, pkt_psnr;
           int sl;
@@ -1299,7 +1311,6 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
 
           vpx_codec_pkt_list_add(&ctx->pkt_list.head, &pkt_psnr);
         }
-#endif
 #endif
         if (is_one_pass_cbr_svc(cpi) &&
             (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1)) {
@@ -1404,11 +1415,21 @@ static vpx_image_t *encoder_get_preview(vpx_codec_alg_priv_t *ctx) {
 
 static vpx_codec_err_t ctrl_set_roi_map(vpx_codec_alg_priv_t *ctx,
                                         va_list args) {
-  (void)ctx;
-  (void)args;
+  vpx_roi_map_t *data = va_arg(args, vpx_roi_map_t *);
 
-  // TODO(yaowu): Need to re-implement and test for VP9.
-  return VPX_CODEC_INVALID_PARAM;
+  if (data) {
+    vpx_roi_map_t *roi = (vpx_roi_map_t *)data;
+
+    if (!vp9_set_roi_map(ctx->cpi, roi->roi_map, roi->rows, roi->cols,
+                         roi->delta_q, roi->delta_lf, roi->skip,
+                         roi->ref_frame)) {
+      return VPX_CODEC_OK;
+    } else {
+      return VPX_CODEC_INVALID_PARAM;
+    }
+  } else {
+    return VPX_CODEC_INVALID_PARAM;
+  }
 }
 
 static vpx_codec_err_t ctrl_set_active_map(vpx_codec_alg_priv_t *ctx,
@@ -1598,7 +1619,7 @@ static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   // Setters
   { VP8_SET_REFERENCE, ctrl_set_reference },
   { VP8_SET_POSTPROC, ctrl_set_previewpp },
-  { VP8E_SET_ROI_MAP, ctrl_set_roi_map },
+  { VP9E_SET_ROI_MAP, ctrl_set_roi_map },
   { VP8E_SET_ACTIVEMAP, ctrl_set_active_map },
   { VP8E_SET_SCALEMODE, ctrl_set_scale_mode },
   { VP8E_SET_CPUUSED, ctrl_set_cpuused },
@@ -1691,6 +1712,7 @@ static vpx_codec_enc_cfg_map_t encoder_usage_cfg_map[] = {
         50,    // rc_two_pass_vbrbias
         0,     // rc_two_pass_vbrmin_section
         2000,  // rc_two_pass_vbrmax_section
+        0,     // rc_2pass_vbr_corpus_complexity (non 0 for corpus vbr)
 
         // keyframing settings (kf)
         VPX_KF_AUTO,  // g_kfmode

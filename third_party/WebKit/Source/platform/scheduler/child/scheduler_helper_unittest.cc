@@ -10,12 +10,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/simple_test_tick_clock.h"
-#include "cc/test/ordered_simple_task_runner.h"
+#include "components/viz/test/ordered_simple_task_runner.h"
 #include "platform/scheduler/base/lazy_now.h"
 #include "platform/scheduler/base/task_queue.h"
-#include "platform/scheduler/base/test_time_source.h"
-#include "platform/scheduler/child/scheduler_tqm_delegate_for_test.h"
 #include "platform/scheduler/child/worker_scheduler_helper.h"
+#include "platform/scheduler/test/create_task_queue_manager_for_test.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,6 +25,7 @@ using ::testing::Return;
 
 namespace blink {
 namespace scheduler {
+namespace scheduler_helper_unittest {
 
 namespace {
 void AppendToVectorTestTask(std::vector<std::string>* vector,
@@ -51,17 +51,15 @@ void AppendToVectorReentrantTask(base::SingleThreadTaskRunner* task_runner,
 class SchedulerHelperTest : public ::testing::Test {
  public:
   SchedulerHelperTest()
-      : clock_(new base::SimpleTestTickClock()),
-        mock_task_runner_(new cc::OrderedSimpleTaskRunner(clock_.get(), false)),
-        main_task_runner_(SchedulerTqmDelegateForTest::Create(
-            mock_task_runner_,
-            base::WrapUnique(new TestTimeSource(clock_.get())))),
-        scheduler_helper_(new WorkerSchedulerHelper(main_task_runner_)),
+      : mock_task_runner_(new cc::OrderedSimpleTaskRunner(&clock_, false)),
+        scheduler_helper_(new WorkerSchedulerHelper(
+            CreateTaskQueueManagerForTest(nullptr, mock_task_runner_, &clock_),
+            nullptr)),
         default_task_runner_(scheduler_helper_->DefaultWorkerTaskQueue()) {
-    clock_->Advance(base::TimeDelta::FromMicroseconds(5000));
+    clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
   }
 
-  ~SchedulerHelperTest() override {}
+  ~SchedulerHelperTest() override = default;
 
   void TearDown() override {
     // Check that all tests stop posting tasks.
@@ -83,10 +81,9 @@ class SchedulerHelperTest : public ::testing::Test {
   }
 
  protected:
-  std::unique_ptr<base::SimpleTestTickClock> clock_;
+  base::SimpleTestTickClock clock_;
   scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
 
-  scoped_refptr<SchedulerTqmDelegateForTest> main_task_runner_;
   std::unique_ptr<WorkerSchedulerHelper> scheduler_helper_;
   scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
 
@@ -127,13 +124,6 @@ TEST_F(SchedulerHelperTest, IsShutdown) {
 
   scheduler_helper_->Shutdown();
   EXPECT_TRUE(scheduler_helper_->IsShutdown());
-}
-
-TEST_F(SchedulerHelperTest, DefaultTaskRunnerRegistration) {
-  EXPECT_EQ(main_task_runner_->default_task_runner(),
-            scheduler_helper_->DefaultWorkerTaskQueue());
-  scheduler_helper_->Shutdown();
-  EXPECT_EQ(nullptr, main_task_runner_->default_task_runner());
 }
 
 TEST_F(SchedulerHelperTest, GetNumberOfPendingTasks) {
@@ -183,36 +173,6 @@ TEST_F(SchedulerHelperTest, ObserversNotNotifiedFor_ControlTaskQueue) {
   RunUntilIdle();
 }
 
-namespace {
-
-class MockObserver : public SchedulerHelper::Observer {
- public:
-  MOCK_METHOD0(OnTriedToExecuteBlockedTask, void());
-};
-
-}  // namespace
-
-TEST_F(SchedulerHelperTest, OnTriedToExecuteBlockedTask) {
-  MockObserver observer;
-  scheduler_helper_->SetObserver(&observer);
-
-  scoped_refptr<TaskQueue> task_queue = scheduler_helper_->NewTaskQueue(
-      TaskQueue::Spec("test").SetShouldReportWhenExecutionBlocked(true));
-  std::unique_ptr<TaskQueue::QueueEnabledVoter> voter =
-      task_queue->CreateQueueEnabledVoter();
-  voter->SetQueueEnabled(false);
-  task_queue->PostTask(FROM_HERE, base::Bind(&NopTask));
-
-  // Trick |task_queue| into posting a DoWork. By default PostTask with a
-  // disabled queue won't post a DoWork until we enable the queue.
-  voter->SetQueueEnabled(true);
-  voter->SetQueueEnabled(false);
-
-  EXPECT_CALL(observer, OnTriedToExecuteBlockedTask()).Times(1);
-  RunUntilIdle();
-
-  scheduler_helper_->SetObserver(nullptr);
-}
-
+}  // namespace scheduler_helper_unittest
 }  // namespace scheduler
 }  // namespace blink

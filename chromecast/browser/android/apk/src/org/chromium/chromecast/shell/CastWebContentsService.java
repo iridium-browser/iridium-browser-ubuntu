@@ -4,6 +4,7 @@
 
 package org.chromium.chromecast.shell;
 
+import android.app.Notification;
 import android.app.Service;
 import android.content.Intent;
 import android.media.AudioManager;
@@ -12,8 +13,10 @@ import android.widget.Toast;
 
 import org.chromium.base.Log;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.content.browser.ContentView;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.chromecast.base.Controller;
+import org.chromium.chromecast.base.Unit;
+import org.chromium.components.content_view.ContentView;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
@@ -28,9 +31,11 @@ import org.chromium.ui.base.WindowAndroid;
 public class CastWebContentsService extends Service {
     private static final String TAG = "cr_CastWebService";
     private static final boolean DEBUG = true;
+    private static final int CAST_NOTIFICATION_ID = 100;
 
+    private final Controller<Unit> mLifetimeController = new Controller<>();
     private String mInstanceId;
-    private AudioManager mAudioManager;
+    private CastAudioManager mAudioManager;
     private WindowAndroid mWindow;
     private ContentViewCore mContentViewCore;
     private ContentView mContentView;
@@ -54,10 +59,7 @@ public class CastWebContentsService extends Service {
     public void onDestroy() {
         if (DEBUG) Log.d(TAG, "onDestroy");
 
-        if (mAudioManager.abandonAudioFocus(null) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            Log.e(TAG, "Failed to abandon audio focus");
-        }
-
+        mLifetimeController.reset();
         super.onDestroy();
     }
 
@@ -72,13 +74,9 @@ public class CastWebContentsService extends Service {
         }
 
         mWindow = new WindowAndroid(this);
-        mAudioManager = CastAudioManager.getAudioManager(this);
-
-        if (mAudioManager.requestAudioFocus(
-                    null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
-                != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            Log.e(TAG, "Failed to obtain audio focus");
-        }
+        CastAudioManager.getAudioManager(this).requestAudioFocusWhen(
+                mLifetimeController, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        mLifetimeController.set(Unit.unit());
     }
 
     @Override
@@ -91,11 +89,17 @@ public class CastWebContentsService extends Service {
     }
 
     // Sets webContents to be the currently displayed webContents.
+    // TODO(thoren): Notification.Builder(Context) is deprecated in O. Use the (Context, String)
+    // constructor when CastWebContentsService starts supporting O.
+    @SuppressWarnings("deprecation")
     private void showWebContents(WebContents webContents) {
         if (DEBUG) Log.d(TAG, "showWebContents");
 
+        Notification notification = new Notification.Builder(this).build();
+        startForeground(CAST_NOTIFICATION_ID, notification);
+
         // TODO(derekjchow): productVersion
-        mContentViewCore = new ContentViewCore(this, "");
+        mContentViewCore = ContentViewCore.create(this, "");
         mContentView = ContentView.createContentView(this, mContentViewCore);
         mContentViewCore.initialize(ViewAndroidDelegate.createBasicDelegate(mContentView),
                 mContentView, webContents, mWindow);
@@ -106,6 +110,9 @@ public class CastWebContentsService extends Service {
     // Remove the currently displayed webContents. no-op if nothing is being displayed.
     private void detachWebContentsIfAny() {
         if (DEBUG) Log.d(TAG, "detachWebContentsIfAny");
+
+        stopForeground(true /*removeNotification*/);
+
         if (mContentView != null) {
             mContentView = null;
             mContentViewCore = null;

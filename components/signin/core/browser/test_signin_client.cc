@@ -4,8 +4,9 @@
 
 #include "components/signin/core/browser/test_signin_client.h"
 
+#include <memory>
+
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/signin/core/browser/webdata/token_service_table.h"
 #include "components/webdata/common/web_data_service_base.h"
@@ -58,7 +59,7 @@ void TestSigninClient::LoadTokenDatabase() {
   scoped_refptr<WebDatabaseService> web_database =
       new WebDatabaseService(path, base::ThreadTaskRunnerHandle::Get(),
                              base::ThreadTaskRunnerHandle::Get());
-  web_database->AddTable(base::MakeUnique<TokenServiceTable>());
+  web_database->AddTable(std::make_unique<TokenServiceTable>());
   web_database->LoadDatabase();
   database_ =
       new TokenWebData(web_database, base::ThreadTaskRunnerHandle::Get(),
@@ -71,12 +72,11 @@ bool TestSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
   return true;
 }
 
-std::unique_ptr<SigninClient::CookieChangedSubscription>
-TestSigninClient::AddCookieChangedCallback(
-    const GURL& url,
-    const std::string& name,
-    const net::CookieStore::CookieChangedCallback& callback) {
-  return base::WrapUnique(new SigninClient::CookieChangedSubscription);
+std::unique_ptr<SigninClient::CookieChangeSubscription>
+TestSigninClient::AddCookieChangeCallback(const GURL& url,
+                                          const std::string& name,
+                                          net::CookieChangeCallback callback) {
+  return std::make_unique<SigninClient::CookieChangeSubscription>();
 }
 
 bool TestSigninClient::IsFirstRun() const {
@@ -107,5 +107,11 @@ std::unique_ptr<GaiaAuthFetcher> TestSigninClient::CreateGaiaAuthFetcher(
     GaiaAuthConsumer* consumer,
     const std::string& source,
     net::URLRequestContextGetter* getter) {
-  return base::MakeUnique<GaiaAuthFetcher>(consumer, source, getter);
+  return std::make_unique<GaiaAuthFetcher>(consumer, source, getter);
+}
+
+void TestSigninClient::PreGaiaLogout(base::OnceClosure callback) {
+  if (!callback.is_null()) {
+    std::move(callback).Run();
+  }
 }

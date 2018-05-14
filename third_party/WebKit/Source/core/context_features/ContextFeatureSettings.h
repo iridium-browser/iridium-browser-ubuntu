@@ -21,11 +21,11 @@ class CORE_EXPORT ContextFeatureSettings final
       public Supplement<ExecutionContext> {
   USING_GARBAGE_COLLECTED_MIXIN(ContextFeatureSettings)
  public:
+  static const char kSupplementName[];
+
   enum class CreationMode { kCreateIfNotExists, kDontCreateIfNotExists };
 
   explicit ContextFeatureSettings(ExecutionContext&);
-
-  static const char* SupplementName();
 
   // Returns the ContextFeatureSettings for an ExecutionContext. If one does not
   // already exist for the given context, one is created.
@@ -35,7 +35,7 @@ class CORE_EXPORT ContextFeatureSettings final
   void enableMojoJS(bool enable) { enable_mojo_js_ = enable; }
   bool isMojoJSEnabled() const { return enable_mojo_js_; }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   bool enable_mojo_js_ = false;

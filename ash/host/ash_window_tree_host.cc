@@ -4,28 +4,44 @@
 
 #include "ash/host/ash_window_tree_host.h"
 
+#include <memory>
+
 #include "ash/host/ash_window_tree_host_init_params.h"
+#include "ash/host/ash_window_tree_host_mirroring_unified.h"
+#include "ash/host/ash_window_tree_host_platform.h"
 #include "ash/host/ash_window_tree_host_unified.h"
+#include "ash/public/cpp/ash_switches.h"
 #include "ash/shell_port.h"
-#include "base/memory/ptr_util.h"
+#include "base/command_line.h"
+#include "base/sys_info.h"
 #include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/rect.h"
 
-#if defined(USE_OZONE)
-#include "ash/host/ash_window_tree_host_platform.h"
-#elif defined(USE_X11)
-#include "ash/host/ash_window_tree_host_x11.h"
-#endif
-
 namespace ash {
+namespace {
 
-AshWindowTreeHost::AshWindowTreeHost() {}
+bool GetAllowConfineCursor() {
+  return base::SysInfo::IsRunningOnChromeOS() ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kAshConstrainPointerToRoot);
+}
+
+}  // namespace
+
+AshWindowTreeHost::AshWindowTreeHost()
+    : allow_confine_cursor_(GetAllowConfineCursor()) {}
 
 AshWindowTreeHost::~AshWindowTreeHost() = default;
 
 void AshWindowTreeHost::TranslateLocatedEvent(ui::LocatedEvent* event) {
+  // NOTE: This code is not called in mus/mash, it is handled on the server
+  // side.
+  // TODO(sky): remove this when mus is the default http://crbug.com/763996.
+  DCHECK_EQ(aura::Env::Mode::LOCAL, aura::Env::GetInstance()->mode());
+
   if (event->IsTouchEvent())
     return;
 
@@ -45,6 +61,7 @@ void AshWindowTreeHost::TranslateLocatedEvent(ui::LocatedEvent* event) {
     screen_position_client->ConvertHostPointToScreen(root_window, &location);
     screen_position_client->ConvertPointFromScreen(root_window, &location);
     wth->ConvertDIPToPixels(&location);
+
     event->set_location(location);
     event->set_root_location(location);
   }
@@ -58,18 +75,17 @@ std::unique_ptr<AshWindowTreeHost> AshWindowTreeHost::Create(
   if (ash_window_tree_host)
     return ash_window_tree_host;
 
-  if (init_params.offscreen) {
-    return base::MakeUnique<AshWindowTreeHostUnified>(
-        init_params.initial_bounds);
+  if (init_params.mirroring_unified) {
+    return std::make_unique<AshWindowTreeHostMirroringUnified>(
+        init_params.initial_bounds, init_params.display_id,
+        init_params.mirroring_delegate);
   }
-#if defined(USE_OZONE)
-  return base::MakeUnique<AshWindowTreeHostPlatform>(
+  if (init_params.offscreen) {
+    return std::make_unique<AshWindowTreeHostUnified>(
+        init_params.initial_bounds, init_params.mirroring_delegate);
+  }
+  return std::make_unique<AshWindowTreeHostPlatform>(
       init_params.initial_bounds);
-#elif defined(USE_X11)
-  return base::MakeUnique<AshWindowTreeHostX11>(init_params.initial_bounds);
-#else
-#error Unsupported platform.
-#endif
 }
 
 }  // namespace ash

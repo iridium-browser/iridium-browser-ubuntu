@@ -8,7 +8,6 @@
 #include <stddef.h>
 
 #include <memory>
-#include <string>
 
 #include "base/macros.h"
 #include "content/browser/indexed_db/indexed_db_factory.h"
@@ -83,10 +82,19 @@ class MockIndexedDBFactory : public IndexedDBFactory {
   MOCK_METHOD0(ContextDestroyed, void());
   MOCK_METHOD1(DatabaseDeleted,
                void(const IndexedDBDatabase::Identifier& identifier));
+
+  MOCK_METHOD1(BlobFilesCleaned, void(const url::Origin& origin));
+
   MOCK_CONST_METHOD1(GetConnectionCount, size_t(const url::Origin& origin));
 
   MOCK_METHOD2(ReportOutstandingBlobs,
                void(const url::Origin& origin, bool blobs_outstanding));
+
+  MOCK_METHOD1(NotifyIndexedDBListChanged, void(const url::Origin& origin));
+  MOCK_METHOD3(NotifyIndexedDBContentChanged,
+               void(const url::Origin& origin,
+                    const base::string16& database_name,
+                    const base::string16& object_store_name));
 
  protected:
   virtual ~MockIndexedDBFactory();

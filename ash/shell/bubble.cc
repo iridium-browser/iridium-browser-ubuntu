@@ -24,7 +24,7 @@ class ExampleBubbleDialogDelegateView : public views::BubbleDialogDelegateView {
   ~ExampleBubbleDialogDelegateView() override;
 
   void Init() override {
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     views::Label* label = new views::Label(label_);
     AddChildView(label);
   }
@@ -38,7 +38,7 @@ ExampleBubbleDialogDelegateView::ExampleBubbleDialogDelegateView(
     : BubbleDialogDelegateView(config.anchor_view, config.arrow),
       label_(config.label) {}
 
-ExampleBubbleDialogDelegateView::~ExampleBubbleDialogDelegateView() {}
+ExampleBubbleDialogDelegateView::~ExampleBubbleDialogDelegateView() = default;
 
 void CreatePointyBubble(views::View* anchor_view) {
   BubbleConfig config;

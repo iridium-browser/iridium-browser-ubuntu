@@ -7,30 +7,30 @@ import os
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-import css_properties
+from core.css import css_properties
 import json5_generator
 from name_utilities import enum_for_css_keyword
 import template_expander
 
 
-class CSSOMTypesWriter(css_properties.CSSProperties):
+class CSSOMTypesWriter(json5_generator.Writer):
     """
     Generates CSSOMTypes.cpp and CSSOMKeywords.cpp. These classes provide
-    utility methods for determining whether a given CSSStyleValue or
-    CSSKeywordValue is valid for a given CSS property. The header files live in
-    core/css/cssom.
+    utility methods for determining whether a given CSSStyleValue is valid
+    for a given CSS property. The header files live in core/css/cssom.
     """
-    def __init__(self, json5_file_path):
-        super(CSSOMTypesWriter, self).__init__(json5_file_path)
+    def __init__(self, json5_file_paths):
+        super(CSSOMTypesWriter, self).__init__([])
 
-        for property_ in self._properties.values():
+        self._input_files = json5_file_paths
+        self._properties = (
+            css_properties.CSSProperties(json5_file_paths)).longhands
+
+        for property_ in self._properties:
             types = []
             # Expand types
             for single_type in property_['typedom_types']:
-                if single_type == 'Image':
-                    types.append('URLImage')
-                else:
-                    types.append(single_type)
+                types.append(single_type)
             property_['typedom_types'] = types
 
             # Generate Keyword ID values from keywords.

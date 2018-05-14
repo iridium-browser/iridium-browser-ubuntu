@@ -44,16 +44,30 @@ class AXTreeSourceArc
   explicit AXTreeSourceArc(Delegate* delegate);
   ~AXTreeSourceArc() override;
 
+  // AXTreeSource overrides.
+  bool GetTreeData(ui::AXTreeData* data) const override;
+
   // Notify automation of an accessibility event.
   void NotifyAccessibilityEvent(mojom::AccessibilityEventData* event_data);
 
+  // Notify automation of a result to an action.
+  void NotifyActionResult(const ui::AXActionData& data, bool result);
+
+  // Attaches tree to an aura window and gives it system focus.
   void Focus(aura::Window* window);
+
+  // Gets the window id of this tree.
+  int32_t window_id() const { return window_id_; }
+
+  // Gets children for testing.
+  void GetChildrenForTest(
+      mojom::AccessibilityNodeInfoData* node,
+      std::vector<mojom::AccessibilityNodeInfoData*>* out_children) const;
 
  private:
   class FocusStealer;
 
   // AXTreeSource overrides.
-  bool GetTreeData(ui::AXTreeData* data) const override;
   mojom::AccessibilityNodeInfoData* GetRoot() const override;
   mojom::AccessibilityNodeInfoData* GetFromId(int32_t id) const override;
   int32_t GetId(mojom::AccessibilityNodeInfoData* node) const override;
@@ -69,6 +83,25 @@ class AXTreeSourceArc
   void SerializeNode(mojom::AccessibilityNodeInfoData* node,
                      ui::AXNodeData* out_data) const override;
 
+  // Returns bounds of a node which can be passed to AXNodeData.location. Bounds
+  // are returned in the following coordinates depending on whether it's root or
+  // not.
+  // - Root node is relative to its container, i.e. focused window.
+  // - Non-root node is relative to the root node of this tree.
+  //
+  // focused_window is nullptr for notification.
+  const gfx::Rect GetBounds(mojom::AccessibilityNodeInfoData* node,
+                            aura::Window* focused_window) const;
+
+  // Computes the smallest rect that encloses all of the descendants of |node|.
+  gfx::Rect ComputeEnclosingBounds(
+      mojom::AccessibilityNodeInfoData* node) const;
+
+  // Helper to recursively compute bounds for |node|. Returns true if non-empty
+  // bounds were encountered.
+  void ComputeEnclosingBoundsInternal(mojom::AccessibilityNodeInfoData* node,
+                                      gfx::Rect& computed_bounds) const;
+
   // AXHostDelegate overrides.
   void PerformAction(const ui::AXActionData& data) override;
 
@@ -80,12 +113,15 @@ class AXTreeSourceArc
   std::map<int32_t, int32_t> parent_map_;
   std::unique_ptr<AXTreeArcSerializer> current_tree_serializer_;
   int32_t root_id_;
+  int32_t window_id_;
   int32_t focused_node_id_;
+  bool is_notification_;
 
   // A delegate that handles accessibility actions on behalf of this tree. The
   // delegate is valid during the lifetime of this tree.
   const Delegate* const delegate_;
   std::unique_ptr<FocusStealer> focus_stealer_;
+  std::string package_name_;
 
   DISALLOW_COPY_AND_ASSIGN(AXTreeSourceArc);
 };

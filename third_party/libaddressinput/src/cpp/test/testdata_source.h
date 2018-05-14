@@ -19,23 +19,29 @@
 #define I18N_ADDRESSINPUT_TEST_TESTDATA_SOURCE_H_
 
 #include <libaddressinput/source.h>
-#include <libaddressinput/util/basictypes.h>
 
 #include <string>
 
 namespace i18n {
 namespace addressinput {
 
+// The name of the test data file.
+extern const char kDataFileName[];
+
 // Gets address metadata from a text file. Sample usage:
 //    class MyClass {
 //     public:
-//      MyClass() : source_(),
-//                  data_ready_(BuildCallback(this, &MyClass::OnDataReady)) {}
+//      MyClass(const MyClass&) = delete;
+//      MyClass& operator=(const MyClass&) = delete;
+//
+//      MyClass() : data_ready_(BuildCallback(this, &MyClass::OnDataReady)),
+//                  source_(/*aggregate=*/true,
+//                          "path/to/test/data/file") {}
 //
 //      ~MyClass() {}
 //
 //      void GetData(const std::string& key) {
-//        source_.Get(key, *data_ready_);
+//        source_->Get(key, *data_ready_);
 //      }
 //
 //     private:
@@ -46,23 +52,29 @@ namespace addressinput {
 //        delete data;
 //      }
 //
-//      TestdataSource source_;
-//      const scoped_ptr<const Source::Callback> data_ready_;
-//
-//      DISALLOW_COPY_AND_ASSIGN(MyClass);
+//      const std::unique_ptr<const Source::Callback> data_ready_;
+//      const TestdataSource source_;
 //    };
 class TestdataSource : public Source {
  public:
+  TestdataSource(const TestdataSource&) = delete;
+  TestdataSource& operator=(const TestdataSource&) = delete;
+
   // Will return aggregate data if |aggregate| is set to true.
+  // This constructor uses a relative path to the test file.
   explicit TestdataSource(bool aggregate);
-  virtual ~TestdataSource();
+
+  // |src_path| is a path to the test data file.
+  TestdataSource(bool aggregate, const std::string& src_path);
+
+  ~TestdataSource() override;
 
   // Source implementation.
-  virtual void Get(const std::string& key, const Callback& data_ready) const;
+  void Get(const std::string& key, const Callback& data_ready) const override;
 
  private:
   const bool aggregate_;
-  DISALLOW_COPY_AND_ASSIGN(TestdataSource);
+  const std::string src_path_;
 };
 
 }  // namespace addressinput

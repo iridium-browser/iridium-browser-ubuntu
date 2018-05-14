@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/common/channel_info.h"
@@ -17,10 +18,12 @@
 #include "chrome/renderer/extensions/app_bindings.h"
 #include "chrome/renderer/extensions/app_hooks_delegate.h"
 #include "chrome/renderer/extensions/automation_internal_custom_bindings.h"
+#include "chrome/renderer/extensions/extension_hooks_delegate.h"
 #include "chrome/renderer/extensions/media_galleries_custom_bindings.h"
 #include "chrome/renderer/extensions/notifications_native_handler.h"
 #include "chrome/renderer/extensions/page_capture_custom_bindings.h"
 #include "chrome/renderer/extensions/sync_file_system_custom_bindings.h"
+#include "chrome/renderer/extensions/tabs_hooks_delegate.h"
 #include "chrome/renderer/extensions/webstore_bindings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/common/content_switches.h"
@@ -28,7 +31,7 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/feature_switch.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/permissions/manifest_permission_set.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -39,6 +42,7 @@
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/i18n_custom_bindings.h"
 #include "extensions/renderer/lazy_background_page_native_handler.h"
+#include "extensions/renderer/native_extension_bindings_system.h"
 #include "extensions/renderer/native_handler.h"
 #include "extensions/renderer/resource_bundle_source_map.h"
 #include "extensions/renderer/script_context.h"
@@ -137,12 +141,12 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
 #if BUILDFLAG(ENABLE_WEBRTC)
   module_system->RegisterNativeHandler(
       "cast_streaming_natives",
-      base::MakeUnique<extensions::CastStreamingNativeHandler>(
+      std::make_unique<extensions::CastStreamingNativeHandler>(
           context, bindings_system));
 #endif
   module_system->RegisterNativeHandler(
       "automationInternal",
-      base::MakeUnique<extensions::AutomationInternalCustomBindings>(
+      std::make_unique<extensions::AutomationInternalCustomBindings>(
           context, bindings_system));
 
   // The following are native handlers that are defined in //extensions, but
@@ -197,7 +201,6 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("systemIndicator",
                              IDR_SYSTEM_INDICATOR_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("tabCapture", IDR_TAB_CAPTURE_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("ttsEngine", IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS);
 
@@ -249,6 +252,10 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource(
       "webrtcDesktopCapturePrivate",
       IDR_WEBRTC_DESKTOP_CAPTURE_PRIVATE_CUSTOM_BINDINGS_JS);
+#if BUILDFLAG(ENABLE_WEBRTC)
+  source_map->RegisterSource("webrtcLoggingPrivate",
+                             IDR_WEBRTC_LOGGING_PRIVATE_CUSTOM_BINDINGS_JS);
+#endif
   source_map->RegisterSource("webstore", IDR_WEBSTORE_CUSTOM_BINDINGS_JS);
 
 
@@ -272,8 +279,10 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("mojo/common/time.mojom", IDR_MOJO_TIME_MOJOM_JS);
   source_map->RegisterSource("net/interfaces/ip_address.mojom",
                              IDR_MOJO_IP_ADDRESS_MOJOM_JS);
-  source_map->RegisterSource("url/mojo/origin.mojom", IDR_ORIGIN_MOJOM_JS);
-  source_map->RegisterSource("url/mojo/url.mojom", IDR_MOJO_URL_MOJOM_JS);
+  source_map->RegisterSource("net/interfaces/ip_endpoint.mojom",
+                             IDR_MOJO_IP_ENDPOINT_MOJOM_JS);
+  source_map->RegisterSource("url/mojom/origin.mojom", IDR_ORIGIN_MOJOM_JS);
+  source_map->RegisterSource("url/mojom/url.mojom", IDR_MOJO_URL_MOJOM_JS);
   source_map->RegisterSource("media/mojo/interfaces/remoting_common.mojom",
                              IDR_REMOTING_COMMON_JS);
   source_map->RegisterSource(
@@ -281,14 +290,15 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
       IDR_MEDIA_REMOTING_JS);
 
   // These bindings are unnecessary with native bindings enabled.
-  if (!extensions::FeatureSwitch::native_crx_bindings()->IsEnabled()) {
+  if (!base::FeatureList::IsEnabled(extensions::features::kNativeCrxBindings)) {
     source_map->RegisterSource("app", IDR_APP_CUSTOM_BINDINGS_JS);
+    source_map->RegisterSource("tabs", IDR_TABS_CUSTOM_BINDINGS_JS);
 
     // Custom types sources.
     source_map->RegisterSource("ChromeSetting", IDR_CHROME_SETTING_JS);
     source_map->RegisterSource("ContentSetting", IDR_CONTENT_SETTING_JS);
-    source_map->RegisterSource("ChromeDirectSetting",
-                               IDR_CHROME_DIRECT_SETTING_JS);
+    source_map->RegisterSource("EasyUnlockProximityRequired",
+                               IDR_EASY_UNLOCK_PROXIMITY_REQUIRED_JS);
   }
 }
 
@@ -315,9 +325,17 @@ void ChromeExtensionsDispatcherDelegate::OnActiveExtensionsUpdated(
 
 void ChromeExtensionsDispatcherDelegate::InitializeBindingsSystem(
     extensions::Dispatcher* dispatcher,
-    extensions::APIBindingsSystem* bindings_system) {
-  DCHECK(extensions::FeatureSwitch::native_crx_bindings()->IsEnabled());
-  bindings_system->GetHooksForAPI("app")->SetDelegate(
-      base::MakeUnique<extensions::AppHooksDelegate>(
-          dispatcher, bindings_system->request_handler()));
+    extensions::NativeExtensionBindingsSystem* bindings_system) {
+  DCHECK(
+      base::FeatureList::IsEnabled(extensions::features::kNativeCrxBindings));
+  extensions::APIBindingsSystem* bindings = bindings_system->api_system();
+  bindings->GetHooksForAPI("app")->SetDelegate(
+      std::make_unique<extensions::AppHooksDelegate>(
+          dispatcher, bindings->request_handler()));
+  bindings->GetHooksForAPI("extension")
+      ->SetDelegate(std::make_unique<extensions::ExtensionHooksDelegate>(
+          bindings_system->messaging_service()));
+  bindings->GetHooksForAPI("tabs")->SetDelegate(
+      std::make_unique<extensions::TabsHooksDelegate>(
+          bindings_system->messaging_service()));
 }

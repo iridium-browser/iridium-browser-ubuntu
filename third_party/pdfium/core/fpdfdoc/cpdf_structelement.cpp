@@ -14,7 +14,6 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfdoc/cpdf_structtree.h"
-#include "third_party/base/stl_util.h"
 
 CPDF_StructKid::CPDF_StructKid()
     : m_Type(Invalid),
@@ -36,7 +35,7 @@ CPDF_StructElement::CPDF_StructElement(CPDF_StructTree* pTree,
       m_Type(pDict->GetStringFor("S")),
       m_Title(pDict->GetStringFor("T")) {
   if (pTree->GetRoleMap()) {
-    CFX_ByteString mapped = pTree->GetRoleMap()->GetStringFor(m_Type);
+    ByteString mapped = pTree->GetRoleMap()->GetStringFor(m_Type);
     if (!mapped.IsEmpty())
       m_Type = mapped;
   }
@@ -45,11 +44,11 @@ CPDF_StructElement::CPDF_StructElement(CPDF_StructTree* pTree,
 
 CPDF_StructElement::~CPDF_StructElement() = default;
 
-int CPDF_StructElement::CountKids() const {
-  return pdfium::CollectionSize<int>(m_Kids);
+size_t CPDF_StructElement::CountKids() const {
+  return m_Kids.size();
 }
 
-CPDF_StructElement* CPDF_StructElement::GetKidIfElement(int index) const {
+CPDF_StructElement* CPDF_StructElement::GetKidIfElement(size_t index) const {
   return m_Kids[index].m_Type == CPDF_StructKid::Element
              ? m_Kids[index].m_pElement.Get()
              : nullptr;
@@ -102,7 +101,7 @@ void CPDF_StructElement::LoadKid(uint32_t PageObjNum,
   if (CPDF_Reference* pRef = ToReference(pKidDict->GetObjectFor("Pg")))
     PageObjNum = pRef->GetRefObjNum();
 
-  CFX_ByteString type = pKidDict->GetStringFor("Type");
+  ByteString type = pKidDict->GetStringFor("Type");
   if ((type == "MCR" || type == "OBJR") && m_pTree->GetPage() &&
       m_pTree->GetPage()->GetObjNum() != PageObjNum) {
     return;

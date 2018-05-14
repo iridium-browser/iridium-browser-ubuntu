@@ -17,8 +17,8 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -36,6 +36,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/websocket_transport_client_socket_pool.h"
 #include "net/websockets/websocket_basic_stream.h"
+#include "net/websockets/websocket_basic_stream_adapters.h"
 #include "net/websockets/websocket_deflate_parameters.h"
 #include "net/websockets/websocket_deflate_predictor.h"
 #include "net/websockets/websocket_deflate_predictor_impl.h"
@@ -307,22 +308,24 @@ WebSocketBasicHandshakeStream::WebSocketBasicHandshakeStream(
   DCHECK(request);
 }
 
-WebSocketBasicHandshakeStream::~WebSocketBasicHandshakeStream() {}
+WebSocketBasicHandshakeStream::~WebSocketBasicHandshakeStream() = default;
 
 int WebSocketBasicHandshakeStream::InitializeStream(
     const HttpRequestInfo* request_info,
+    bool can_send_early,
     RequestPriority priority,
     const NetLogWithSource& net_log,
-    const CompletionCallback& callback) {
+    CompletionOnceCallback callback) {
+  DCHECK(request_info->traffic_annotation.is_valid());
   url_ = request_info->url;
-  state_.Initialize(request_info, priority, net_log, callback);
+  state_.Initialize(request_info, can_send_early, priority, net_log);
   return OK;
 }
 
 int WebSocketBasicHandshakeStream::SendRequest(
     const HttpRequestHeaders& headers,
     HttpResponseInfo* response,
-    const CompletionCallback& callback) {
+    CompletionOnceCallback callback) {
   DCHECK(!headers.HasHeader(websockets::kSecWebSocketKey));
   DCHECK(!headers.HasHeader(websockets::kSecWebSocketProtocol));
   DCHECK(!headers.HasHeader(websockets::kSecWebSocketExtensions));
@@ -364,19 +367,20 @@ int WebSocketBasicHandshakeStream::SendRequest(
   connect_delegate_->OnStartOpeningHandshake(std::move(request));
 
   return parser()->SendRequest(
-      state_.GenerateRequestLine(), enriched_headers, response, callback);
+      state_.GenerateRequestLine(), enriched_headers,
+      NetworkTrafficAnnotationTag(state_.traffic_annotation()), response,
+      std::move(callback));
 }
 
 int WebSocketBasicHandshakeStream::ReadResponseHeaders(
-    const CompletionCallback& callback) {
+    CompletionOnceCallback callback) {
   // HttpStreamParser uses a weak pointer when reading from the
   // socket, so it won't be called back after being destroyed. The
   // HttpStreamParser is owned by HttpBasicState which is owned by this object,
   // so this use of base::Unretained() is safe.
-  int rv = parser()->ReadResponseHeaders(
-      base::Bind(&WebSocketBasicHandshakeStream::ReadResponseHeadersCallback,
-                 base::Unretained(this),
-                 callback));
+  int rv = parser()->ReadResponseHeaders(base::BindOnce(
+      &WebSocketBasicHandshakeStream::ReadResponseHeadersCallback,
+      base::Unretained(this), std::move(callback)));
   if (rv == ERR_IO_PENDING)
     return rv;
   return ValidateResponse(rv);
@@ -385,8 +389,8 @@ int WebSocketBasicHandshakeStream::ReadResponseHeaders(
 int WebSocketBasicHandshakeStream::ReadResponseBody(
     IOBuffer* buf,
     int buf_len,
-    const CompletionCallback& callback) {
-  return parser()->ReadResponseBody(buf, buf_len, callback);
+    CompletionOnceCallback callback) {
+  return parser()->ReadResponseBody(buf, buf_len, std::move(callback));
 }
 
 void WebSocketBasicHandshakeStream::Close(bool not_reusable) {
@@ -481,9 +485,11 @@ std::unique_ptr<WebSocketStream> WebSocketBasicHandshakeStream::Upgrade() {
   // sure it does not touch it again before it is destroyed.
   state_.DeleteParser();
   WebSocketTransportClientSocketPool::UnlockEndpoint(state_.connection());
-  std::unique_ptr<WebSocketStream> basic_stream(
-      new WebSocketBasicStream(state_.ReleaseConnection(), state_.read_buf(),
-                               sub_protocol_, extensions_));
+  std::unique_ptr<WebSocketStream> basic_stream =
+      std::make_unique<WebSocketBasicStream>(
+          std::make_unique<WebSocketClientSocketHandleAdapter>(
+              state_.ReleaseConnection()),
+          state_.read_buf(), sub_protocol_, extensions_);
   DCHECK(extension_params_.get());
   if (extension_params_->deflate_enabled) {
     UMA_HISTOGRAM_ENUMERATION(
@@ -506,9 +512,9 @@ void WebSocketBasicHandshakeStream::SetWebSocketKeyForTesting(
 }
 
 void WebSocketBasicHandshakeStream::ReadResponseHeadersCallback(
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     int result) {
-  callback.Run(ValidateResponse(result));
+  std::move(callback).Run(ValidateResponse(result));
 }
 
 void WebSocketBasicHandshakeStream::OnFinishOpeningHandshake() {
@@ -527,7 +533,7 @@ int WebSocketBasicHandshakeStream::ValidateResponse(int rv) {
   if (rv >= 0) {
     const HttpResponseHeaders* headers = http_response_info_->headers.get();
     const int response_code = headers->response_code();
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Net.WebSocket.ResponseCode", response_code);
+    base::UmaHistogramSparse("Net.WebSocket.ResponseCode", response_code);
     switch (response_code) {
       case HTTP_SWITCHING_PROTOCOLS:
         OnFinishOpeningHandshake();

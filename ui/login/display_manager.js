@@ -33,15 +33,16 @@
 /** @const */ var SCREEN_ARC_TERMS_OF_SERVICE = 'arc-tos';
 /** @const */ var SCREEN_WRONG_HWID = 'wrong-hwid';
 /** @const */ var SCREEN_DEVICE_DISABLED = 'device-disabled';
+/** @const */ var SCREEN_UPDATE_REQUIRED = 'update-required';
 /** @const */ var SCREEN_UNRECOVERABLE_CRYPTOHOME_ERROR =
     'unrecoverable-cryptohome-error';
 /** @const */ var SCREEN_ACTIVE_DIRECTORY_PASSWORD_CHANGE =
     'ad-password-change';
+/** @const */ var SCREEN_SYNC_CONSENT = 'sync-consent';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENABLE_DEBBUGING = 'debugging';
-/** @const */ var ACCELERATOR_TOGGLE_EASY_BOOTSTRAP = 'toggle_easy_bootstrap';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
@@ -55,6 +56,7 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
 /** @const */ var ACCELERATOR_BOOTSTRAPPING_SLAVE = "bootstrapping_slave";
+/** @const */ var ACCELERATOR_DEMO_MODE = "demo_mode";
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -90,7 +92,8 @@
   USER_ADDING: 'user-adding',
   APP_LAUNCH_SPLASH: 'app-launch-splash',
   ARC_KIOSK_SPLASH: 'arc-kiosk-splash',
-  DESKTOP_USER_MANAGER: 'login-add-user'
+  DESKTOP_USER_MANAGER: 'login-add-user',
+  GAIA_SIGNIN: 'gaia-signin'
 };
 
 /* Possible lock screen enabled app activity state. */
@@ -155,7 +158,9 @@ cr.define('cr.ui.login', function() {
     SCREEN_ARC_TERMS_OF_SERVICE,
     SCREEN_WRONG_HWID,
     SCREEN_CONFIRM_PASSWORD,
-    SCREEN_FATAL_ERROR
+    SCREEN_UPDATE_REQUIRED,
+    SCREEN_FATAL_ERROR,
+    SCREEN_SYNC_CONSENT
   ];
 
   /**
@@ -183,6 +188,15 @@ cr.define('cr.ui.login', function() {
     SCREEN_OOBE_RESET,
   ];
 
+  /**
+   * Group of screens (screen IDs) where demo mode setup invocation is
+   * available.
+   * @type Array<string>
+   * @const
+   */
+  var DEMO_MODE_SETUP_AVAILABLE_SCREEN_GROUP = [
+    SCREEN_GAIA_SIGNIN,
+  ];
 
   /**
    * OOBE screens group index.
@@ -278,7 +292,33 @@ cr.define('cr.ui.login', function() {
     },
 
     set headerHidden(hidden) {
+      if (this.showingViewsBasedShelf && !hidden) {
+        // When views-based shelf is enabled, toggling header bar visibility
+        // is handled by ash. Prevent showing a duplicate header bar here.
+        return;
+      }
       $('login-header-bar').hidden = hidden;
+    },
+
+    /**
+     * The header bar should be hidden when views-based shelf is shown.
+     */
+    get showingViewsBasedShelf() {
+      var showingViewsLock = loadTimeData.valueExists('showViewsLock') &&
+          loadTimeData.getString('showViewsLock') == 'on' &&
+          (this.displayType_ == DISPLAY_TYPE.LOCK ||
+           this.displayType_ == DISPLAY_TYPE.USER_ADDING);
+      return showingViewsLock || this.showingViewsLogin;
+    },
+
+    /**
+     * Returns true if we are showing views based login screen.
+     * @return {boolean}
+     */
+    get showingViewsLogin() {
+      return loadTimeData.valueExists('showViewsLogin') &&
+          loadTimeData.getString('showViewsLogin') == 'on' &&
+          (this.displayType_ == DISPLAY_TYPE.GAIA_SIGNIN);
     },
 
     /**
@@ -399,11 +439,13 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('networkConfigRequest');
-      } else if (name == ACCELERATOR_TOGGLE_EASY_BOOTSTRAP) {
-        if (currentStepId == SCREEN_GAIA_SIGNIN)
-          chrome.send('toggleEasyBootstrap');
       } else if (name == ACCELERATOR_BOOTSTRAPPING_SLAVE) {
-          chrome.send('setOobeBootstrappingSlave');
+        chrome.send('setOobeBootstrappingSlave');
+      } else if (name == ACCELERATOR_DEMO_MODE) {
+        if (DEMO_MODE_SETUP_AVAILABLE_SCREEN_GROUP.indexOf(currentStepId) !=
+            -1) {
+          chrome.send('setupDemoMode');
+        }
       }
     },
 
@@ -528,10 +570,6 @@ cr.define('cr.ui.login', function() {
         newStep.setAttribute(
             'aria-label',
             loadTimeData.getString('signinScreenTitle'));
-      } else if (nextStepId == SCREEN_OOBE_NETWORK) {
-        newStep.setAttribute(
-            'aria-label',
-            loadTimeData.getString('networkScreenAccessibleTitle'));
       }
 
       // Default control to be focused (if specified).
@@ -621,6 +659,10 @@ cr.define('cr.ui.login', function() {
         return;
 
       var screenId = screen.id;
+      if (screenId == SCREEN_ACCOUNT_PICKER && this.showingViewsLogin) {
+        chrome.send('updateGaiaDialogVisibility', [false]);
+        return;
+      }
 
       // Make sure the screen is decorated.
       this.preloadScreen(screen);
@@ -716,6 +758,12 @@ cr.define('cr.ui.login', function() {
       // This requires |screen| to have 'box-sizing: border-box'.
       screen.style.width = width + 'px';
       screen.style.height = height + 'px';
+
+      if (this.showingViewsLogin) {
+        chrome.send('updateGaiaDialogSize', [width, height]);
+        $('scroll-container').classList.toggle('disable-scroll', true);
+        $('scroll-container').scrollTop = $('inner-container').offsetTop;
+      }
     },
 
     /**
@@ -733,6 +781,8 @@ cr.define('cr.ui.login', function() {
         if (screen.updateLocalizedContent)
           screen.updateLocalizedContent();
       }
+      var isInTabletMode = loadTimeData.getBoolean('isInTabletMode');
+      this.setTabletModeState_(isInTabletMode);
 
       var currentScreenId = this.screens_[this.currentStep_];
       var currentScreen = $(currentScreenId);
@@ -742,6 +792,18 @@ cr.define('cr.ui.login', function() {
       // so that strings are reloaded.
       // Will be reloaded if drowdown is actually shown.
       cr.ui.DropDown.refresh();
+    },
+
+    /**
+     * Updates "device in tablet mode" state when tablet mode is changed.
+     * @param {Boolean} isInTabletMode True when in tablet mode.
+     */
+    setTabletModeState_: function(isInTabletMode) {
+      for (var i = 0, screenId; screenId = this.screens_[i]; ++i) {
+        var screen = $(screenId);
+        if (screen.setTabletModeState)
+          screen.setTabletModeState(isInTabletMode);
+      }
     },
 
     /**
@@ -801,13 +863,11 @@ cr.define('cr.ui.login', function() {
      * @private
      */
     onWindowResize_: function() {
-      var currentScreenId = this.screens_[this.currentStep_];
-      var currentScreen = $(currentScreenId);
-      if (currentScreen)
-        currentScreen.onWindowResize();
-      // The account picker always needs to be notified of window size changes.
-      if (currentScreenId != SCREEN_ACCOUNT_PICKER && $(SCREEN_ACCOUNT_PICKER))
-        $(SCREEN_ACCOUNT_PICKER).onWindowResize();
+      for (var i = 0, screenId; screenId = this.screens_[i]; ++i) {
+        var screen = $(screenId);
+        if (screen.onWindowResize)
+          screen.onWindowResize();
+      }
     },
 
     /*

@@ -197,8 +197,8 @@ class VpnProviderApiTest : public ExtensionApiTest,
   void TriggerInternalRemove() {
     NetworkHandler::Get()->network_configuration_handler()->RemoveConfiguration(
         GetSingleServicePath(),
-        NetworkConfigurationObserver::SOURCE_USER_ACTION,
-        base::Bind(base::DoNothing), base::Bind(DoNothingFailureCallback));
+        NetworkConfigurationObserver::SOURCE_USER_ACTION, base::DoNothing(),
+        base::Bind(DoNothingFailureCallback));
   }
 
   // NetworkConfigurationObserver:
@@ -390,17 +390,14 @@ IN_PROC_BROWSER_TEST_F(VpnProviderApiTest, ConfigPersistence) {
   EXPECT_FALSE(DoesConfigExist(kTestConfig));
 
   base::DictionaryValue properties;
-  properties.SetStringWithoutPathExpansion(shill::kTypeProperty,
-                                           shill::kTypeVPN);
-  properties.SetStringWithoutPathExpansion(shill::kNameProperty, kTestConfig);
-  properties.SetStringWithoutPathExpansion(shill::kProviderHostProperty,
-                                           extension_id_);
-  properties.SetStringWithoutPathExpansion(shill::kObjectPathSuffixProperty,
-                                           GetKey(kTestConfig));
-  properties.SetStringWithoutPathExpansion(shill::kProviderTypeProperty,
-                                           shill::kProviderThirdPartyVpn);
-  properties.SetStringWithoutPathExpansion(shill::kProfileProperty,
-                                           kNetworkProfilePath);
+  properties.SetKey(shill::kTypeProperty, base::Value(shill::kTypeVPN));
+  properties.SetKey(shill::kNameProperty, base::Value(kTestConfig));
+  properties.SetKey(shill::kProviderHostProperty, base::Value(extension_id_));
+  properties.SetKey(shill::kObjectPathSuffixProperty,
+                    base::Value(GetKey(kTestConfig)));
+  properties.SetKey(shill::kProviderTypeProperty,
+                    base::Value(shill::kProviderThirdPartyVpn));
+  properties.SetKey(shill::kProfileProperty, base::Value(kNetworkProfilePath));
   NetworkHandler::Get()
       ->network_configuration_handler()
       ->CreateShillConfiguration(
@@ -450,8 +447,8 @@ IN_PROC_BROWSER_TEST_F(VpnProviderApiTest, CreateDisable) {
 
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile())->extension_service();
-  extension_service->DisableExtension(extension_id_,
-                                      extensions::Extension::DISABLE_NONE);
+  extension_service->DisableExtension(
+      extension_id_, extensions::disable_reason::DISABLE_USER_ACTION);
   content::RunAllPendingInMessageLoop();
   EXPECT_FALSE(DoesConfigExist(kTestConfig));
   EXPECT_FALSE(DBusThreadManager::Get()

@@ -38,7 +38,7 @@ namespace blink {
 class DOMArrayBufferView;
 class ExceptionState;
 
-class Crypto final : public GarbageCollected<Crypto>, public ScriptWrappable {
+class Crypto final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -49,10 +49,10 @@ class Crypto final : public GarbageCollected<Crypto>, public ScriptWrappable {
 
   SubtleCrypto* subtle();
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
-  Crypto() {}
+  Crypto() = default;
 
   Member<SubtleCrypto> subtle_crypto_;
 };

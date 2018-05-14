@@ -30,28 +30,35 @@
 
 #include "core/css/resolver/StyleAdjuster.h"
 
-#include "core/HTMLNames.h"
-#include "core/SVGNames.h"
+#include "core/css/StyleChangeReason.h"
+#include "core/css/resolver/StyleResolver.h"
+#include "core/css/resolver/StyleResolverState.h"
 #include "core/dom/ContainerNode.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/NodeComputedStyle.h"
-#include "core/dom/StyleChangeReason.h"
+#include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/Settings.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLPlugInElement.h"
 #include "core/html/HTMLTableCellElement.h"
-#include "core/html/HTMLTextAreaElement.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html/forms/HTMLTextAreaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
+#include "core/html_names.h"
 #include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutReplaced.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/style/ComputedStyle.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "core/svg/SVGSVGElement.h"
+#include "core/svg_names.h"
 #include "platform/Length.h"
+#include "platform/feature_policy/FeaturePolicy.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/transforms/TransformOperations.h"
 #include "platform/wtf/Assertions.h"
 
@@ -72,6 +79,17 @@ TouchAction AdjustTouchActionForElement(TouchAction touch_action,
   return touch_action;
 }
 
+// Returns true for elements that are either <img> or <svg> image or <video>
+// that are not in an image or media document; returns false otherwise.
+bool IsImageOrVideoElement(const Element* element) {
+  if ((IsHTMLImageElement(element) || IsSVGImageElement(element)) &&
+      !element->GetDocument().IsImageDocument())
+    return true;
+  if (IsHTMLVideoElement(element) && !element->GetDocument().IsMediaDocument())
+    return true;
+  return false;
+}
+
 }  // namespace
 
 static EDisplay EquivalentBlockDisplay(EDisplay display) {
@@ -83,6 +101,7 @@ static EDisplay EquivalentBlockDisplay(EDisplay display) {
     case EDisplay::kGrid:
     case EDisplay::kListItem:
     case EDisplay::kFlowRoot:
+    case EDisplay::kLayoutCustom:
       return display;
     case EDisplay::kInlineTable:
       return EDisplay::kTable;
@@ -92,6 +111,8 @@ static EDisplay EquivalentBlockDisplay(EDisplay display) {
       return EDisplay::kFlex;
     case EDisplay::kInlineGrid:
       return EDisplay::kGrid;
+    case EDisplay::kInlineLayoutCustom:
+      return EDisplay::kLayoutCustom;
 
     case EDisplay::kContents:
     case EDisplay::kInline:
@@ -129,7 +150,7 @@ static bool DoesNotInheritTextDecoration(const ComputedStyle& style,
          style.Display() == EDisplay::kWebkitInlineBox ||
          IsAtShadowBoundary(element) || style.IsFloating() ||
          style.HasOutOfFlowPosition() || IsOutermostSVGElement(element) ||
-         isHTMLRTElement(element);
+         IsHTMLRTElement(element);
 }
 
 // Certain elements (<a>, <font>) override text decoration colors.  "The font
@@ -139,7 +160,7 @@ static bool DoesNotInheritTextDecoration(const ComputedStyle& style,
 // The <a> behavior is non-standard.
 static bool OverridesTextDecorationColors(const Element* element) {
   return element &&
-         (isHTMLFontElement(element) || isHTMLAnchorElement(element));
+         (IsHTMLFontElement(element) || IsHTMLAnchorElement(element));
 }
 
 // FIXME: This helper is only needed because pseudoStyleForElement passes a null
@@ -181,7 +202,7 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
                                       HTMLElement& element) {
   // <div> and <span> are the most common elements on the web, we skip all the
   // work for them.
-  if (isHTMLDivElement(element) || isHTMLSpanElement(element))
+  if (IsHTMLDivElement(element) || IsHTMLSpanElement(element))
     return;
 
   if (IsHTMLTableCellElement(element)) {
@@ -197,13 +218,13 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     return;
   }
 
-  if (isHTMLImageElement(element)) {
-    if (toHTMLImageElement(element).IsCollapsed())
+  if (auto* image = ToHTMLImageElementOrNull(element)) {
+    if (image->IsCollapsed() || style.Display() == EDisplay::kContents)
       style.SetDisplay(EDisplay::kNone);
     return;
   }
 
-  if (isHTMLTableElement(element)) {
+  if (IsHTMLTableElement(element)) {
     // Tables never support the -webkit-* values for text-align and will reset
     // back to the default.
     if (style.GetTextAlign() == ETextAlign::kWebkitLeft ||
@@ -213,7 +234,7 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     return;
   }
 
-  if (isHTMLFrameElement(element) || isHTMLFrameSetElement(element)) {
+  if (IsHTMLFrameElement(element) || IsHTMLFrameSetElement(element)) {
     // Frames and framesets never honor position:relative or position:absolute.
     // This is necessary to fix a crash where a site tries to position these
     // objects. They also never honor display.
@@ -223,6 +244,10 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
   }
 
   if (IsHTMLFrameElementBase(element)) {
+    if (style.Display() == EDisplay::kContents) {
+      style.SetDisplay(EDisplay::kNone);
+      return;
+    }
     // Frames cannot overflow (they are always the size we ask them to be).
     // Some compositing code paths may try to draw scrollbars anyhow.
     style.SetOverflowX(EOverflow::kVisible);
@@ -230,7 +255,7 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     return;
   }
 
-  if (isHTMLRTElement(element)) {
+  if (IsHTMLRTElement(element)) {
     // Ruby text does not support float or position. This might change with
     // evolution of the specification.
     style.SetPosition(EPosition::kStatic);
@@ -238,19 +263,19 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     return;
   }
 
-  if (isHTMLLegendElement(element)) {
+  if (IsHTMLLegendElement(element) && style.Display() != EDisplay::kContents) {
     style.SetDisplay(EDisplay::kBlock);
     return;
   }
 
-  if (isHTMLMarqueeElement(element)) {
+  if (IsHTMLMarqueeElement(element)) {
     // For now, <marquee> requires an overflow clip to work properly.
     style.SetOverflowX(EOverflow::kHidden);
     style.SetOverflowY(EOverflow::kHidden);
     return;
   }
 
-  if (isHTMLTextAreaElement(element)) {
+  if (IsHTMLTextAreaElement(element)) {
     // Textarea considers overflow visible as auto.
     style.SetOverflowX(style.OverflowX() == EOverflow::kVisible
                            ? EOverflow::kAuto
@@ -258,13 +283,29 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
     style.SetOverflowY(style.OverflowY() == EOverflow::kVisible
                            ? EOverflow::kAuto
                            : style.OverflowY());
+    if (style.Display() == EDisplay::kContents)
+      style.SetDisplay(EDisplay::kNone);
     return;
   }
 
   if (IsHTMLPlugInElement(element)) {
     style.SetRequiresAcceleratedCompositingForExternalReasons(
         ToHTMLPlugInElement(element).ShouldAccelerate());
+    if (style.Display() == EDisplay::kContents)
+      style.SetDisplay(EDisplay::kNone);
     return;
+  }
+
+  if (style.Display() == EDisplay::kContents) {
+    // See https://drafts.csswg.org/css-display/#unbox-html
+    // Some of these elements are handled with other adjustments above.
+    if (IsHTMLBRElement(element) || IsHTMLWBRElement(element) ||
+        IsHTMLMeterElement(element) || IsHTMLProgressElement(element) ||
+        IsHTMLCanvasElement(element) || IsHTMLMediaElement(element) ||
+        IsHTMLInputElement(element) || IsHTMLTextAreaElement(element) ||
+        IsHTMLSelectElement(element)) {
+      style.SetDisplay(EDisplay::kNone);
+    }
   }
 }
 
@@ -383,25 +424,26 @@ static void AdjustStyleForDisplay(ComputedStyle& style,
         style.MarginAfter().IsPercentOrCalc()) {
       UseCounter::Count(document, WebFeature::kFlexboxPercentageMarginVertical);
     }
+  } else if (layout_parent_style.IsDisplayLayoutCustomBox()) {
+    // Blockify the children of a LayoutCustom.
+    style.SetDisplay(EquivalentBlockDisplay(style.Display()));
   }
 }
 
 static void AdjustEffectiveTouchAction(ComputedStyle& style,
                                        const ComputedStyle& parent_style,
-                                       Element* element) {
+                                       Element* element,
+                                       bool is_svg_root) {
   TouchAction inherited_action = parent_style.GetEffectiveTouchAction();
 
-  bool is_svg_root = element && element->IsSVGElement() &&
-                     isSVGSVGElement(*element) && element->parentNode() &&
-                     !element->parentNode()->IsSVGElement();
   bool is_replaced_canvas =
-      element && isHTMLCanvasElement(element) &&
+      element && IsHTMLCanvasElement(element) &&
       element->GetDocument().GetFrame() &&
       element->GetDocument().CanExecuteScripts(kNotAboutToExecuteScript);
   bool is_non_replaced_inline_elements =
       style.IsDisplayInlineType() &&
       !(style.IsDisplayReplacedType() || is_svg_root ||
-        isHTMLImageElement(element) || is_replaced_canvas);
+        IsHTMLImageElement(element) || is_replaced_canvas);
   bool is_table_row_or_column = style.IsDisplayTableRowOrColumnType();
   bool is_layout_object_needed =
       element && element->LayoutObjectIsNeeded(style);
@@ -471,15 +513,19 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   }
 }
 
-void StyleAdjuster::AdjustComputedStyle(
-    ComputedStyle& style,
-    const ComputedStyle& parent_style,
-    const ComputedStyle& layout_parent_style,
-    Element* element) {
-  if (style.Display() != EDisplay::kNone) {
-    if (element && element->IsHTMLElement())
-      AdjustStyleForHTMLElement(style, ToHTMLElement(*element));
+void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
+                                        Element* element) {
+  DCHECK(state.LayoutParentStyle());
+  DCHECK(state.ParentStyle());
+  ComputedStyle& style = state.MutableStyleRef();
+  const ComputedStyle& parent_style = *state.ParentStyle();
+  const ComputedStyle& layout_parent_style = *state.LayoutParentStyle();
 
+  if (style.Display() != EDisplay::kNone && element &&
+      element->IsHTMLElement()) {
+    AdjustStyleForHTMLElement(style, ToHTMLElement(*element));
+  }
+  if (style.Display() != EDisplay::kNone) {
     // Per the spec, position 'static' and 'relative' in the top layer compute
     // to 'absolute'.
     if (IsInTopLayer(element, style) &&
@@ -501,12 +547,19 @@ void StyleAdjuster::AdjustComputedStyle(
     AdjustStyleForFirstLetter(style);
 
     AdjustStyleForDisplay(style, layout_parent_style,
-                          element ? &element->GetDocument() : 0);
+                          element ? &element->GetDocument() : nullptr);
 
     // Paint containment forces a block formatting context, so we must coerce
     // from inline.  https://drafts.csswg.org/css-containment/#containment-paint
     if (style.ContainsPaint() && style.Display() == EDisplay::kInline)
       style.SetDisplay(EDisplay::kBlock);
+
+    // If this is a child of a LayoutCustom, we need the name of the parent
+    // layout function for invalidation purposes.
+    if (layout_parent_style.IsDisplayLayoutCustomBox()) {
+      style.SetDisplayLayoutCustomParentName(
+          layout_parent_style.DisplayLayoutCustomName());
+    }
   } else {
     AdjustStyleForFirstLetter(style);
   }
@@ -532,7 +585,7 @@ void StyleAdjuster::AdjustComputedStyle(
   else
     style.RestoreParentTextDecorations(parent_style);
   style.ApplyTextDecorations(
-      parent_style.VisitedDependentColor(CSSPropertyTextDecorationColor),
+      parent_style.VisitedDependentColor(GetCSSPropertyTextDecorationColor()),
       OverridesTextDecorationColors(element));
 
   // Cull out any useless layers and also repeat patterns into additional
@@ -552,33 +605,36 @@ void StyleAdjuster::AdjustComputedStyle(
 
   AdjustStyleForEditing(style);
 
+  bool is_svg_root = false;
   bool is_svg_element = element && element->IsSVGElement();
-  if (is_svg_element) {
-    // display: contents computes to inline for replaced elements and form
-    // controls, and isn't specified for other kinds of SVG content[1], so let's
-    // just do the same here for all other SVG elements.
-    //
-    // If we wouldn't do this, then we'd need to ensure that display: contents
-    // doesn't prevent SVG elements from generating a LayoutObject in
-    // SVGElement::LayoutObjectIsNeeded.
-    //
-    // [1]: https://www.w3.org/TR/SVG/painting.html#DisplayProperty
-    if (style.Display() == EDisplay::kContents)
-      style.SetDisplay(EDisplay::kInline);
 
-    // Only the root <svg> element in an SVG document fragment tree honors css
-    // position.
-    if (!(isSVGSVGElement(*element) && element->parentNode() &&
-          !element->parentNode()->IsSVGElement()))
-      style.SetPosition(ComputedStyle::InitialPosition());
+  if (is_svg_element) {
+    is_svg_root = ToSVGElement(element)->IsOutermostSVGSVGElement();
+    if (!is_svg_root) {
+      // Only the root <svg> element in an SVG document fragment tree honors css
+      // position.
+      style.SetPosition(ComputedStyleInitialValues::InitialPosition());
+    }
+
+    if (style.Display() == EDisplay::kContents &&
+        (is_svg_root ||
+         (!IsSVGSVGElement(element) && !IsSVGGElement(element) &&
+          !IsSVGUseElement(element) && !IsSVGTSpanElement(element)))) {
+      // According to the CSS Display spec[1], nested <svg> elements, <g>,
+      // <use>, and <tspan> elements are not rendered and their children are
+      // "hoisted". For other elements display:contents behaves as display:none.
+      //
+      // [1] https://drafts.csswg.org/css-display/#unbox-svg
+      style.SetDisplay(EDisplay::kNone);
+    }
 
     // SVG text layout code expects us to be a block-level style element.
-    if ((isSVGForeignObjectElement(*element) || isSVGTextElement(*element)) &&
+    if ((IsSVGForeignObjectElement(*element) || IsSVGTextElement(*element)) &&
         style.IsDisplayInlineType())
       style.SetDisplay(EDisplay::kBlock);
 
     // Columns don't apply to svg text elements.
-    if (isSVGTextElement(*element))
+    if (IsSVGTextElement(*element))
       style.ClearMultiCol();
   }
 
@@ -591,14 +647,58 @@ void StyleAdjuster::AdjustComputedStyle(
   if (style.GetPosition() == EPosition::kSticky)
     style.SetSubtreeIsSticky(true);
 
-  // If the inherited value of justify-items includes the 'legacy' keyword,
-  // 'auto' computes to the the inherited value.  Otherwise, 'auto' computes to
-  // 'normal'.
-  if (style.JustifyItemsPosition() == kItemPositionAuto) {
-    if (parent_style.JustifyItemsPositionType() == kLegacyPosition)
-      style.SetJustifyItems(parent_style.JustifyItems());
+  // If the inherited value of justify-items includes the 'legacy'
+  // keyword (plus 'left', 'right' or 'center'), 'legacy' computes to
+  // the the inherited value.  Otherwise, 'auto' computes to 'normal'.
+  if (parent_style.JustifyItemsPositionType() == ItemPositionType::kLegacy &&
+      style.JustifyItemsPosition() == ItemPosition::kLegacy) {
+    style.SetJustifyItems(parent_style.JustifyItems());
   }
 
-  AdjustEffectiveTouchAction(style, parent_style, element);
+  AdjustEffectiveTouchAction(style, parent_style, element, is_svg_root);
+
+  bool is_media_control =
+      element && element->ShadowPseudoId().StartsWith("-webkit-media-controls");
+  if (is_media_control && style.Appearance() == kNoControlPart) {
+    // For compatibility reasons if the element is a media control and the
+    // -webkit-appearance is none then we should clear the background image.
+    if (!StyleResolver::HasAuthorBackground(state)) {
+      style.MutableBackgroundInternal().ClearImage();
+    }
+  }
+
+  if (RuntimeEnabledFeatures::LayoutNGEnabled() && !style.ForceLegacyLayout()) {
+    // Form controls are not supported yet.
+    if (element && element->ShouldForceLegacyLayout()) {
+      style.SetForceLegacyLayout(true);
+    }
+
+    // TODO(layout-dev): Once LayoutNG handles inline content editable, we
+    // should get rid of following code fragment.
+    else if (style.UserModify() != EUserModify::kReadOnly ||
+             (element && element->GetDocument().InDesignMode())) {
+      style.SetForceLegacyLayout(true);
+
+      if (style.Display() == EDisplay::kInline &&
+          parent_style.UserModify() == EUserModify::kReadOnly) {
+        style.SetDisplay(EDisplay::kInlineBlock);
+      }
+    }
+  }
+
+  // If intrinsically sized images or videos are disallowed by feature policy,
+  // use default size (300 x 150) instead.
+  if (IsImageOrVideoElement(element)) {
+    if (IsSupportedInFeaturePolicy(
+            mojom::FeaturePolicyFeature::kUnsizedMedia) &&
+        element->GetDocument().GetFrame() &&
+        !element->GetDocument().GetFrame()->IsFeatureEnabled(
+            mojom::FeaturePolicyFeature::kUnsizedMedia)) {
+      if (!style.Width().IsSpecified())
+        style.SetLogicalWidth(Length(LayoutReplaced::kDefaultWidth, kFixed));
+      if (!style.Height().IsSpecified())
+        style.SetLogicalHeight(Length(LayoutReplaced::kDefaultHeight, kFixed));
+    }
+  }
 }
 }  // namespace blink

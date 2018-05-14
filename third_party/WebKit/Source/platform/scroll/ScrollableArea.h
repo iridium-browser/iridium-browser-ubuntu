@@ -27,18 +27,17 @@
 #define ScrollableArea_h
 
 #include "platform/PlatformExport.h"
-#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/Color.h"
 #include "platform/heap/Handle.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/scroll/ScrollAnimatorBase.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "platform/scroll/Scrollbar.h"
 #include "platform/wtf/MathExtras.h"
 #include "platform/wtf/Noncopyable.h"
 #include "platform/wtf/Vector.h"
-#include "public/platform/WebLayerScrollClient.h"
 
 namespace blink {
 
@@ -50,25 +49,25 @@ class LayoutObject;
 class PaintLayer;
 class PlatformChromeClient;
 class ProgrammaticScrollAnimator;
-struct ScrollAlignment;
 class ScrollAnchor;
 class ScrollAnimatorBase;
+struct SerializedAnchor;
 class SmoothScrollSequencer;
 class CompositorAnimationTimeline;
+struct WebScrollIntoViewParams;
 
 enum IncludeScrollbarsInRect {
   kExcludeScrollbars,
   kIncludeScrollbars,
 };
 
-class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
-                                       public WebLayerScrollClient {
+class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin {
   WTF_MAKE_NONCOPYABLE(ScrollableArea);
 
  public:
   static int PixelsPerLineStep(PlatformChromeClient*);
   static float MinFractionToStepWhenPaging();
-  static int MaxOverlapBetweenPages();
+  int MaxOverlapBetweenPages() const;
 
   // Convert a non-finite scroll value (Infinity, -Infinity, NaN) to 0 as
   // per http://dev.w3.org/csswg/cssom-view/#normalize-non_finite-values.
@@ -76,7 +75,7 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
     return std::isfinite(value) ? value : 0.0;
   }
 
-  virtual PlatformChromeClient* GetChromeClient() const { return 0; }
+  virtual PlatformChromeClient* GetChromeClient() const { return nullptr; }
 
   virtual SmoothScrollSequencer* GetSmoothScrollSequencer() const {
     return nullptr;
@@ -102,11 +101,7 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
   // will always be the input rect since scrolling it can't change the location
   // of content relative to the document, unlike an overflowing element.
   virtual LayoutRect ScrollIntoView(const LayoutRect& rect_in_content,
-                                    const ScrollAlignment& align_x,
-                                    const ScrollAlignment& align_y,
-                                    bool is_smooth,
-                                    ScrollType = kProgrammaticScroll,
-                                    bool is_for_scroll_sequence = false);
+                                    const WebScrollIntoViewParams& params);
 
   static bool ScrollBehaviorFromString(const String&, ScrollBehavior&);
 
@@ -215,6 +210,7 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
 
   virtual Scrollbar* HorizontalScrollbar() const { return nullptr; }
   virtual Scrollbar* VerticalScrollbar() const { return nullptr; }
+  virtual Scrollbar* CreateScrollbar(ScrollbarOrientation) { return nullptr; }
 
   virtual PaintLayer* Layer() const { return nullptr; }
 
@@ -245,6 +241,15 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
   virtual int VisibleHeight() const { return VisibleContentRect().Height(); }
   virtual int VisibleWidth() const { return VisibleContentRect().Width(); }
   virtual IntSize ContentsSize() const = 0;
+
+  // scroll snapport is the area of the scrollport that is used as the alignment
+  // container for the scroll snap areas when calculating snap positions. It's
+  // the box's scrollport contracted by its scroll-padding.
+  // https://drafts.csswg.org/css-scroll-snap-1/#scroll-padding
+  virtual LayoutRect VisibleScrollSnapportRect() const {
+    return LayoutRect(VisibleContentRect());
+  }
+
   virtual IntPoint LastKnownMousePosition() const { return IntPoint(); }
 
   virtual bool ShouldSuspendScrollAnimations() const { return true; }
@@ -255,6 +260,7 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
   // of the top-level FrameView.
   virtual IntRect ScrollableAreaBoundingBox() const = 0;
 
+  virtual CompositorElementId GetCompositorElementId() const = 0;
   virtual bool ScrollAnimatorEnabled() const { return false; }
 
   // NOTE: Only called from Internals for testing.
@@ -299,10 +305,10 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
   }
 
   virtual GraphicsLayer* LayerForContainer() const;
-  virtual GraphicsLayer* LayerForScrolling() const { return 0; }
-  virtual GraphicsLayer* LayerForHorizontalScrollbar() const { return 0; }
-  virtual GraphicsLayer* LayerForVerticalScrollbar() const { return 0; }
-  virtual GraphicsLayer* LayerForScrollCorner() const { return 0; }
+  virtual GraphicsLayer* LayerForScrolling() const { return nullptr; }
+  virtual GraphicsLayer* LayerForHorizontalScrollbar() const { return nullptr; }
+  virtual GraphicsLayer* LayerForVerticalScrollbar() const { return nullptr; }
+  virtual GraphicsLayer* LayerForScrollCorner() const { return nullptr; }
   bool HasLayerForHorizontalScrollbar() const;
   bool HasLayerForVerticalScrollbar() const;
   bool HasLayerForScrollCorner() const;
@@ -365,24 +371,38 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
 
   // Need to promptly let go of owned animator objects.
   EAGERLY_FINALIZE();
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   virtual void ClearScrollableArea();
 
+  virtual bool RestoreScrollAnchor(const SerializedAnchor&) { return false; }
   virtual ScrollAnchor* GetScrollAnchor() { return nullptr; }
 
   virtual void DidScrollWithScrollbar(ScrollbarPart, ScrollbarOrientation) {}
 
   // Returns the task runner to be used for scrollable area timers.
   // Ideally a frame-specific throttled one can be used.
-  virtual RefPtr<WebTaskRunner> GetTimerTaskRunner() const = 0;
+  virtual scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner()
+      const = 0;
 
   // Callback for compositor-side scrolling.
-  void DidScroll(const gfx::ScrollOffset&) override;
+  virtual void DidScroll(const gfx::ScrollOffset&);
 
   virtual void ScrollbarFrameRectChanged() {}
 
+  virtual ScrollbarTheme& GetPageScrollbarTheme() const = 0;
+
+  // If either direction has a non-auto mode, the other must as well.
+  void SetAutosizeScrollbarModes(ScrollbarMode vertical,
+                                 ScrollbarMode horizontal);
+
  protected:
+  // Deduces the ScrollBehavior based on the element style and the parameter set
+  // by programmatic scroll into either instant or smooth scroll.
+  static ScrollBehavior DetermineScrollBehavior(
+      ScrollBehavior behavior_from_style,
+      ScrollBehavior behavior_from_param);
+
   ScrollableArea();
 
   ScrollbarOrientation ScrollbarOrientationFromDirection(
@@ -418,7 +438,19 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
   // then reset to alpha, causing spurrious "visibilityChanged" calls.
   virtual void ScrollbarVisibilityChanged() {}
 
+  ScrollbarMode AutosizeVerticalScrollbarMode() const {
+    return autosize_vertical_scrollbar_mode_;
+  }
+  ScrollbarMode AutosizeHorizontalScrollbarMode() const {
+    return autosize_horizontal_scrollbar_mode_;
+  }
+
+  virtual bool HasBeenDisposed() const { return false; }
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(ScrollableAreaTest,
+                           PopupOverlayScrollbarShouldNotFadeOut);
+
   void ProgrammaticScrollHelper(const ScrollOffset&, ScrollBehavior, bool);
   void UserScrollHelper(const ScrollOffset&, ScrollBehavior);
 
@@ -438,6 +470,13 @@ class PLATFORM_EXPORT ScrollableArea : public GarbageCollectedMixin,
 
   std::unique_ptr<TaskRunnerTimer<ScrollableArea>>
       fade_overlay_scrollbars_timer_;
+
+  // FrameViewAutoSizeInfo controls scrollbar appearance manually rather than
+  // relying on layout. These members are used to override the
+  // ScrollableArea's ScrollbarModes as calculated from style. kScrollbarAuto
+  // disables the override.
+  ScrollbarMode autosize_vertical_scrollbar_mode_;
+  ScrollbarMode autosize_horizontal_scrollbar_mode_;
 
   unsigned scrollbar_overlay_color_theme_ : 2;
 

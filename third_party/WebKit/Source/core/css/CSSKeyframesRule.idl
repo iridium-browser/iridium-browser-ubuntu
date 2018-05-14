@@ -26,13 +26,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// https://dev.w3.org/csswg/css-animations/#interface-csskeyframesrule
+// https://drafts.csswg.org/css-animations/#interface-csskeyframesrule
 
 interface CSSKeyframesRule : CSSRule {
     attribute DOMString name;
     readonly attribute CSSRuleList cssRules;
 
-    void appendRule(DOMString rule);
+    [CallWith=ExecutionContext] void appendRule(DOMString rule);
     void deleteRule(DOMString select);
     CSSKeyframeRule? findRule(DOMString select);
 

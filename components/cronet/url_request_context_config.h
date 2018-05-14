@@ -19,10 +19,6 @@
 #include "net/http/http_network_session.h"
 #include "net/nqe/effective_connection_type.h"
 
-namespace base {
-class SequencedTaskRunner;
-}  // namespace base
-
 namespace net {
 class CertVerifier;
 class NetLog;
@@ -90,8 +86,6 @@ struct URLRequestContextConfig {
       const std::string& quic_user_agent_id,
       // Enable SPDY.
       bool enable_spdy,
-      // Enable SDCH.
-      bool enable_sdch,
       // Enable Brotli.
       bool enable_brotli,
       // Type of http cache.
@@ -103,6 +97,8 @@ struct URLRequestContextConfig {
       bool load_disable_cache,
       // Storage path for http cache and cookie storage.
       const std::string& storage_path,
+      // Accept-Language request header field.
+      const std::string& accept_language,
       // User-Agent request header field.
       const std::string& user_agent,
       // JSON encoded experimental options.
@@ -120,8 +116,7 @@ struct URLRequestContextConfig {
   // Configures |context_builder| based on |this|.
   void ConfigureURLRequestContextBuilder(
       net::URLRequestContextBuilder* context_builder,
-      net::NetLog* net_log,
-      const scoped_refptr<base::SequencedTaskRunner>& file_task_runner);
+      net::NetLog* net_log);
 
   // Enable QUIC.
   const bool enable_quic;
@@ -129,8 +124,6 @@ struct URLRequestContextConfig {
   const std::string quic_user_agent_id;
   // Enable SPDY.
   const bool enable_spdy;
-  // Enable SDCH.
-  const bool enable_sdch;
   // Enable Brotli.
   const bool enable_brotli;
   // Type of http cache.
@@ -142,6 +135,8 @@ struct URLRequestContextConfig {
   const bool load_disable_cache;
   // Storage path for http cache and cookie storage.
   const std::string storage_path;
+  // Accept-Language request header field.
+  const std::string accept_language;
   // User-Agent request header field.
   const std::string user_agent;
 
@@ -174,9 +169,6 @@ struct URLRequestContextConfig {
   std::unique_ptr<base::DictionaryValue> effective_experimental_options =
       nullptr;
 
-  // Enable reading of the network quality from the prefs.
-  bool nqe_persistent_caching_enabled;
-
   // If set, forces NQE to return the set value as the effective connection
   // type.
   base::Optional<net::EffectiveConnectionType>
@@ -188,8 +180,7 @@ struct URLRequestContextConfig {
   void ParseAndSetExperimentalOptions(
       net::URLRequestContextBuilder* context_builder,
       net::HttpNetworkSession::Params* session_params,
-      net::NetLog* net_log,
-      const scoped_refptr<base::SequencedTaskRunner>& file_task_runner);
+      net::NetLog* net_log);
 
   // Experimental options encoded as a string in a JSON format containing
   // experiments and their corresponding configuration options. The format
@@ -221,8 +212,6 @@ struct URLRequestContextConfigBuilder {
   std::string quic_user_agent_id = "";
   // Enable SPDY.
   bool enable_spdy = true;
-  // Enable SDCH.
-  bool enable_sdch = false;
   // Enable Brotli.
   bool enable_brotli = false;
   // Type of http cache.
@@ -235,6 +224,8 @@ struct URLRequestContextConfigBuilder {
   bool load_disable_cache = false;
   // Storage path for http cache and cookie storage.
   std::string storage_path = "";
+  // Accept-Language request header field.
+  std::string accept_language = "";
   // User-Agent request header field.
   std::string user_agent = "";
   // Experimental options encoded as a string in a JSON format containing

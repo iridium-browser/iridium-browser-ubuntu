@@ -7,9 +7,9 @@
 
 #include <memory>
 
+#include "ash/app_list/model/search/search_result.h"
 #include "base/macros.h"
 #include "components/omnibox/browser/autocomplete_match.h"
-#include "ui/app_list/search_result.h"
 
 class AppListControllerDelegate;
 class AutocompleteController;
@@ -22,7 +22,6 @@ class OmniboxResult : public SearchResult {
   OmniboxResult(Profile* profile,
                 AppListControllerDelegate* list_controller,
                 AutocompleteController* autocomplete_controller,
-                bool is_voice_query,
                 const AutocompleteMatch& match);
   ~OmniboxResult() override;
 
@@ -43,10 +42,7 @@ class OmniboxResult : public SearchResult {
   Profile* profile_;
   AppListControllerDelegate* list_controller_;
   AutocompleteController* autocomplete_controller_;
-  bool is_voice_query_;
   AutocompleteMatch match_;
-
-  const bool is_fullscreen_app_list_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxResult);
 };

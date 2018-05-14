@@ -6,10 +6,12 @@
 #define WebAssociatedURLLoaderImpl_h
 
 #include <memory>
+
+#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
-#include "platform/wtf/RefPtr.h"
 #include "public/web/WebAssociatedURLLoader.h"
 #include "public/web/WebAssociatedURLLoaderOptions.h"
 
@@ -22,8 +24,6 @@ class Document;
 // This class is used to implement WebFrame::createAssociatedURLLoader.
 class CORE_EXPORT WebAssociatedURLLoaderImpl final
     : public WebAssociatedURLLoader {
-  WTF_MAKE_NONCOPYABLE(WebAssociatedURLLoaderImpl);
-
  public:
   WebAssociatedURLLoaderImpl(Document*, const WebAssociatedURLLoaderOptions&);
   ~WebAssociatedURLLoaderImpl();
@@ -32,7 +32,7 @@ class CORE_EXPORT WebAssociatedURLLoaderImpl final
                           WebAssociatedURLLoaderClient*) override;
   void Cancel() override;
   void SetDefersLoading(bool) override;
-  void SetLoadingTaskRunner(blink::WebTaskRunner*) override;
+  void SetLoadingTaskRunner(base::SingleThreadTaskRunner*) override;
 
   // Called by |m_observer| to handle destruction of the Document associated
   // with the frame given to the constructor.
@@ -65,6 +65,8 @@ class CORE_EXPORT WebAssociatedURLLoaderImpl final
   // A ContextLifecycleObserver for cancelling |m_loader| when the Document
   // is detached.
   Persistent<Observer> observer_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebAssociatedURLLoaderImpl);
 };
 
 }  // namespace blink

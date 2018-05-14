@@ -54,6 +54,10 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
 
 @synthesize hoverAlpha = hoverAlpha_;
 
++ (CGFloat)insetInView:(NSView*)view {
+  return [view cr_lineWidth];
+}
+
 // For nib instantiations
 - (id)initWithCoder:(NSCoder*)decoder {
   if ((self = [super initWithCoder:decoder])) {
@@ -481,10 +485,6 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
   [innerPath stroke];
 }
 
-- (CGFloat)insetInView:(NSView*)controlView {
-  return [controlView cr_lineWidth];
-}
-
 // TODO(viettrungluu): clean this up.
 // (Private)
 - (void)getDrawParamsForFrame:(NSRect)cellFrame
@@ -492,7 +492,7 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
                    innerFrame:(NSRect*)returnInnerFrame
                     innerPath:(NSBezierPath**)returnInnerPath
                      clipPath:(NSBezierPath**)returnClipPath {
-  const CGFloat lineWidth = [self insetInView:controlView];
+  const CGFloat lineWidth = [[self class] insetInView:controlView];
   const CGFloat halfLineWidth = lineWidth / 2.0;
 
   NSRect drawFrame = NSZeroRect;
@@ -515,15 +515,16 @@ static const NSTimeInterval kAnimationHideDuration = 0.4;
     case kMiddleButtonType:
       drawFrame.size.width += 20;
       innerFrame.size.width += 2;
-      // Fallthrough
+      FALLTHROUGH;
     case kRightButtonType:
       drawFrame.origin.x -= 20;
       innerFrame.origin.x -= 2;
-      // Fallthrough
+      FALLTHROUGH;
     case kLeftButtonType:
     case kLeftButtonWithShadowType:
       drawFrame.size.width += 20;
       innerFrame.size.width += 2;
+      break;
     default:
       break;
   }

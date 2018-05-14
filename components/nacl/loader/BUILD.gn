@@ -2,8 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//build/config/features.gni")
+import("//build/config/compiler/compiler.gni")
 import("//build/config/nacl/config.gni")
+import("//components/nacl/features.gni")
 import("//services/service_manager/public/service_manifest.gni")
 import("//testing/test.gni")
 
@@ -51,7 +52,7 @@ source_set("minimal") {
 source_set("minimal_content_dummy") {
   check_includes = false
   sources = [
-    "//content/public/child/child_process_sandbox_support_linux.h",
+    "//content/public/common/common_sandbox_support_linux.h",
     "//content/public/common/main_function_params.h",
     "//content/public/common/sandbox_init.h",
   ]
@@ -68,7 +69,6 @@ source_set("loader") {
   ]
   deps = [
     "//components/nacl/common",
-    "//content/public/child",
     "//content/public/common",
     "//ppapi/shared_impl",
     "//services/service_manager/public/cpp",
@@ -128,12 +128,31 @@ if (is_linux) {
       "//ipc",
       "//mojo/edk/system",
       "//sandbox/linux:sandbox_services",
+      "//services/service_manager/sandbox",
       "//url/ipc:url_ipc",
     ]
 
     cflags = [ "-fPIE" ]
 
     ldflags = [ "-pie" ]
+
+    if (is_chromeos) {
+      # NaCl is not working with compiler-rt in ChromeOS.
+      # Force libgcc as a workaround. See https://crbug.com/761103
+      ldflags += [ "-rtlib=libgcc" ]
+
+      # Nacl crashes when enabling ThinLTO. See https://crbug.com/799642
+      # We haven't triaged down to the root cause yet. For now, disabling
+      # dead function removal from LTO optimization is a workaround, so that
+      # we can enable ThinLTO and CFI.
+      if (use_thin_lto) {
+        if (use_lld) {
+          ldflags += [ "-Wl,-mllvm,-compute-dead=false" ]
+        } else {
+          ldflags += [ "-Wl,-plugin-opt,-compute-dead=false" ]
+        }
+      }
+    }
 
     data_deps = [
       "//native_client/src/trusted/service_runtime/linux:bootstrap",
@@ -188,6 +207,7 @@ if (is_win && target_cpu == "x86" && current_cpu == "x64") {
       "//content/public/common:static_switches",
       "//mojo/edk/system",
       "//sandbox",
+      "//services/service_manager/sandbox:sandbox",
     ]
   }
 }
@@ -228,6 +248,7 @@ if (is_nacl_nonsfi) {
       "//ppapi/proxy",
       "//sandbox/linux:sandbox",
       "//services/service_manager/public/cpp",
+      "//services/service_manager/sandbox",
     ]
   }
 

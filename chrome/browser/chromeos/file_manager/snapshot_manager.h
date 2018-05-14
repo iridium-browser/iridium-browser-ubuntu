@@ -7,9 +7,8 @@
 
 #include <stdint.h>
 
-#include <deque>
-
 #include "base/callback_forward.h"
+#include "base/containers/circular_deque.h"
 #include "base/files/file.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -73,10 +72,10 @@ class SnapshotManager {
       base::File::Error result,
       const base::File::Info& file_info,
       const base::FilePath& platform_path,
-      const scoped_refptr<storage::ShareableFileReference>& file_ref);
+      scoped_refptr<storage::ShareableFileReference> file_ref);
 
   Profile* profile_;
-  std::deque<FileReferenceWithSizeInfo> file_refs_;
+  base::circular_deque<FileReferenceWithSizeInfo> file_refs_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

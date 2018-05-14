@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/supports_user_data.h"
@@ -14,24 +15,34 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_factory.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/event_target.h"
+#include "ui/events/system_input_injector.h"
 #include "ui/gfx/geometry/point.h"
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/client_native_pixmap_factory_ozone.h"
-
-namespace gfx {
-class ClientNativePixmapFactory;
-}
 #endif
+
+namespace base {
+class UnguessableToken;
+}
+
+namespace mojo {
+template <typename MojoInterface>
+class InterfacePtr;
+}
 
 namespace ui {
 class ContextFactory;
 class ContextFactoryPrivate;
 class PlatformEventSource;
+namespace mojom {
+class WindowTreeClient;
+}
 }
 namespace aura {
 namespace test {
 class EnvTestHelper;
+class EnvWindowTreeClientSetter;
 }
 
 class EnvInputStateController;
@@ -46,6 +57,7 @@ class WindowTreeHost;
 // A singleton object that tracks general state within Aura.
 class AURA_EXPORT Env : public ui::EventTarget,
                         public ui::OSExchangeDataProviderFactory::Factory,
+                        public ui::SystemInputInjectorFactory,
                         public base::SupportsUserData {
  public:
   enum class Mode {
@@ -100,6 +112,11 @@ class AURA_EXPORT Env : public ui::EventTarget,
   }
   ui::ContextFactory* context_factory() { return context_factory_; }
 
+  void set_throttle_input_on_resize_for_testing(bool throttle_input) {
+    throttle_input_on_resize_ = throttle_input;
+  }
+  bool throttle_input_on_resize() const { return throttle_input_on_resize_; }
+
   void set_context_factory_private(
       ui::ContextFactoryPrivate* context_factory_private) {
     context_factory_private_ = context_factory_private;
@@ -112,8 +129,15 @@ class AURA_EXPORT Env : public ui::EventTarget,
   void SetWindowTreeClient(WindowTreeClient* window_tree_client);
   bool HasWindowTreeClient() const { return window_tree_client_ != nullptr; }
 
+  // Schedules an embed of a client. See
+  // mojom::WindowTreeClient::ScheduleEmbed() for details.
+  void ScheduleEmbed(
+      mojo::InterfacePtr<ui::mojom::WindowTreeClient> client,
+      base::OnceCallback<void(const base::UnguessableToken&)> callback);
+
  private:
   friend class test::EnvTestHelper;
+  friend class test::EnvWindowTreeClientSetter;
   friend class EventInjector;
   friend class MusMouseLocationUpdater;
   friend class Window;
@@ -128,6 +152,10 @@ class AURA_EXPORT Env : public ui::EventTarget,
   // Mus instances. We can't do this work in Init(), because our mode may
   // changed via the EnvTestHelper.
   void EnableMusOSExchangeDataProvider();
+
+  // After calling this method, all SystemInputInjectors will go through mus
+  // instead of ozone.
+  void EnableMusOverrideInputInjector();
 
   // Called by the Window when it is initialized. Notifies observers.
   void NotifyWindowInitialized(Window* window);
@@ -148,6 +176,9 @@ class AURA_EXPORT Env : public ui::EventTarget,
 
   // Overridden from ui::OSExchangeDataProviderFactory::Factory:
   std::unique_ptr<ui::OSExchangeData::Provider> BuildProvider() override;
+
+  // Overridden from SystemInputInjectorFactory:
+  std::unique_ptr<ui::SystemInputInjector> CreateSystemInputInjector() override;
 
   // This is not const for tests, which may share Env across tests and so needs
   // to reset the value.
@@ -171,15 +202,11 @@ class AURA_EXPORT Env : public ui::EventTarget,
   bool always_use_last_mouse_location_ = false;
   // Whether we set ourselves as the OSExchangeDataProviderFactory.
   bool is_os_exchange_data_provider_factory_ = false;
+  // Whether we set ourselves as the SystemInputInjectorFactory.
+  bool is_override_input_injector_factory_ = false;
 
   std::unique_ptr<InputStateLookup> input_state_lookup_;
   std::unique_ptr<ui::PlatformEventSource> event_source_;
-
-#if defined(USE_OZONE)
-  // Factory for pixmaps that can use be transported from the client to the GPU
-  // process using a low-level ozone-provided platform specific mechanism.
-  std::unique_ptr<gfx::ClientNativePixmapFactory> native_pixmap_factory_;
-#endif
 
   ui::ContextFactory* context_factory_;
   ui::ContextFactoryPrivate* context_factory_private_;
@@ -187,6 +214,8 @@ class AURA_EXPORT Env : public ui::EventTarget,
   // This is set to true when the WindowTreeClient is destroyed. It triggers
   // creating a different WindowPort implementation.
   bool in_mus_shutdown_ = false;
+
+  bool throttle_input_on_resize_ = true;
 
   DISALLOW_COPY_AND_ASSIGN(Env);
 };

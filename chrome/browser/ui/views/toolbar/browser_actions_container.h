@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/optional.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
@@ -108,10 +109,32 @@ class BrowserActionsContainer : public views::View,
                                 public ToolbarActionView::Delegate,
                                 public views::WidgetObserver {
  public:
+  class Delegate {
+   public:
+    // Returns the view of the toolbar actions overflow menu to use as a
+    // reference point for a popup when this view isn't visible.
+    virtual views::MenuButton* GetOverflowReferenceView() = 0;
+
+    // Returns the maximum width the browser actions container can have. An
+    // empty value means there is no maximum.
+    virtual base::Optional<int> GetMaxBrowserActionsWidth() const = 0;
+
+    // Creates a ToolbarActionsBar for the BrowserActionsContainer to use.
+    virtual std::unique_ptr<ToolbarActionsBar> CreateToolbarActionsBar(
+        ToolbarActionsBarDelegate* delegate,
+        Browser* browser,
+        ToolbarActionsBar* main_bar) const = 0;
+  };
+
   // Constructs a BrowserActionContainer for a particular |browser| object. For
   // documentation of |main_container|, see class comments.
+  //
+  // |interactive| determines whether the bar can be dragged to resize it or do
+  // drag and drop.
   BrowserActionsContainer(Browser* browser,
-                          BrowserActionsContainer* main_container);
+                          BrowserActionsContainer* main_container,
+                          Delegate* delegate,
+                          bool interactive = true);
   ~BrowserActionsContainer() override;
 
   // Get the number of toolbar actions being displayed.
@@ -119,6 +142,8 @@ class BrowserActionsContainer : public views::View,
 
   // Returns the browser this container is associated with.
   Browser* browser() const { return browser_; }
+
+  Delegate* delegate() { return delegate_; }
 
   ToolbarActionsBar* toolbar_actions_bar() {
     return toolbar_actions_bar_.get();
@@ -235,6 +260,8 @@ class BrowserActionsContainer : public views::View,
     return toolbar_actions_bar_->platform_settings();
   }
 
+  Delegate* const delegate_ = nullptr;
+
   // The controlling ToolbarActionsBar, which handles most non-view logic.
   std::unique_ptr<ToolbarActionsBar> toolbar_actions_bar_;
 
@@ -242,7 +269,7 @@ class BrowserActionsContainer : public views::View,
   ToolbarActionViews toolbar_action_views_;
 
   // The Browser object the container is associated with.
-  Browser* browser_;
+  Browser* const browser_;
 
   // The main container we are serving as overflow for, or NULL if this
   // class is the the main container. See class comments for details on
@@ -250,7 +277,7 @@ class BrowserActionsContainer : public views::View,
   BrowserActionsContainer* main_container_;
 
   // The resize area for the container.
-  views::ResizeArea* resize_area_;
+  views::ResizeArea* resize_area_ = nullptr;
 
   // The painter used when we are highlighting a subset of extensions.
   std::unique_ptr<views::Painter> warning_highlight_painter_;
@@ -259,27 +286,30 @@ class BrowserActionsContainer : public views::View,
   std::unique_ptr<gfx::SlideAnimation> resize_animation_;
 
   // True if the container has been added to the parent view.
-  bool added_to_view_;
+  bool added_to_view_ = false;
 
   // When the container is resizing, this is the width at which it started.
   // If the container is not resizing, -1.
-  int resize_starting_width_;
+  int resize_starting_width_ = -1;
 
   // This is used while the user is resizing (and when the animations are in
   // progress) to know how wide the delta is between the current state and what
   // we should draw.
-  int resize_amount_;
+  int resize_amount_ = 0;
 
   // Keeps track of the absolute pixel width the container should have when we
   // are done animating.
-  int animation_target_size_;
+  int animation_target_size_ = 0;
 
   // The DropPosition for the current drag-and-drop operation, or NULL if there
   // is none.
   std::unique_ptr<DropPosition> drop_position_;
 
+  // Whether the container can be interacted with (e.g drag/drop, resize).
+  const bool interactive_ = true;
+
   // The extension bubble that is actively showing, if any.
-  views::BubbleDialogDelegateView* active_bubble_;
+  views::BubbleDialogDelegateView* active_bubble_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainer);
 };

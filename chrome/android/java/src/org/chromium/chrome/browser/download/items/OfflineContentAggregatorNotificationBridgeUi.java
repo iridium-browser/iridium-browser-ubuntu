@@ -70,9 +70,6 @@ public class OfflineContentAggregatorNotificationBridgeUi
 
     // OfflineContentProvider.Observer implementation.
     @Override
-    public void onItemsAvailable() {}
-
-    @Override
     public void onItemsAdded(ArrayList<OfflineItem> items) {
         for (int i = 0; i < items.size(); i++) {
             OfflineItem item = items.get(i);
@@ -120,7 +117,7 @@ public class OfflineContentAggregatorNotificationBridgeUi
 
     @Override
     public void resumeDownload(ContentId id, DownloadItem item, boolean hasUserGesture) {
-        mProvider.resumeDownload(id);
+        mProvider.resumeDownload(id, hasUserGesture);
     }
 
     @Override
@@ -163,7 +160,7 @@ public class OfflineContentAggregatorNotificationBridgeUi
                 break;
             case OfflineItemState.INTERRUPTED:
                 // TODO(dtrainor): Push the correct value for auto resume.
-                mUi.notifyDownloadInterrupted(info, true);
+                mUi.notifyDownloadInterrupted(info, true, item.pendingState);
                 break;
             case OfflineItemState.PAUSED:
                 mUi.notifyDownloadPaused(info);

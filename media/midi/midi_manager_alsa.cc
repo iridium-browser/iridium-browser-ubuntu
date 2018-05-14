@@ -17,7 +17,6 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/safe_strerror.h"
@@ -244,10 +243,7 @@ void MidiManagerAlsa::StartInitialization() {
   }
 
   // Initialize decoder.
-  snd_midi_event_t* tmp_decoder = nullptr;
-  snd_midi_event_new(0, &tmp_decoder);
-  ScopedSndMidiEventPtr decoder(tmp_decoder);
-  tmp_decoder = nullptr;
+  ScopedSndMidiEventPtr decoder = CreateScopedSndMidiEventPtr(0);
   snd_midi_event_no_status(decoder.get(), 1);
 
   // Initialize udev and monitor.
@@ -323,20 +319,12 @@ void MidiManagerAlsa::Finalize() {
 void MidiManagerAlsa::DispatchSendMidiData(MidiManagerClient* client,
                                            uint32_t port_index,
                                            const std::vector<uint8_t>& data,
-                                           double timestamp) {
-  base::TimeDelta delay;
-  if (timestamp != 0.0) {
-    base::TimeTicks time_to_send =
-        base::TimeTicks() + base::TimeDelta::FromMicroseconds(
-                                timestamp * base::Time::kMicrosecondsPerSecond);
-    delay = std::max(time_to_send - base::TimeTicks::Now(), base::TimeDelta());
-  }
-
+                                           base::TimeTicks timestamp) {
   service()->task_service()->PostBoundDelayedTask(
       kSendTaskRunner,
       base::BindOnce(&MidiManagerAlsa::SendMidiData, base::Unretained(this),
                      client, port_index, data),
-      delay);
+      MidiService::TimestampToTimeDeltaDelay(timestamp));
 }
 
 MidiManagerAlsa::MidiPort::Id::Id() = default;
@@ -631,7 +619,7 @@ void MidiManagerAlsa::AlsaSeqState::ClientStart(int client_id,
                                                 snd_seq_client_type_t type) {
   ClientExit(client_id);
   clients_.insert(
-      std::make_pair(client_id, base::MakeUnique<Client>(client_name, type)));
+      std::make_pair(client_id, std::make_unique<Client>(client_name, type)));
   if (IsCardClient(type, client_id))
     ++card_client_count_;
 }
@@ -658,7 +646,7 @@ void MidiManagerAlsa::AlsaSeqState::PortStart(
   auto it = clients_.find(client_id);
   if (it != clients_.end())
     it->second->AddPort(port_id,
-                        base::MakeUnique<Port>(port_name, direction, midi));
+                        std::make_unique<Port>(port_name, direction, midi));
 }
 
 void MidiManagerAlsa::AlsaSeqState::PortExit(int client_id, int port_id) {
@@ -731,13 +719,13 @@ MidiManagerAlsa::AlsaSeqState::ToMidiPortState(const AlsaCardMap& alsa_cards) {
         PortDirection direction = port->direction();
         if (direction == PortDirection::kInput ||
             direction == PortDirection::kDuplex) {
-          midi_ports->push_back(base::MakeUnique<MidiPort>(
+          midi_ports->push_back(std::make_unique<MidiPort>(
               path, id, client_id, port_id, midi_device, client->name(),
               port->name(), manufacturer, version, MidiPort::Type::kInput));
         }
         if (direction == PortDirection::kOutput ||
             direction == PortDirection::kDuplex) {
-          midi_ports->push_back(base::MakeUnique<MidiPort>(
+          midi_ports->push_back(std::make_unique<MidiPort>(
               path, id, client_id, port_id, midi_device, client->name(),
               port->name(), manufacturer, version, MidiPort::Type::kOutput));
         }
@@ -856,11 +844,10 @@ std::string MidiManagerAlsa::AlsaCard::ExtractManufacturerString(
 void MidiManagerAlsa::SendMidiData(MidiManagerClient* client,
                                    uint32_t port_index,
                                    const std::vector<uint8_t>& data) {
-  snd_midi_event_t* encoder;
-  snd_midi_event_new(kSendBufferSize, &encoder);
+  ScopedSndMidiEventPtr encoder = CreateScopedSndMidiEventPtr(kSendBufferSize);
   for (const auto datum : data) {
     snd_seq_event_t event;
-    int result = snd_midi_event_encode_byte(encoder, datum, &event);
+    int result = snd_midi_event_encode_byte(encoder.get(), datum, &event);
     if (result == 1) {
       // Full event, send it.
       base::AutoLock lock(out_ports_lock_);
@@ -876,7 +863,6 @@ void MidiManagerAlsa::SendMidiData(MidiManagerClient* client,
       }
     }
   }
-  snd_midi_event_free(encoder);
 
   // Acknowledge send.
   AccumulateMidiBytesSent(client, data.size());
@@ -898,8 +884,7 @@ void MidiManagerAlsa::EventLoop() {
     if (pfd[0].revents & POLLIN) {
       // Read available incoming MIDI data.
       int remaining;
-      double timestamp =
-          (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF();
+      base::TimeTicks timestamp = base::TimeTicks::Now();
       do {
         snd_seq_event_t* event;
         err = snd_seq_event_input(in_client_.get(), &event);
@@ -966,7 +951,7 @@ void MidiManagerAlsa::EventLoop() {
 }
 
 void MidiManagerAlsa::ProcessSingleEvent(snd_seq_event_t* event,
-                                         double timestamp) {
+                                         base::TimeTicks timestamp) {
   auto source_it =
       source_map_.find(AddrToInt(event->source.client, event->source.port));
   if (source_it != source_map_.end()) {
@@ -1389,10 +1374,15 @@ bool MidiManagerAlsa::Subscribe(uint32_t port_index,
   return true;
 }
 
-#if !defined(OS_CHROMEOS)
+MidiManagerAlsa::ScopedSndMidiEventPtr
+MidiManagerAlsa::CreateScopedSndMidiEventPtr(size_t size) {
+  snd_midi_event_t* coder;
+  snd_midi_event_new(size, &coder);
+  return ScopedSndMidiEventPtr(coder);
+}
+
 MidiManager* MidiManager::Create(MidiService* service) {
   return new MidiManagerAlsa(service);
 }
-#endif
 
 }  // namespace midi

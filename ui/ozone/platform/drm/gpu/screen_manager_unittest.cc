@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "base/files/platform_file.h"
 #include "base/macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/ozone/platform/drm/gpu/crtc_controller.h"
@@ -20,9 +21,6 @@
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
 
 namespace {
-
-void EmptySwapCallback(gfx::SwapResult) {
-}
 
 // Create a basic mode for a 6x4 screen.
 const drmModeModeInfo kDefaultMode =
@@ -503,8 +501,9 @@ TEST_F(ScreenManagerTest, EnableControllerWhenWindowHasBuffer) {
   scoped_refptr<ui::ScanoutBuffer> buffer = buffer_generator_->Create(
       drm_, DRM_FORMAT_XRGB8888, GetPrimaryBounds().size());
   window->SchedulePageFlip(
-      std::vector<ui::OverlayPlane>(1, ui::OverlayPlane(buffer)),
-      base::Bind(&EmptySwapCallback));
+      std::vector<ui::OverlayPlane>(
+          1, ui::OverlayPlane(buffer, base::kInvalidPlatformFile)),
+      base::DoNothing());
   screen_manager_->AddWindow(1, std::move(window));
 
   screen_manager_->AddDisplayController(drm_, kPrimaryCrtc, kPrimaryConnector);
@@ -529,8 +528,9 @@ TEST_F(ScreenManagerTest, RejectBufferWithIncompatibleModifiers) {
                                             GetPrimaryBounds().size());
 
   window->SchedulePageFlip(
-      std::vector<ui::OverlayPlane>(1, ui::OverlayPlane(buffer)),
-      base::Bind(&EmptySwapCallback));
+      std::vector<ui::OverlayPlane>(
+          1, ui::OverlayPlane(buffer, base::kInvalidPlatformFile)),
+      base::DoNothing());
   screen_manager_->AddWindow(1, std::move(window));
 
   screen_manager_->AddDisplayController(drm_, kPrimaryCrtc, kPrimaryConnector);

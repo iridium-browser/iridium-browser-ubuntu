@@ -16,19 +16,19 @@ class PersistentNotificationHandler : public NotificationHandler {
   ~PersistentNotificationHandler() override;
 
   // NotificationHandler implementation.
-  void OnShow(Profile* profile, const std::string& notification_id) override;
   void OnClose(Profile* profile,
-               const std::string& origin,
+               const GURL& origin,
                const std::string& notification_id,
-               bool by_user) override;
+               bool by_user,
+               base::OnceClosure completed_closure) override;
   void OnClick(Profile* profile,
-               const std::string& origin,
+               const GURL& origin,
                const std::string& notification_id,
-               int action_index,
-               const base::NullableString16& reply) override;
-  void OpenSettings(Profile* profile) override;
-  bool ShouldDisplayOnFullScreen(Profile* profile,
-                                 const std::string& origin) override;
+               const base::Optional<int>& action_index,
+               const base::Optional<base::string16>& reply,
+               base::OnceClosure completed_closure) override;
+  void DisableNotifications(Profile* profile, const GURL& origin) override;
+  void OpenSettings(Profile* profile, const GURL& origin) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PersistentNotificationHandler);

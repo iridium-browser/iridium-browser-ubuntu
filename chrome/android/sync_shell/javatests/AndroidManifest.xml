@@ -17,7 +17,8 @@
         android:label="ChromeSyncShellTest">
         <uses-library android:name="android.test.runner" />
     </application>
-    <instrumentation android:name="org.chromium.chrome.test.ChromeInstrumentationTestRunner"
+    <instrumentation android:name="org.chromium.base.test.BaseChromiumAndroidJUnitRunner"
         android:targetPackage="{{manifest_package}}"
-        android:label="Tests for {{manifest_package}}"/>
+        android:label="Tests for {{manifest_package}}"
+        chromium-junit4="true"/>
 </manifest>

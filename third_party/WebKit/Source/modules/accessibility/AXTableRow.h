@@ -29,6 +29,7 @@
 #ifndef AXTableRow_h
 #define AXTableRow_h
 
+#include "base/macros.h"
 #include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
@@ -36,8 +37,6 @@ namespace blink {
 class AXObjectCacheImpl;
 
 class MODULES_EXPORT AXTableRow : public AXLayoutObject {
-  WTF_MAKE_NONCOPYABLE(AXTableRow);
-
  protected:
   AXTableRow(LayoutObject*, AXObjectCacheImpl&);
 
@@ -45,7 +44,7 @@ class MODULES_EXPORT AXTableRow : public AXLayoutObject {
   static AXTableRow* Create(LayoutObject*, AXObjectCacheImpl&);
   ~AXTableRow() override;
 
-  void AddChildren() final;
+  void AddChildren() override;
   bool IsTableRow() const final;
 
   // retrieves the "row" header (a th tag in the rightmost column)
@@ -53,7 +52,8 @@ class MODULES_EXPORT AXTableRow : public AXLayoutObject {
   // Retrieves the "row" headers (th, scope) from left to right for the each
   // row.
   virtual void HeaderObjectsForRow(AXObjectVector&);
-  AXObject* ParentTable() const;
+  virtual AXObject* ParentTable() const;
+  virtual const AXObjectVector& Cells() { return Children(); }
 
   void SetRowIndex(int row_index) { row_index_ = row_index; }
   int RowIndex() const { return row_index_; }
@@ -61,15 +61,16 @@ class MODULES_EXPORT AXTableRow : public AXLayoutObject {
   unsigned AriaColumnIndex() const;
   unsigned AriaRowIndex() const;
 
-  virtual bool CanSetSelectedAttribute() const { return false; }
-
  protected:
   AccessibilityRole DetermineAccessibilityRole() final;
+  virtual bool CanSetSelectedAttribute() const { return false; }
 
  private:
   int row_index_;
 
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const final;
+
+  DISALLOW_COPY_AND_ASSIGN(AXTableRow);
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXTableRow, IsTableRow());

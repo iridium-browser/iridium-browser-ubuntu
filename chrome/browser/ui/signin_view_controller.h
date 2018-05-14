@@ -11,29 +11,53 @@
 class Browser;
 class SigninViewControllerDelegate;
 
+namespace content {
+class WebContents;
+}
+
+namespace login_ui_test_utils {
+class SigninViewControllerTestUtil;
+}
+
 namespace signin_metrics {
 enum class AccessPoint;
 }
 
-// Class responsible for showing and hiding the Signin and Sync Confirmation
-// tab-modal dialogs.
+// Class responsible for showing and hiding all sign-in related UIs
+// (modal sign-in, DICE full-tab sign-in page, sync confirmation dialog, sign-in
+// error dialog).
 class SigninViewController {
  public:
   SigninViewController();
   virtual ~SigninViewController();
 
-  // Returns true if the signin flow should be shown as tab-modal for |mode|.
-  static bool ShouldShowModalSigninForMode(profiles::BubbleViewMode mode);
+  // Returns true if the signin flow should be shown for |mode|.
+  static bool ShouldShowSigninForMode(profiles::BubbleViewMode mode);
 
-  // Shows the signin flow as a tab modal dialog attached to |browser|'s active
-  // web contents.
+  // Shows the signin attached to |browser|'s active web contents.
   // |access_point| indicates the access point used to open the Gaia sign in
   // page.
-  void ShowModalSignin(profiles::BubbleViewMode mode,
-                       Browser* browser,
-                       signin_metrics::AccessPoint access_point);
+  void ShowSignin(profiles::BubbleViewMode mode,
+                  Browser* browser,
+                  signin_metrics::AccessPoint access_point);
+
+  // Shows the DICE-specific sign-in flow: opens a Gaia sign-in webpage in a new
+  // tab attached to |browser|.
+  void ShowDiceSigninTab(profiles::BubbleViewMode mode,
+                         Browser* browser,
+                         signin_metrics::AccessPoint access_point,
+                         const std::string& email);
+
+  // Shows the modal sync confirmation dialog as a browser-modal dialog on top
+  // of the |browser|'s window.
   void ShowModalSyncConfirmationDialog(Browser* browser);
+
+  // Shows the modal sign-in error dialog as a browser-modal dialog on top of
+  // the |browser|'s window.
   void ShowModalSigninErrorDialog(Browser* browser);
+
+  // Returns true if the modal dialog is shown.
+  bool ShowsModalDialog();
 
   // Closes the tab-modal signin flow previously shown using this
   // SigninViewController, if one exists. Does nothing otherwise.
@@ -42,16 +66,29 @@ class SigninViewController {
   // Sets the height of the modal signin dialog.
   void SetModalSigninHeight(int height);
 
-  // Notifies this object that it's |signin_view_controller_delegate_|
-  // member has become invalid.
+  // Either navigates back in the signin flow if the history state allows it or
+  // closes the flow otherwise.
+  // Does nothing if the signin flow does not exist.
+  void PerformNavigation();
+
+  // Notifies this object that it's |delegate_| member has become invalid.
   void ResetModalSigninDelegate();
 
-  SigninViewControllerDelegate* delegate() {
-    return signin_view_controller_delegate_;
-  }
-
  private:
-  SigninViewControllerDelegate* signin_view_controller_delegate_;
+  friend class login_ui_test_utils::SigninViewControllerTestUtil;
+
+  // Shows the signin flow as a tab modal dialog attached to |browser|'s active
+  // web contents.
+  // |access_point| indicates the access point used to open the Gaia sign in
+  // page.
+  void ShowModalSigninDialog(profiles::BubbleViewMode mode,
+                             Browser* browser,
+                             signin_metrics::AccessPoint access_point);
+
+  // Returns the web contents of the modal dialog.
+  content::WebContents* GetModalDialogWebContentsForTesting();
+
+  SigninViewControllerDelegate* delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninViewController);
 };

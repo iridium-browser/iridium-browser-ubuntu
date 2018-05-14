@@ -7,7 +7,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/default_clock.h"
@@ -16,7 +15,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media/router/discovery/dial/dial_device_data.h"
 #include "chrome/browser/media/router/discovery/dial/dial_service.h"
-#include "components/net_log/chrome_net_log.h"
 #include "content/public/browser/browser_thread.h"
 
 using base::Time;
@@ -47,7 +45,7 @@ DialRegistry::DialRegistry()
       refresh_interval_delta_(TimeDelta::FromSeconds(kDialRefreshIntervalSecs)),
       expiration_delta_(TimeDelta::FromSeconds(kDialExpirationSecs)),
       max_devices_(kDialMaxDevices),
-      clock_(new base::DefaultClock()) {
+      clock_(base::DefaultClock::GetInstance()) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_GT(max_devices_, 0U);
   // This is a leaky singleton, so there's no code to remove |this| as an
@@ -65,9 +63,14 @@ DialRegistry* DialRegistry::GetInstance() {
                          base::LeakySingletonTraits<DialRegistry>>::get();
 }
 
+void DialRegistry::SetNetLog(net::NetLog* net_log) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!net_log_)
+    net_log_ = net_log;
+}
+
 std::unique_ptr<DialService> DialRegistry::CreateDialService() {
-  DCHECK(g_browser_process->net_log());
-  return base::MakeUnique<DialServiceImpl>(g_browser_process->net_log());
+  return std::make_unique<DialServiceImpl>(net_log_);
 }
 
 void DialRegistry::ClearDialService() {
@@ -115,15 +118,15 @@ GURL DialRegistry::GetDeviceDescriptionURL(const std::string& label) const {
 
 void DialRegistry::AddDeviceForTest(const DialDeviceData& device_data) {
   std::unique_ptr<DialDeviceData> test_data =
-      base::MakeUnique<DialDeviceData>(device_data);
+      std::make_unique<DialDeviceData>(device_data);
   device_by_label_map_.insert(
       std::make_pair(device_data.label(), test_data.get()));
   device_by_id_map_.insert(
       std::make_pair(device_data.device_id(), std::move(test_data)));
 }
 
-void DialRegistry::SetClockForTest(std::unique_ptr<base::Clock> clock) {
-  clock_ = std::move(clock);
+void DialRegistry::SetClockForTest(base::Clock* clock) {
+  clock_ = clock;
 }
 
 bool DialRegistry::ReadyToDiscover() {
@@ -283,7 +286,7 @@ void DialRegistry::OnDeviceDiscovered(DialService* service,
   // Adds |device| to our list of devices or updates an existing device, unless
   // |device| is a duplicate. Returns true if the list was modified and
   // increments the list generation.
-  auto device_data = base::MakeUnique<DialDeviceData>(device);
+  auto device_data = std::make_unique<DialDeviceData>(device);
   DCHECK(!device_data->device_id().empty());
   DCHECK(device_data->label().empty());
 

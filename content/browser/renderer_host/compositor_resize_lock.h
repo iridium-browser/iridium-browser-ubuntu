@@ -30,8 +30,7 @@ class CompositorResizeLockClient {
 };
 
 // Used to prevent further resizes while a resize is pending.
-class CONTENT_EXPORT CompositorResizeLock
-    : NON_EXPORTED_BASE(public ui::CompositorLockClient) {
+class CONTENT_EXPORT CompositorResizeLock : public ui::CompositorLockClient {
  public:
   CompositorResizeLock(CompositorResizeLockClient* client,
                        const gfx::Size& new_size);
@@ -59,6 +58,7 @@ class CONTENT_EXPORT CompositorResizeLock
   std::unique_ptr<ui::CompositorLock> compositor_lock_;
   bool unlocked_ = false;
   bool timed_out_ = false;
+  const base::TimeTicks acquisition_time_;
 
   DISALLOW_COPY_AND_ASSIGN(CompositorResizeLock);
 };

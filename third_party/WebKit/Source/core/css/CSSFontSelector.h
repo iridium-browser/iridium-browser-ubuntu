@@ -28,6 +28,7 @@
 
 #include "core/CoreExport.h"
 #include "core/css/FontFaceCache.h"
+#include "core/dom/Document.h"
 #include "platform/fonts/FontSelector.h"
 #include "platform/fonts/GenericFontFamilySettings.h"
 #include "platform/heap/Handle.h"
@@ -37,8 +38,6 @@
 
 namespace blink {
 
-class CSSFontSelectorClient;
-class Document;
 class FontDescription;
 
 class CORE_EXPORT CSSFontSelector : public FontSelector {
@@ -52,8 +51,8 @@ class CORE_EXPORT CSSFontSelector : public FontSelector {
 
   void ReportNotDefGlyph() const override;
 
-  PassRefPtr<FontData> GetFontData(const FontDescription&,
-                                   const AtomicString&) override;
+  scoped_refptr<FontData> GetFontData(const FontDescription&,
+                                      const AtomicString&) override;
   void WillUseFontData(const FontDescription&,
                        const AtomicString& family,
                        const String& text) override;
@@ -61,25 +60,25 @@ class CORE_EXPORT CSSFontSelector : public FontSelector {
                     const AtomicString& family_name,
                     const FontDataForRangeSet&) override;
   bool IsPlatformFamilyMatchAvailable(const FontDescription&,
-                                      const AtomicString& family);
+                                      const AtomicString& family) override;
 
-  void FontFaceInvalidated();
+  void FontFaceInvalidated() override;
 
   // FontCacheClient implementation
   void FontCacheInvalidated() override;
 
-  void RegisterForInvalidationCallbacks(CSSFontSelectorClient*);
-  void UnregisterForInvalidationCallbacks(CSSFontSelectorClient*);
+  void RegisterForInvalidationCallbacks(FontSelectorClient*) override;
+  void UnregisterForInvalidationCallbacks(FontSelectorClient*) override;
 
-  Document* GetDocument() const { return document_; }
-  FontFaceCache* GetFontFaceCache() { return &font_face_cache_; }
+  ExecutionContext* GetExecutionContext() const override { return document_; }
+  FontFaceCache* GetFontFaceCache() override { return &font_face_cache_; }
 
   const GenericFontFamilySettings& GetGenericFontFamilySettings() const {
     return generic_font_family_settings_;
   }
   void UpdateGenericFontFamilySettings(Document&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  protected:
   explicit CSSFontSelector(Document*);
@@ -93,7 +92,7 @@ class CORE_EXPORT CSSFontSelector : public FontSelector {
   WeakMember<Document> document_;
   // FIXME: Move to Document or StyleEngine.
   FontFaceCache font_face_cache_;
-  HeapHashSet<WeakMember<CSSFontSelectorClient>> clients_;
+  HeapHashSet<WeakMember<FontSelectorClient>> clients_;
   GenericFontFamilySettings generic_font_family_settings_;
 };
 

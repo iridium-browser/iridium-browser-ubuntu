@@ -156,7 +156,6 @@ void EC_KEY_free(EC_KEY *r) {
 
   CRYPTO_free_ex_data(g_ec_ex_data_class_bss_get(), r, &r->ex_data);
 
-  OPENSSL_cleanse((void *)r, sizeof(EC_KEY));
   OPENSSL_free(r);
 }
 
@@ -165,9 +164,9 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
     OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return NULL;
   }
-  /* Copy the parameters. */
+  // Copy the parameters.
   if (src->group) {
-    /* TODO(fork): duplicating the group seems wasteful. */
+    // TODO(fork): duplicating the group seems wasteful.
     EC_GROUP_free(dest->group);
     dest->group = EC_GROUP_dup(src->group);
     if (dest->group == NULL) {
@@ -175,7 +174,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
     }
   }
 
-  /* Copy the public key. */
+  // Copy the public key.
   if (src->pub_key && src->group) {
     EC_POINT_free(dest->pub_key);
     dest->pub_key = EC_POINT_dup(src->pub_key, src->group);
@@ -184,7 +183,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
     }
   }
 
-  /* copy the private key */
+  // copy the private key
   if (src->priv_key) {
     if (dest->priv_key == NULL) {
       dest->priv_key = BN_new();
@@ -196,14 +195,14 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
       return NULL;
     }
   }
-  /* copy method/extra data */
+  // copy method/extra data
   if (src->ecdsa_meth) {
       METHOD_unref(dest->ecdsa_meth);
       dest->ecdsa_meth = src->ecdsa_meth;
       METHOD_ref(dest->ecdsa_meth);
   }
 
-  /* copy the rest */
+  // copy the rest
   dest->enc_flag = src->enc_flag;
   dest->conv_form = src->conv_form;
 
@@ -234,19 +233,21 @@ int EC_KEY_is_opaque(const EC_KEY *key) {
 const EC_GROUP *EC_KEY_get0_group(const EC_KEY *key) { return key->group; }
 
 int EC_KEY_set_group(EC_KEY *key, const EC_GROUP *group) {
+  // If |key| already has a group, it is an error to switch to another one.
+  if (key->group != NULL) {
+    if (EC_GROUP_cmp(key->group, group, NULL) != 0) {
+      OPENSSL_PUT_ERROR(EC, EC_R_GROUP_MISMATCH);
+      return 0;
+    }
+    return 1;
+  }
+
+  assert(key->priv_key == NULL);
+  assert(key->pub_key == NULL);
+
   EC_GROUP_free(key->group);
-  /* TODO(fork): duplicating the group seems wasteful but see
-   * |EC_KEY_set_conv_form|. */
   key->group = EC_GROUP_dup(group);
-  if (key->group == NULL) {
-    return 0;
-  }
-  /* XXX: |BN_cmp| is not constant time. */
-  if (key->priv_key != NULL &&
-      BN_cmp(key->priv_key, EC_GROUP_get0_order(group)) >= 0) {
-    return 0;
-  }
-  return 1;
+  return key->group != NULL;
 }
 
 const BIGNUM *EC_KEY_get0_private_key(const EC_KEY *key) {
@@ -254,8 +255,12 @@ const BIGNUM *EC_KEY_get0_private_key(const EC_KEY *key) {
 }
 
 int EC_KEY_set_private_key(EC_KEY *key, const BIGNUM *priv_key) {
-  /* XXX: |BN_cmp| is not constant time. */
-  if (key->group != NULL &&
+  if (key->group == NULL) {
+    OPENSSL_PUT_ERROR(EC, EC_R_MISSING_PARAMETERS);
+    return 0;
+  }
+
+  if (BN_is_negative(priv_key) ||
       BN_cmp(priv_key, EC_GROUP_get0_order(key->group)) >= 0) {
     OPENSSL_PUT_ERROR(EC, EC_R_WRONG_ORDER);
     return 0;
@@ -270,6 +275,16 @@ const EC_POINT *EC_KEY_get0_public_key(const EC_KEY *key) {
 }
 
 int EC_KEY_set_public_key(EC_KEY *key, const EC_POINT *pub_key) {
+  if (key->group == NULL) {
+    OPENSSL_PUT_ERROR(EC, EC_R_MISSING_PARAMETERS);
+    return 0;
+  }
+
+  if (EC_GROUP_cmp(key->group, pub_key->group, NULL) != 0) {
+    OPENSSL_PUT_ERROR(EC, EC_R_GROUP_MISMATCH);
+    return 0;
+  }
+
   EC_POINT_free(key->pub_key);
   key->pub_key = EC_POINT_dup(pub_key, key->group);
   return (key->pub_key == NULL) ? 0 : 1;
@@ -310,17 +325,16 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
     goto err;
   }
 
-  /* testing whether the pub_key is on the elliptic curve */
+  // testing whether the pub_key is on the elliptic curve
   if (!EC_POINT_is_on_curve(eckey->group, eckey->pub_key, ctx)) {
     OPENSSL_PUT_ERROR(EC, EC_R_POINT_IS_NOT_ON_CURVE);
     goto err;
   }
-  /* in case the priv_key is present :
-   * check if generator * priv_key == pub_key
-   */
+  // in case the priv_key is present :
+  // check if generator * priv_key == pub_key
   if (eckey->priv_key) {
-    /* XXX: |BN_cmp| is not constant time. */
-    if (BN_cmp(eckey->priv_key, EC_GROUP_get0_order(eckey->group)) >= 0) {
+    if (BN_is_negative(eckey->priv_key) ||
+        BN_cmp(eckey->priv_key, EC_GROUP_get0_order(eckey->group)) >= 0) {
       OPENSSL_PUT_ERROR(EC, EC_R_WRONG_ORDER);
       goto err;
     }
@@ -345,7 +359,7 @@ err:
 
 int EC_KEY_check_fips(const EC_KEY *key) {
   if (EC_KEY_is_opaque(key)) {
-    /* Opaque keys can't be checked. */
+    // Opaque keys can't be checked.
     OPENSSL_PUT_ERROR(EC, EC_R_PUBLIC_KEY_VALIDATION_FAILED);
     return 0;
   }
@@ -374,8 +388,6 @@ int EC_KEY_check_fips(const EC_KEY *key) {
 
 int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
                                              BIGNUM *y) {
-  BN_CTX *ctx = NULL;
-  BIGNUM *tx, *ty;
   EC_POINT *point = NULL;
   int ok = 0;
 
@@ -383,51 +395,18 @@ int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
     OPENSSL_PUT_ERROR(EC, ERR_R_PASSED_NULL_PARAMETER);
     return 0;
   }
-  ctx = BN_CTX_new();
 
-  if (ctx == NULL) {
-    return 0;
-  }
-
-  BN_CTX_start(ctx);
   point = EC_POINT_new(key->group);
-
-  if (point == NULL) {
-    goto err;
-  }
-
-  tx = BN_CTX_get(ctx);
-  ty = BN_CTX_get(ctx);
-  if (tx == NULL ||
-      ty == NULL) {
-    goto err;
-  }
-
-  if (!EC_POINT_set_affine_coordinates_GFp(key->group, point, x, y, ctx) ||
-      !EC_POINT_get_affine_coordinates_GFp(key->group, point, tx, ty, ctx)) {
-    goto err;
-  }
-
-  /* Check if retrieved coordinates match originals: if not values
-   * are out of range. */
-  if (BN_cmp(x, tx) || BN_cmp(y, ty)) {
-    OPENSSL_PUT_ERROR(EC, EC_R_COORDINATES_OUT_OF_RANGE);
-    goto err;
-  }
-
-  if (!EC_KEY_set_public_key(key, point)) {
-    goto err;
-  }
-
-  if (EC_KEY_check_key(key) == 0) {
+  if (point == NULL ||
+      !EC_POINT_set_affine_coordinates_GFp(key->group, point, x, y, NULL) ||
+      !EC_KEY_set_public_key(key, point) ||
+      !EC_KEY_check_key(key)) {
     goto err;
   }
 
   ok = 1;
 
 err:
-  BN_CTX_end(ctx);
-  BN_CTX_free(ctx);
   EC_POINT_free(point);
   return ok;
 }
@@ -453,14 +432,14 @@ int EC_KEY_generate_key(EC_KEY *eckey) {
 
   const BIGNUM *order = EC_GROUP_get0_order(eckey->group);
 
-  /* Check that the size of the group order is FIPS compliant (FIPS 186-4
-   * B.4.2). */
+  // Check that the size of the group order is FIPS compliant (FIPS 186-4
+  // B.4.2).
   if (BN_num_bits(order) < 160) {
     OPENSSL_PUT_ERROR(EC, EC_R_INVALID_GROUP_ORDER);
     goto err;
   }
 
-  /* Generate the private key by testing candidates (FIPS 186-4 B.4.2). */
+  // Generate the private key by testing candidates (FIPS 186-4 B.4.2).
   if (!BN_rand_range_ex(priv_key, 1, order)) {
     goto err;
   }

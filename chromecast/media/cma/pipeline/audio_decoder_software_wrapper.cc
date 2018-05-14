@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/media/cma/base/decoder_config_logging.h"
@@ -15,10 +16,36 @@
 namespace chromecast {
 namespace media {
 
+namespace {
+const int kMonoChannelCount = 1;
+const int kStereoChannelCount = 2;
+const int k5_1ChannelCount = 6;
+
+bool IsChannelLayoutSupported(AudioConfig config) {
+  if (config.channel_number == kMonoChannelCount ||
+      config.channel_number == kStereoChannelCount)
+    return true;
+
+  // Only supports 5.1 for Opus.
+  if (config.channel_number == k5_1ChannelCount &&
+      config.codec == AudioCodec::kCodecOpus)
+    return true;
+
+  return false;
+}
+
+// Codecs that cannot be decoded on the device and must be passed through.
+constexpr media::AudioCodec kPassthroughCodecs[] = {
+    kCodecEAC3, kCodecAC3, kCodecDTS,
+};
+
+} // namespace
+
 AudioDecoderSoftwareWrapper::AudioDecoderSoftwareWrapper(
     MediaPipelineBackend::AudioDecoder* backend_decoder)
     : backend_decoder_(backend_decoder),
       delegate_(nullptr),
+      decoder_error_(false),
       weak_factory_(this) {
   DCHECK(backend_decoder_);
   backend_decoder_->SetDelegate(this);
@@ -29,6 +56,9 @@ AudioDecoderSoftwareWrapper::~AudioDecoderSoftwareWrapper() {}
 void AudioDecoderSoftwareWrapper::SetDelegate(DecoderDelegate* delegate) {
   DCHECK(delegate);
   delegate_ = delegate;
+  if (decoder_error_) {
+    delegate_->OnDecoderError();
+  }
 }
 
 MediaPipelineBackend::BufferStatus AudioDecoderSoftwareWrapper::PushBuffer(
@@ -39,7 +69,7 @@ MediaPipelineBackend::BufferStatus AudioDecoderSoftwareWrapper::PushBuffer(
 
   DecoderBufferBase* buffer_base = static_cast<DecoderBufferBase*>(buffer);
   if (!software_decoder_->Decode(
-          make_scoped_refptr(buffer_base),
+          base::WrapRefCounted(buffer_base),
           base::Bind(&AudioDecoderSoftwareWrapper::OnDecodedBuffer,
                      weak_factory_.GetWeakPtr()))) {
     return MediaPipelineBackend::kBufferFailed;
@@ -53,7 +83,6 @@ void AudioDecoderSoftwareWrapper::GetStatistics(Statistics* statistics) {
 }
 
 bool AudioDecoderSoftwareWrapper::SetConfig(const AudioConfig& config) {
-  DCHECK(delegate_);
   DCHECK(IsValidConfig(config));
 
   if (backend_decoder_->SetConfig(config)) {
@@ -61,6 +90,11 @@ bool AudioDecoderSoftwareWrapper::SetConfig(const AudioConfig& config) {
     software_decoder_.reset();
     output_config_ = config;
     return true;
+  }
+
+  if (base::ContainsValue(kPassthroughCodecs, config.codec)) {
+    LOG(INFO) << "Cannot use software decoder for " << config.codec;
+    return false;
   }
 
   if (!CreateSoftwareDecoder(config)) {
@@ -72,7 +106,13 @@ bool AudioDecoderSoftwareWrapper::SetConfig(const AudioConfig& config) {
 
   output_config_.codec = media::kCodecPCM;
   output_config_.sample_format = media::kSampleFormatS16;
-  output_config_.channel_number = 2;
+  // The underlying software decoder will always convert mono to stereo,
+  // so set output stereo in the case of mono input.
+  if (config.channel_number == kMonoChannelCount) {
+    output_config_.channel_number = kStereoChannelCount;
+  } else {
+    output_config_.channel_number = config.channel_number;
+  }
   output_config_.bytes_per_channel = 2;
   output_config_.samples_per_second = config.samples_per_second;
   output_config_.encryption_scheme = Unencrypted();
@@ -90,8 +130,9 @@ AudioDecoderSoftwareWrapper::GetRenderingDelay() {
 
 bool AudioDecoderSoftwareWrapper::CreateSoftwareDecoder(
     const AudioConfig& config) {
-  if (config.channel_number > 2) {
-    LOG(ERROR) << "Multi-channel software audio decoding is not supported";
+  if (!IsChannelLayoutSupported(config)) {
+    LOG(ERROR) << "Software audio decoding is not supported for channel: "
+               << config.channel_number << " with codec: " << config.codec;
     return false;
   }
   // TODO(kmackay) Consider using planar float instead.
@@ -105,14 +146,18 @@ bool AudioDecoderSoftwareWrapper::CreateSoftwareDecoder(
 
 void AudioDecoderSoftwareWrapper::OnDecoderInitialized(bool success) {
   if (!success) {
+    decoder_error_ = true;
     LOG(ERROR) << "Failed to initialize software decoder";
-    delegate_->OnDecoderError();
+    if (delegate_) {
+      delegate_->OnDecoderError();
+    }
   }
 }
 
 void AudioDecoderSoftwareWrapper::OnDecodedBuffer(
     CastAudioDecoder::Status status,
     const scoped_refptr<DecoderBufferBase>& decoded) {
+  DCHECK(delegate_);
   if (status != CastAudioDecoder::kDecodeOk) {
     delegate_->OnPushBufferComplete(MediaPipelineBackend::kBufferFailed);
     return;

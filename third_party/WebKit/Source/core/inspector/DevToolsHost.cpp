@@ -29,13 +29,14 @@
 
 #include "core/inspector/DevToolsHost.h"
 
+#include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "core/clipboard/Pasteboard.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/UserGestureIndicator.h"
-#include "core/events/Event.h"
-#include "core/events/EventTarget.h"
+#include "core/dom/events/Event.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
@@ -49,8 +50,8 @@
 #include "platform/ContextMenu.h"
 #include "platform/ContextMenuItem.h"
 #include "platform/PlatformChromeClient.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/SharedBuffer.h"
+#include "platform/bindings/ScriptForbiddenScope.h"
 #include "platform/bindings/ScriptState.h"
 #include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceFetcher.h"
@@ -71,7 +72,7 @@ class FrontendMenuProvider final : public ContextMenuProvider {
     DCHECK(!devtools_host_);
   }
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(devtools_host_);
     ContextMenuProvider::Trace(visitor);
   }
@@ -115,13 +116,13 @@ DevToolsHost::DevToolsHost(InspectorFrontendClient* client,
       frontend_frame_(frontend_frame),
       menu_provider_(nullptr) {}
 
-DevToolsHost::~DevToolsHost() {
-  DCHECK(!client_);
-}
+DevToolsHost::~DevToolsHost() = default;
 
-DEFINE_TRACE(DevToolsHost) {
+void DevToolsHost::Trace(blink::Visitor* visitor) {
+  visitor->Trace(client_);
   visitor->Trace(frontend_frame_);
   visitor->Trace(menu_provider_);
+  ScriptWrappable::Trace(visitor);
 }
 
 void DevToolsHost::EvaluateScript(const String& expression) {
@@ -133,18 +134,18 @@ void DevToolsHost::EvaluateScript(const String& expression) {
   if (!script_state)
     return;
   ScriptState::Scope scope(script_state);
-  UserGestureIndicator gesture_indicator(
-      UserGestureToken::Create(frontend_frame_->GetDocument()));
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      Frame::NotifyUserActivation(frontend_frame_);
   v8::MicrotasksScope microtasks(script_state->GetIsolate(),
                                  v8::MicrotasksScope::kRunMicrotasks);
-  v8::Local<v8::String> source =
-      V8AtomicString(script_state->GetIsolate(), expression.Utf8().data());
-  V8ScriptRunner::CompileAndRunInternalScript(
-      source, script_state->GetIsolate(), String(), TextPosition());
+  ScriptSourceCode source_code(expression, ScriptSourceLocationType::kInternal,
+                               nullptr, KURL(), TextPosition());
+  V8ScriptRunner::CompileAndRunInternalScript(script_state->GetIsolate(),
+                                              script_state, source_code);
 }
 
 void DevToolsHost::DisconnectClient() {
-  client_ = 0;
+  client_ = nullptr;
   if (menu_provider_) {
     menu_provider_->Disconnect();
     menu_provider_ = nullptr;
@@ -219,9 +220,18 @@ String DevToolsHost::getSelectionForegroundColor() {
   return LayoutTheme::GetTheme().ActiveSelectionForegroundColor().Serialized();
 }
 
-bool DevToolsHost::isUnderTest() {
-  return client_ && client_->IsUnderTest();
+String DevToolsHost::getInactiveSelectionBackgroundColor() {
+  return LayoutTheme::GetTheme()
+      .InactiveSelectionBackgroundColor()
+      .Serialized();
 }
+
+String DevToolsHost::getInactiveSelectionForegroundColor() {
+  return LayoutTheme::GetTheme()
+      .InactiveSelectionForegroundColor()
+      .Serialized();
+}
+
 
 bool DevToolsHost::isHostedMode() {
   return false;

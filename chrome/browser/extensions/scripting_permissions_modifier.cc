@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/scripting_permissions_modifier.h"
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "extensions/browser/extension_prefs.h"
@@ -32,7 +31,7 @@ const char kHasSetScriptOnAllUrlsPrefName[] = "has_set_script_all_urls";
 URLPatternSet FilterImpliedAllHostsPatterns(const URLPatternSet& patterns) {
   URLPatternSet result;
   for (const URLPattern& pattern : patterns) {
-    if (pattern.ImpliesAllHosts())
+    if (pattern.MatchesEffectiveTld())
       result.AddPattern(pattern);
   }
   return result;
@@ -59,10 +58,10 @@ void SetAllowedOnAllUrlsPref(bool by_user,
                              const std::string& id,
                              ExtensionPrefs* prefs) {
   prefs->UpdateExtensionPref(id, kExtensionAllowedOnAllUrlsPrefName,
-                             base::MakeUnique<base::Value>(allowed));
+                             std::make_unique<base::Value>(allowed));
   if (by_user) {
     prefs->UpdateExtensionPref(id, kHasSetScriptOnAllUrlsPrefName,
-                               base::MakeUnique<base::Value>(true));
+                               std::make_unique<base::Value>(true));
   }
 }
 
@@ -252,7 +251,7 @@ void ScriptingPermissionsModifier::WithholdPermissions(
                                       URLPatternSet* granted,
                                       URLPatternSet* withheld) {
     for (const URLPattern& pattern : patterns) {
-      if (pattern.ImpliesAllHosts())
+      if (pattern.MatchesEffectiveTld())
         withheld->AddPattern(pattern);
       else
         granted->AddPattern(pattern);
@@ -310,7 +309,7 @@ void ScriptingPermissionsModifier::CleanUpPrefsIfNecessary() {
   DCHECK(ExtensionMustBeAllowedOnAllUrls(*extension_));
   extension_prefs_->UpdateExtensionPref(extension_->id(),
                                         kExtensionAllowedOnAllUrlsPrefName,
-                                        base::MakeUnique<base::Value>(true));
+                                        std::make_unique<base::Value>(true));
   extension_prefs_->UpdateExtensionPref(
       extension_->id(), kHasSetScriptOnAllUrlsPrefName, nullptr);
 }

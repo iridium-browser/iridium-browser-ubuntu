@@ -31,6 +31,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/LocalFrameView.h"
 #include "core/frame/VisualViewport.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/page/Page.h"
 #include "core/style/ComputedStyle.h"
 
@@ -39,9 +40,9 @@ namespace blink {
 DOMVisualViewport::DOMVisualViewport(LocalDOMWindow* window)
     : window_(window) {}
 
-DOMVisualViewport::~DOMVisualViewport() {}
+DOMVisualViewport::~DOMVisualViewport() = default;
 
-DEFINE_TRACE(DOMVisualViewport) {
+void DOMVisualViewport::Trace(blink::Visitor* visitor) {
   visitor->Trace(window_);
   EventTargetWithInlineData::Trace(visitor);
 }
@@ -81,13 +82,20 @@ float DOMVisualViewport::pageLeft() const {
   if (!frame)
     return 0;
 
+  Page* page = frame->GetPage();
+  if (!page)
+    return 0;
+
   LocalFrameView* view = frame->View();
-  if (!view)
+  if (!view || !view->LayoutViewportScrollableArea())
     return 0;
 
   frame->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
-  float viewport_x = view->GetScrollableArea()->GetScrollOffset().Width();
-  return AdjustScrollForAbsoluteZoom(viewport_x, frame->PageZoomFactor());
+  float viewport_x =
+      page->GetVisualViewport().GetScrollOffset().Width() +
+      view->LayoutViewportScrollableArea()->GetScrollOffset().Width();
+  return AdjustForAbsoluteZoom::AdjustScroll(viewport_x,
+                                             frame->PageZoomFactor());
 }
 
 float DOMVisualViewport::pageTop() const {
@@ -95,13 +103,20 @@ float DOMVisualViewport::pageTop() const {
   if (!frame)
     return 0;
 
+  Page* page = frame->GetPage();
+  if (!page)
+    return 0;
+
   LocalFrameView* view = frame->View();
-  if (!view)
+  if (!view || !view->LayoutViewportScrollableArea())
     return 0;
 
   frame->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
-  float viewport_y = view->GetScrollableArea()->GetScrollOffset().Height();
-  return AdjustScrollForAbsoluteZoom(viewport_y, frame->PageZoomFactor());
+  float viewport_y =
+      page->GetVisualViewport().GetScrollOffset().Height() +
+      view->LayoutViewportScrollableArea()->GetScrollOffset().Height();
+  return AdjustForAbsoluteZoom::AdjustScroll(viewport_y,
+                                             frame->PageZoomFactor());
 }
 
 double DOMVisualViewport::width() const {
@@ -110,9 +125,13 @@ double DOMVisualViewport::width() const {
     return 0;
 
   if (!frame->IsMainFrame()) {
-    FloatSize viewport_size = window_->GetViewportSize(kExcludeScrollbars);
-    return AdjustForAbsoluteZoom(ExpandedIntSize(viewport_size).Width(),
-                                 frame->PageZoomFactor());
+    // Update layout to ensure scrollbars are up-to-date.
+    frame->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+    auto* scrollable_area = frame->View()->LayoutViewportScrollableArea();
+    float width =
+        scrollable_area->VisibleContentRect(kExcludeScrollbars).Width();
+    return AdjustForAbsoluteZoom::AdjustInt(clampTo<int>(ceilf(width)),
+                                            frame->PageZoomFactor());
   }
 
   if (Page* page = frame->GetPage())
@@ -127,9 +146,13 @@ double DOMVisualViewport::height() const {
     return 0;
 
   if (!frame->IsMainFrame()) {
-    FloatSize viewport_size = window_->GetViewportSize(kExcludeScrollbars);
-    return AdjustForAbsoluteZoom(ExpandedIntSize(viewport_size).Height(),
-                                 frame->PageZoomFactor());
+    // Update layout to ensure scrollbars are up-to-date.
+    frame->GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
+    auto* scrollable_area = frame->View()->LayoutViewportScrollableArea();
+    float height =
+        scrollable_area->VisibleContentRect(kExcludeScrollbars).Height();
+    return AdjustForAbsoluteZoom::AdjustInt(clampTo<int>(ceilf(height)),
+                                            frame->PageZoomFactor());
   }
 
   if (Page* page = frame->GetPage())

@@ -10,7 +10,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/common/pref_names.h"
 #include "components/policy/core/common/policy_map.h"
@@ -65,6 +64,94 @@ const char kPrefKeyUsageCorporate[] = "corporate";
 
 const char kPolicyAllowCorporateKeyUsage[] = "allowCorporateKeyUsage";
 
+const base::DictionaryValue* GetPrefsEntry(
+    const std::string& public_key_spki_der_b64,
+    const PrefService* const profile_prefs) {
+  if (!profile_prefs)
+    return nullptr;
+
+  const base::DictionaryValue* platform_keys =
+      profile_prefs->GetDictionary(prefs::kPlatformKeys);
+  if (!platform_keys)
+    return nullptr;
+
+  const base::Value* key_entry_value =
+      platform_keys->FindKey(public_key_spki_der_b64);
+  if (!key_entry_value)
+    return nullptr;
+
+  const base::DictionaryValue* key_entry = nullptr;
+  key_entry_value->GetAsDictionary(&key_entry);
+  return key_entry;
+}
+
+const base::DictionaryValue* GetKeyPermissionsMap(
+    policy::PolicyService* const profile_policies) {
+  if (!profile_policies)
+    return nullptr;
+
+  const policy::PolicyMap& policies = profile_policies->GetPolicies(
+      policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string()));
+  const base::Value* policy_value =
+      policies.GetValue(policy::key::kKeyPermissions);
+  if (!policy_value) {
+    DVLOG(1) << "KeyPermissions policy is not set";
+    return nullptr;
+  }
+  const base::DictionaryValue* key_permissions_map = nullptr;
+  policy_value->GetAsDictionary(&key_permissions_map);
+  return key_permissions_map;
+}
+
+bool GetCorporateKeyUsageFromPref(
+    const base::DictionaryValue* key_permissions_for_ext) {
+  if (!key_permissions_for_ext)
+    return false;
+
+  const base::Value* allow_corporate_key_usage =
+      key_permissions_for_ext->FindKey(kPolicyAllowCorporateKeyUsage);
+  if (!allow_corporate_key_usage || !allow_corporate_key_usage->is_bool())
+    return false;
+  return allow_corporate_key_usage->GetBool();
+}
+
+// Returns true if the extension with id |extension_id| is allowed to use
+// corporate usage keys by policy in |profile_policies|.
+bool PolicyAllowsCorporateKeyUsageForExtension(
+    const std::string& extension_id,
+    policy::PolicyService* const profile_policies) {
+  if (!profile_policies)
+    return false;
+
+  const base::DictionaryValue* key_permissions_map =
+      GetKeyPermissionsMap(profile_policies);
+  if (!key_permissions_map)
+    return false;
+
+  const base::Value* key_permissions_for_ext_value =
+      key_permissions_map->FindKey(extension_id);
+  const base::DictionaryValue* key_permissions_for_ext = nullptr;
+  if (!key_permissions_for_ext_value ||
+      !key_permissions_for_ext_value->GetAsDictionary(
+          &key_permissions_for_ext) ||
+      !key_permissions_for_ext)
+    return false;
+
+  bool allow_corporate_key_usage =
+      GetCorporateKeyUsageFromPref(key_permissions_for_ext);
+
+  VLOG_IF(allow_corporate_key_usage, 2)
+      << "Policy allows usage of corporate keys by extension " << extension_id;
+  return allow_corporate_key_usage;
+}
+
+bool IsKeyOnUserSlot(
+    const std::vector<KeyPermissions::KeyLocation>& key_locations) {
+  return std::find(key_locations.begin(), key_locations.end(),
+                   KeyPermissions::KeyLocation::kUserSlot) !=
+         key_locations.end();
+}
+
 }  // namespace
 
 struct KeyPermissions::PermissionsForExtension::KeyEntry {
@@ -108,7 +195,11 @@ KeyPermissions::PermissionsForExtension::~PermissionsForExtension() {
 }
 
 bool KeyPermissions::PermissionsForExtension::CanUseKeyForSigning(
-    const std::string& public_key_spki_der) {
+    const std::string& public_key_spki_der,
+    const std::vector<KeyLocation>& key_locations) {
+  if (key_locations.empty())
+    return false;
+
   std::string public_key_spki_der_b64;
   base::Base64Encode(public_key_spki_der, &public_key_spki_der_b64);
 
@@ -126,8 +217,10 @@ bool KeyPermissions::PermissionsForExtension::CanUseKeyForSigning(
 
   // Usage of corporate keys is solely determined by policy. The user must not
   // circumvent this decision.
-  if (key_permissions_->IsCorporateKey(public_key_spki_der_b64))
+  if (key_permissions_->IsCorporateKey(public_key_spki_der_b64,
+                                       key_locations)) {
     return PolicyAllowsCorporateKeyUsage();
+  }
 
   // Only permissions for keys that are not designated for corporate usage are
   // determined by user decisions.
@@ -135,16 +228,18 @@ bool KeyPermissions::PermissionsForExtension::CanUseKeyForSigning(
 }
 
 void KeyPermissions::PermissionsForExtension::SetKeyUsedForSigning(
-    const std::string& public_key_spki_der) {
+    const std::string& public_key_spki_der,
+    const std::vector<KeyLocation>& key_locations) {
+  if (key_locations.empty())
+    return;
+
   std::string public_key_spki_der_b64;
   base::Base64Encode(public_key_spki_der, &public_key_spki_der_b64);
 
   KeyEntry* matching_entry = GetStateStoreEntry(public_key_spki_der_b64);
 
   if (!matching_entry->sign_once) {
-    if (matching_entry->sign_unlimited)
-      VLOG(1) << "Key is already marked as not usable for signing, skipping.";
-    else
+    if (!CanUseKeyForSigning(public_key_spki_der, key_locations))
       LOG(ERROR) << "Key was not allowed for signing.";
     return;
   }
@@ -154,7 +249,13 @@ void KeyPermissions::PermissionsForExtension::SetKeyUsedForSigning(
 }
 
 void KeyPermissions::PermissionsForExtension::RegisterKeyForCorporateUsage(
-    const std::string& public_key_spki_der) {
+    const std::string& public_key_spki_der,
+    const std::vector<KeyLocation>& key_locations) {
+  if (key_locations.empty()) {
+    NOTREACHED();
+    return;
+  }
+
   std::string public_key_spki_der_b64;
   base::Base64Encode(public_key_spki_der, &public_key_spki_der_b64);
 
@@ -168,25 +269,39 @@ void KeyPermissions::PermissionsForExtension::RegisterKeyForCorporateUsage(
   matching_entry->sign_once = true;
   WriteToStateStore();
 
+  // Only register the key as corporate in the profile prefs if it is on the
+  // user slot. Keys on the system slot are implicitly corporate. We have still
+  // stored the sign_once permission, so the enrolling extension in the same
+  // profile can use the key for signing once in order to build a CSR even if it
+  // doesn't have permission to use corporate keys.
+  if (!IsKeyOnUserSlot(key_locations))
+    return;
+
   DictionaryPrefUpdate update(profile_prefs_, prefs::kPlatformKeys);
 
   std::unique_ptr<base::DictionaryValue> new_pref_entry(
       new base::DictionaryValue);
-  new_pref_entry->SetStringWithoutPathExpansion(kPrefKeyUsage,
-                                                kPrefKeyUsageCorporate);
+  new_pref_entry->SetKey(kPrefKeyUsage, base::Value(kPrefKeyUsageCorporate));
 
   update->SetWithoutPathExpansion(public_key_spki_der_b64,
                                   std::move(new_pref_entry));
 }
 
 void KeyPermissions::PermissionsForExtension::SetUserGrantedPermission(
-    const std::string& public_key_spki_der) {
-  if (!key_permissions_->CanUserGrantPermissionFor(public_key_spki_der)) {
+    const std::string& public_key_spki_der,
+    const std::vector<KeyLocation>& key_locations) {
+  if (!key_permissions_->CanUserGrantPermissionFor(public_key_spki_der,
+                                                   key_locations)) {
     LOG(WARNING) << "Tried to grant permission for a key although prohibited "
                     "(either key is a corporate key or this account is "
                     "managed).";
     return;
   }
+
+  // It only makes sense to store the sign_unlimited flag for a key if it is on
+  // a user slot. Currently, system-slot keys are implicitly corporate, so
+  // CanUserGrantPermissionForKey should return false for them.
+  DCHECK(IsKeyOnUserSlot(key_locations));
 
   std::string public_key_spki_der_b64;
   base::Base64Encode(public_key_spki_der, &public_key_spki_der_b64);
@@ -203,33 +318,8 @@ void KeyPermissions::PermissionsForExtension::SetUserGrantedPermission(
 
 bool KeyPermissions::PermissionsForExtension::PolicyAllowsCorporateKeyUsage()
     const {
-  const policy::PolicyMap& policies = profile_policies_->GetPolicies(
-      policy::PolicyNamespace(policy::POLICY_DOMAIN_CHROME, std::string()));
-  const base::Value* policy_value =
-      policies.GetValue(policy::key::kKeyPermissions);
-  if (!policy_value)
-    return false;
-
-  const base::DictionaryValue* key_permissions_map = nullptr;
-  policy_value->GetAsDictionary(&key_permissions_map);
-  if (!key_permissions_map) {
-    LOG(ERROR) << "Expected policy to be a dictionary.";
-    return false;
-  }
-
-  const base::DictionaryValue* key_permissions_for_ext = nullptr;
-  key_permissions_map->GetDictionaryWithoutPathExpansion(
-      extension_id_, &key_permissions_for_ext);
-  if (!key_permissions_for_ext)
-    return false;
-
-  bool allow_corporate_key_usage = false;
-  key_permissions_for_ext->GetBooleanWithoutPathExpansion(
-      kPolicyAllowCorporateKeyUsage, &allow_corporate_key_usage);
-
-  VLOG_IF(allow_corporate_key_usage, 2)
-      << "Policy allows usage of corporate keys by extension " << extension_id_;
-  return allow_corporate_key_usage;
+  return PolicyAllowsCorporateKeyUsageForExtension(extension_id_,
+                                                   profile_policies_);
 }
 
 void KeyPermissions::PermissionsForExtension::WriteToStateStore() {
@@ -264,7 +354,7 @@ void KeyPermissions::PermissionsForExtension::KeyEntriesFromState(
                                                  &new_entry.sign_unlimited);
       state_store_entries_.push_back(new_entry);
     } else {
-      LOG(ERROR) << "Found invalid entry of type " << entry.GetType()
+      LOG(ERROR) << "Found invalid entry of type " << entry.type()
                  << " in PlatformKeys state store.";
       continue;
     }
@@ -280,15 +370,14 @@ KeyPermissions::PermissionsForExtension::KeyEntriesToState() {
       continue;
 
     std::unique_ptr<base::DictionaryValue> new_entry(new base::DictionaryValue);
-    new_entry->SetStringWithoutPathExpansion(kStateStoreSPKI, entry.spki_b64);
+    new_entry->SetKey(kStateStoreSPKI, base::Value(entry.spki_b64));
     // Omit writing default values, namely |false|.
     if (entry.sign_once) {
-      new_entry->SetBooleanWithoutPathExpansion(kStateStoreSignOnce,
-                                                entry.sign_once);
+      new_entry->SetKey(kStateStoreSignOnce, base::Value(entry.sign_once));
     }
     if (entry.sign_unlimited) {
-      new_entry->SetBooleanWithoutPathExpansion(kStateStoreSignUnlimited,
-                                                entry.sign_unlimited);
+      new_entry->SetKey(kStateStoreSignUnlimited,
+                        base::Value(entry.sign_unlimited));
     }
     new_state->Append(std::move(new_entry));
   }
@@ -336,7 +425,8 @@ void KeyPermissions::GetPermissionsForExtension(
 }
 
 bool KeyPermissions::CanUserGrantPermissionFor(
-    const std::string& public_key_spki_der) const {
+    const std::string& public_key_spki_der,
+    const std::vector<KeyLocation>& key_locations) const {
   // As keys cannot be tagged for non-corporate usage, the user can currently
   // not grant any permissions if the profile is managed.
   if (profile_is_managed_)
@@ -347,17 +437,62 @@ bool KeyPermissions::CanUserGrantPermissionFor(
 
   // If this profile is not managed but we find a corporate key, don't allow
   // the user to grant permissions.
-  return !IsCorporateKey(public_key_spki_der_b64);
+  return !IsCorporateKey(public_key_spki_der_b64, key_locations);
+}
+
+// static
+bool KeyPermissions::IsCorporateKeyForProfile(
+    const std::string& public_key_spki_der_b64,
+    const PrefService* const profile_prefs) {
+  const base::DictionaryValue* prefs_entry =
+      GetPrefsEntry(public_key_spki_der_b64, profile_prefs);
+  if (prefs_entry) {
+    const base::Value* key_usage = prefs_entry->FindKey(kPrefKeyUsage);
+    if (!key_usage || !key_usage->is_string())
+      return false;
+    return key_usage->GetString() == kPrefKeyUsageCorporate;
+  }
+  return false;
+}
+
+// static
+std::vector<std::string> KeyPermissions::GetCorporateKeyUsageAllowedAppIds(
+    policy::PolicyService* const profile_policies) {
+  std::vector<std::string> permissions;
+
+  const base::DictionaryValue* key_permissions_map =
+      GetKeyPermissionsMap(profile_policies);
+  if (!key_permissions_map)
+    return permissions;
+
+  for (const auto& item : key_permissions_map->DictItems()) {
+    const auto& app_id = item.first;
+    const auto& key_permission = item.second;
+    const base::DictionaryValue* key_permissions_for_app = nullptr;
+    if (!key_permission.GetAsDictionary(&key_permissions_for_app) ||
+        !key_permissions_for_app) {
+      continue;
+    }
+    if (GetCorporateKeyUsageFromPref(key_permissions_for_app))
+      permissions.push_back(app_id);
+  }
+  return permissions;
 }
 
 bool KeyPermissions::IsCorporateKey(
-    const std::string& public_key_spki_der_b64) const {
-  const base::DictionaryValue* prefs_entry =
-      GetPrefsEntry(public_key_spki_der_b64);
-  if (prefs_entry) {
-    std::string key_usage;
-    prefs_entry->GetStringWithoutPathExpansion(kPrefKeyUsage, &key_usage);
-    return key_usage == kPrefKeyUsageCorporate;
+    const std::string& public_key_spki_der_b64,
+    const std::vector<KeyPermissions::KeyLocation>& key_locations) const {
+  for (const KeyLocation key_location : key_locations) {
+    switch (key_location) {
+      case KeyLocation::kUserSlot:
+        if (IsCorporateKeyForProfile(public_key_spki_der_b64, profile_prefs_))
+          return true;
+        break;
+      case KeyLocation::kSystemSlot:
+        return true;
+      default:
+        NOTREACHED();
+    }
   }
   return false;
 }
@@ -372,7 +507,7 @@ void KeyPermissions::CreatePermissionObjectAndPassToCallback(
     const std::string& extension_id,
     const PermissionsCallback& callback,
     std::unique_ptr<base::Value> value) {
-  callback.Run(base::MakeUnique<PermissionsForExtension>(
+  callback.Run(std::make_unique<PermissionsForExtension>(
       extension_id, std::move(value), profile_prefs_, profile_policies_, this));
 }
 
@@ -381,17 +516,6 @@ void KeyPermissions::SetPlatformKeysOfExtension(
     std::unique_ptr<base::Value> value) {
   extensions_state_store_->SetExtensionValue(
       extension_id, kStateStorePlatformKeys, std::move(value));
-}
-
-const base::DictionaryValue* KeyPermissions::GetPrefsEntry(
-    const std::string& public_key_spki_der_b64) const {
-  const base::DictionaryValue* platform_keys =
-      profile_prefs_->GetDictionary(prefs::kPlatformKeys);
-
-  const base::DictionaryValue* key_entry = nullptr;
-  platform_keys->GetDictionaryWithoutPathExpansion(public_key_spki_der_b64,
-                                                   &key_entry);
-  return key_entry;
 }
 
 }  // namespace chromeos

@@ -19,7 +19,7 @@ ScrollState* CreateScrollState(double delta_x,
                                bool beginning,
                                bool ending) {
   std::unique_ptr<ScrollStateData> scroll_state_data =
-      WTF::MakeUnique<ScrollStateData>();
+      std::make_unique<ScrollStateData>();
   scroll_state_data->delta_x = delta_x;
   scroll_state_data->delta_y = delta_y;
   scroll_state_data->is_beginning = beginning;
@@ -68,7 +68,8 @@ TEST_F(ScrollStateTest, ConsumeDeltaNative) {
 
 TEST_F(ScrollStateTest, CurrentNativeScrollingElement) {
   ScrollState* scroll_state = CreateScrollState(0, 0, false, false);
-  Element* element = Element::Create(QualifiedName::Null(), Document::Create());
+  Element* element =
+      Element::Create(QualifiedName::Null(), Document::CreateForTest());
   scroll_state->SetCurrentNativeScrollingElement(element);
 
   EXPECT_EQ(element, scroll_state->CurrentNativeScrollingElement());

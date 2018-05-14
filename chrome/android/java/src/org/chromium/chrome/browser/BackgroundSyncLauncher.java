@@ -19,7 +19,6 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
-import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
 
 /**
  * The {@link BackgroundSyncLauncher} singleton is created and owned by the C++ browser. It
@@ -163,11 +162,6 @@ public class BackgroundSyncLauncher {
         launchBrowserIfStopped(false, 0);
     }
 
-    private static boolean canUseGooglePlayServices() {
-        return ExternalAuthUtils.getInstance().canUseGooglePlayServices(
-                ContextUtils.getApplicationContext(), new UserRecoverableErrorHandler.Silent());
-    }
-
     /**
      * Returns true if the Background Sync Manager should be automatically disabled on startup.
      * This is currently only the case if Play Services is not up to date, since any sync attempts
@@ -182,7 +176,7 @@ public class BackgroundSyncLauncher {
         // disabled in tests.
         if (sGCMEnabled) {
             boolean isAvailable = true;
-            if (!canUseGooglePlayServices()) {
+            if (!ExternalAuthUtils.canUseGooglePlayServices()) {
                 setGCMEnabled(false);
                 Log.i(TAG, "Disabling Background Sync because Play Services is not up to date.");
                 isAvailable = false;
@@ -247,19 +241,15 @@ public class BackgroundSyncLauncher {
      */
     protected static void rescheduleTasksOnUpgrade(final Context context) {
         final GcmNetworkManager scheduler = GcmNetworkManager.getInstance(context);
-        BackgroundSyncLauncher.ShouldLaunchCallback callback =
-                new BackgroundSyncLauncher.ShouldLaunchCallback() {
-                    @Override
-                    public void run(Boolean shouldLaunch) {
-                        if (shouldLaunch) {
-                            // It's unclear what time the sync event was supposed to fire, so fire
-                            // without delay and let the browser reschedule if necessary.
-                            // TODO(iclelland): If this fails, report the failure via UMA (not now,
-                            // since the browser is not running, but on next startup.)
-                            scheduleLaunchTask(scheduler, 0);
-                        }
-                    }
-                };
+        BackgroundSyncLauncher.ShouldLaunchCallback callback = shouldLaunch -> {
+            if (shouldLaunch) {
+                // It's unclear what time the sync event was supposed to fire, so fire
+                // without delay and let the browser reschedule if necessary.
+                // TODO(iclelland): If this fails, report the failure via UMA (not now,
+                // since the browser is not running, but on next startup.)
+                scheduleLaunchTask(scheduler, 0);
+            }
+        };
         BackgroundSyncLauncher.shouldLaunchBrowserIfStopped(callback);
     }
 

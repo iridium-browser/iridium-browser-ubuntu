@@ -96,9 +96,6 @@ class QuicConnectionPeer {
 
   static QuicPacketHeader* GetLastHeader(QuicConnection* connection);
 
-  static void SetPacketNumberOfLastSentPacket(QuicConnection* connection,
-                                              QuicPacketNumber number);
-
   static QuicConnectionStats* GetStats(QuicConnection* connection);
 
   static QuicPacketCount GetPacketsBetweenMtuProbes(QuicConnection* connection);
@@ -115,6 +112,9 @@ class QuicConnectionPeer {
                                        QuicPacketNumber packet_number);
   static void SetNoStopWaitingFrames(QuicConnection* connection,
                                      bool no_stop_waiting_frames);
+  static void SetMaxTrackedPackets(QuicConnection* connection,
+                                   QuicPacketCount max_tracked_packets);
+  static void SetSessionDecidesWhatToWrite(QuicConnection* connection);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

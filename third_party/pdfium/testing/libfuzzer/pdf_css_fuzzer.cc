@@ -4,25 +4,25 @@
 
 #include <memory>
 
-#include "core/fxcrt/cfx_retain_ptr.h"
 #include "core/fxcrt/cfx_seekablestreamproxy.h"
+#include "core/fxcrt/css/cfx_css.h"
+#include "core/fxcrt/css/cfx_csssyntaxparser.h"
 #include "core/fxcrt/fx_string.h"
-#include "xfa/fde/css/cfde_csssyntaxparser.h"
-#include "xfa/fde/css/fde_css.h"
+#include "core/fxcrt/retain_ptr.h"
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  CFX_WideString input = CFX_WideString::FromUTF8(
-      CFX_ByteStringC(data, static_cast<FX_STRSIZE>(size)));
+  WideString input =
+      WideString::FromUTF8(ByteStringView(data, static_cast<size_t>(size)));
 
   // If we convert the input into an empty string bail out.
   if (input.GetLength() == 0)
     return 0;
 
-  CFDE_CSSSyntaxParser parser(input.c_str(), input.GetLength());
-  FDE_CSSSyntaxStatus status;
+  CFX_CSSSyntaxParser parser(input.c_str(), input.GetLength());
+  CFX_CSSSyntaxStatus status;
   do {
     status = parser.DoSyntaxParse();
-  } while (status != FDE_CSSSyntaxStatus::Error &&
-           status != FDE_CSSSyntaxStatus::EOS);
+  } while (status != CFX_CSSSyntaxStatus::Error &&
+           status != CFX_CSSSyntaxStatus::EOS);
   return 0;
 }

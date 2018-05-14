@@ -14,7 +14,6 @@
 #include "base/callback.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/mock_entropy_provider.h"
@@ -35,7 +34,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/quota_service.h"
@@ -220,10 +219,8 @@ class IncidentReportingServiceTest : public testing::Test {
   }
 
   void CreateIncidentReportingService() {
-#if !defined(GOOGLE_CHROME_BUILD)
-    scoped_feature_list_.InitAndDisableFeature(
-        safe_browsing::kIncidentReportingDisableUpload);
-#endif
+    scoped_feature_list_.InitAndEnableFeature(
+        safe_browsing::kIncidentReportingEnableUpload);
 
     instance_.reset(new TestIncidentReportingService(
         base::ThreadTaskRunnerHandle::Get(),
@@ -254,7 +251,7 @@ class IncidentReportingServiceTest : public testing::Test {
     // Create prefs for the profile with safe browsing enabled or not.
     std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
         new sync_preferences::TestingPrefServiceSyncable);
-    chrome::RegisterUserProfilePrefs(prefs->registry());
+    RegisterUserProfilePrefs(prefs->registry());
     prefs->SetBoolean(
         prefs::kSafeBrowsingEnabled,
         safe_browsing_opt_in == SAFE_BROWSING_ONLY ||
@@ -299,7 +296,7 @@ class IncidentReportingServiceTest : public testing::Test {
     incident->set_path(kTestTrackedPrefPath);
     if (value)
       incident->set_atomic_value(value);
-    return base::MakeUnique<safe_browsing::TrackedPreferenceIncident>(
+    return std::make_unique<safe_browsing::TrackedPreferenceIncident>(
         std::move(incident), false /* is_personal */);
   }
 
@@ -406,8 +403,8 @@ class IncidentReportingServiceTest : public testing::Test {
             callback) {
       // Post a task to run the callback.
       base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE, base::BindOnce(callback, base::Passed(&binary_download),
-                                    base::Passed(&non_binary_download)));
+          FROM_HERE, base::BindOnce(callback, std::move(binary_download),
+                                    std::move(non_binary_download)));
       return std::unique_ptr<safe_browsing::LastDownloadFinder>(
           new FakeDownloadFinder(on_deleted));
     }
@@ -562,7 +559,7 @@ class IncidentReportingServiceTest : public testing::Test {
       on_start_upload_callback_.Run();
       on_start_upload_callback_ = base::Closure();
     }
-    return base::MakeUnique<FakeUploader>(
+    return std::make_unique<FakeUploader>(
         base::Bind(&IncidentReportingServiceTest::OnUploaderDestroyed,
                    base::Unretained(this)),
         callback, upload_result_);
@@ -1306,19 +1303,20 @@ TEST_F(IncidentReportingServiceTest, UploadsWithBothDownloadTypes) {
 // Test that a profile's prune state is properly cleaned upon load.
 TEST_F(IncidentReportingServiceTest, CleanLegacyPruneState) {
   CreateIncidentReportingService();
-  const std::string omnibox_type(base::IntToString(
-      static_cast<int32_t>(safe_browsing::IncidentType::OMNIBOX_INTERACTION)));
+  const std::string blacklist_load_type(base::IntToString(static_cast<int32_t>(
+      safe_browsing::IncidentType::OBSOLETE_BLACKLIST_LOAD)));
   const std::string preference_type(base::IntToString(
       static_cast<int32_t>(safe_browsing::IncidentType::TRACKED_PREFERENCE)));
 
   // Set up a prune state dict with data to be cleared (and not).
   std::unique_ptr<base::DictionaryValue> incidents_sent(
       new base::DictionaryValue());
-  auto type_dict = base::MakeUnique<base::DictionaryValue>();
-  type_dict->SetStringWithoutPathExpansion("foo", "47");
-  incidents_sent->SetWithoutPathExpansion(omnibox_type, std::move(type_dict));
-  type_dict = base::MakeUnique<base::DictionaryValue>();
-  type_dict->SetStringWithoutPathExpansion("bar", "43");
+  auto type_dict = std::make_unique<base::DictionaryValue>();
+  type_dict->SetKey("foo", base::Value("47"));
+  incidents_sent->SetWithoutPathExpansion(blacklist_load_type,
+                                          std::move(type_dict));
+  type_dict = std::make_unique<base::DictionaryValue>();
+  type_dict->SetKey("bar", base::Value("43"));
   incidents_sent->SetWithoutPathExpansion(preference_type,
                                           std::move(type_dict));
 
@@ -1333,7 +1331,7 @@ TEST_F(IncidentReportingServiceTest, CleanLegacyPruneState) {
   const base::DictionaryValue* new_state =
       profile->GetPrefs()->GetDictionary(prefs::kSafeBrowsingIncidentsSent);
   // The legacy value must be gone.
-  ASSERT_FALSE(new_state->HasKey(omnibox_type));
+  ASSERT_FALSE(new_state->HasKey(blacklist_load_type));
   // But other data must be untouched.
   ASSERT_TRUE(new_state->HasKey(preference_type));
 }

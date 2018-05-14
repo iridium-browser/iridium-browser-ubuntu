@@ -14,6 +14,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/translate/translate_service.h"
@@ -34,6 +35,7 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "ui/base/ui_base_features.h"
 
 namespace {
 
@@ -61,6 +63,9 @@ class TranslateBaseBrowserTest : public InProcessBrowserTest {
   TranslateBaseBrowserTest() {}
 
   void SetUp() override {
+    // --secondary-ui-md forces the bubble to be enabled, so explicitly
+    // disable it since this test deals with the infobar.
+    scoped_feature_list_.InitAndDisableFeature(features::kSecondaryUiMd);
     set_open_about_blank_on_browser_launch(false);
     translate::TranslateManager::SetIgnoreMissingKeyForTesting(true);
     InProcessBrowserTest::SetUp();
@@ -78,6 +83,7 @@ class TranslateBaseBrowserTest : public InProcessBrowserTest {
   }
 
  private:
+  base::test::ScopedFeatureList scoped_feature_list_;
   DISALLOW_COPY_AND_ASSIGN(TranslateBaseBrowserTest);
 };
 
@@ -290,13 +296,16 @@ IN_PROC_BROWSER_TEST_F(TranslateBrowserTest, IgnoreRefreshMetaTagAtOnload) {
       kRefreshMetaTagAtOnloadTestPath, false));
 }
 
-IN_PROC_BROWSER_TEST_F(TranslateBrowserTest, UpdateLocation) {
-  ASSERT_NO_FATAL_FAILURE(CheckForTranslateUI(
-      kUpdateLocationTestPath, false));
+// TODO(toyoshim, creis): The infobar should be dismissed on client redirects.
+// See https://crbug.com/781879.
+IN_PROC_BROWSER_TEST_F(TranslateBrowserTest, DISABLED_UpdateLocation) {
+  ASSERT_NO_FATAL_FAILURE(CheckForTranslateUI(kUpdateLocationTestPath, false));
 }
 
-IN_PROC_BROWSER_TEST_F(TranslateBrowserTest, UpdateLocationAtOnload) {
-  ASSERT_NO_FATAL_FAILURE(CheckForTranslateUI(
-      kUpdateLocationAtOnloadTestPath, false));
+// TODO(toyoshim, creis): The infobar should be dismissed on client redirects.
+// See https://crbug.com/781879.
+IN_PROC_BROWSER_TEST_F(TranslateBrowserTest, DISABLED_UpdateLocationAtOnload) {
+  ASSERT_NO_FATAL_FAILURE(
+      CheckForTranslateUI(kUpdateLocationAtOnloadTestPath, false));
 }
 #endif  // !defined(USE_AURA)

@@ -7,7 +7,14 @@
 
 #include <utility>
 
+// The following header file has to be included from at least
+// non-test file in order to avoid strange linking errors.
+// TODO(bnc): Remove this include as soon as it is included elsewhere in
+// non-test code.
+#include "net/spdy/platform/api/spdy_mem_slice.h"
+
 #include "net/spdy/platform/api/spdy_string.h"
+#include "net/spdy/platform/api/spdy_string_piece.h"
 #include "net/spdy/platform/impl/spdy_string_utils_impl.h"
 
 namespace net {
@@ -34,6 +41,26 @@ inline void SpdyStringAppendF(const Args&... args) {
 
 inline char SpdyHexDigitToInt(char c) {
   return SpdyHexDigitToIntImpl(c);
+}
+
+inline SpdyString SpdyHexDecode(SpdyStringPiece data) {
+  return SpdyHexDecodeImpl(data);
+}
+
+inline bool SpdyHexDecodeToUInt32(SpdyStringPiece data, uint32_t* out) {
+  return SpdyHexDecodeToUInt32Impl(data, out);
+}
+
+inline SpdyString SpdyHexEncode(const char* bytes, size_t size) {
+  return SpdyHexEncodeImpl(bytes, size);
+}
+
+inline SpdyString SpdyHexEncodeUInt32AndTrim(uint32_t data) {
+  return SpdyHexEncodeUInt32AndTrimImpl(data);
+}
+
+inline SpdyString SpdyHexDump(SpdyStringPiece data) {
+  return SpdyHexDumpImpl(data);
 }
 
 }  // namespace net

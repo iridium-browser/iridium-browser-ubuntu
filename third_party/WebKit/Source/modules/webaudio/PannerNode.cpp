@@ -57,16 +57,15 @@ PannerHandler::PannerHandler(AudioNode& node,
       distance_model_(DistanceEffect::kModelInverse),
       is_azimuth_elevation_dirty_(true),
       is_distance_cone_gain_dirty_(true),
-      last_gain_(-1.0),
       cached_azimuth_(0),
       cached_elevation_(0),
       cached_distance_cone_gain_(1.0f),
-      position_x_(position_x),
-      position_y_(position_y),
-      position_z_(position_z),
-      orientation_x_(orientation_x),
-      orientation_y_(orientation_y),
-      orientation_z_(orientation_z) {
+      position_x_(&position_x),
+      position_y_(&position_y),
+      position_z_(&position_z),
+      orientation_x_(&orientation_x),
+      orientation_y_(&orientation_y),
+      orientation_z_(&orientation_z) {
   AddInput();
   AddOutput(2);
 
@@ -82,7 +81,7 @@ PannerHandler::PannerHandler(AudioNode& node,
   Initialize();
 }
 
-PassRefPtr<PannerHandler> PannerHandler::Create(
+scoped_refptr<PannerHandler> PannerHandler::Create(
     AudioNode& node,
     float sample_rate,
     AudioParamHandler& position_x,
@@ -91,9 +90,9 @@ PassRefPtr<PannerHandler> PannerHandler::Create(
     AudioParamHandler& orientation_x,
     AudioParamHandler& orientation_y,
     AudioParamHandler& orientation_z) {
-  return AdoptRef(new PannerHandler(node, sample_rate, position_x, position_y,
-                                    position_z, orientation_x, orientation_y,
-                                    orientation_z));
+  return base::AdoptRef(new PannerHandler(node, sample_rate, position_x,
+                                          position_y, position_z, orientation_x,
+                                          orientation_y, orientation_z));
 }
 
 PannerHandler::~PannerHandler() {
@@ -151,10 +150,8 @@ void PannerHandler::Process(size_t frames_to_process) {
       // Get the distance and cone gain.
       float total_gain = DistanceConeGain();
 
-      last_gain_ = total_gain;
-
-      // Apply gain in-place with de-zippering.
-      destination->CopyWithGainFrom(*destination, &last_gain_, total_gain);
+      // Apply gain in-place.
+      destination->CopyWithGainFrom(*destination, total_gain);
     }
   } else {
     // Too bad - The tryLock() failed.  We must be in the middle of changing the
@@ -433,25 +430,35 @@ void PannerHandler::SetConeOuterGain(double angle) {
   MarkPannerAsDirty(PannerHandler::kDistanceConeGainDirty);
 }
 
-void PannerHandler::SetPosition(float x, float y, float z) {
+void PannerHandler::SetPosition(float x,
+                                float y,
+                                float z,
+                                ExceptionState& exceptionState) {
   // This synchronizes with process().
   MutexLocker process_locker(process_lock_);
 
-  position_x_->SetValue(x);
-  position_y_->SetValue(y);
-  position_z_->SetValue(z);
+  double now = Context()->currentTime();
+
+  position_x_->Timeline().SetValueAtTime(x, now, exceptionState);
+  position_y_->Timeline().SetValueAtTime(y, now, exceptionState);
+  position_z_->Timeline().SetValueAtTime(z, now, exceptionState);
 
   MarkPannerAsDirty(PannerHandler::kAzimuthElevationDirty |
                     PannerHandler::kDistanceConeGainDirty);
 }
 
-void PannerHandler::SetOrientation(float x, float y, float z) {
+void PannerHandler::SetOrientation(float x,
+                                   float y,
+                                   float z,
+                                   ExceptionState& exceptionState) {
   // This synchronizes with process().
   MutexLocker process_locker(process_lock_);
 
-  orientation_x_->SetValue(x);
-  orientation_y_->SetValue(y);
-  orientation_z_->SetValue(z);
+  double now = Context()->currentTime();
+
+  orientation_x_->Timeline().SetValueAtTime(x, now, exceptionState);
+  orientation_y_->Timeline().SetValueAtTime(y, now, exceptionState);
+  orientation_z_->Timeline().SetValueAtTime(z, now, exceptionState);
 
   MarkPannerAsDirty(PannerHandler::kDistanceConeGainDirty);
 }
@@ -573,7 +580,7 @@ void PannerHandler::MarkPannerAsDirty(unsigned dirty) {
 void PannerHandler::SetChannelCount(unsigned long channel_count,
                                     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   // A PannerNode only supports 1 or 2 channels
   if (channel_count > 0 && channel_count <= 2) {
@@ -594,7 +601,7 @@ void PannerHandler::SetChannelCount(unsigned long channel_count,
 void PannerHandler::SetChannelCountMode(const String& mode,
                                         ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  BaseAudioContext::AutoLocker locker(Context());
+  BaseAudioContext::GraphAutoLocker locker(Context());
 
   ChannelCountMode old_mode = InternalChannelCountMode();
 
@@ -647,15 +654,30 @@ void PannerHandler::UpdateDirtyState() {
 
 PannerNode::PannerNode(BaseAudioContext& context)
     : AudioNode(context),
-      position_x_(AudioParam::Create(context, kParamTypePannerPositionX, 0.0)),
-      position_y_(AudioParam::Create(context, kParamTypePannerPositionY, 0.0)),
-      position_z_(AudioParam::Create(context, kParamTypePannerPositionZ, 0.0)),
-      orientation_x_(
-          AudioParam::Create(context, kParamTypePannerOrientationX, 1.0)),
-      orientation_y_(
-          AudioParam::Create(context, kParamTypePannerOrientationY, 0.0)),
-      orientation_z_(
-          AudioParam::Create(context, kParamTypePannerOrientationZ, 0.0)) {
+      position_x_(AudioParam::Create(context,
+                                     kParamTypePannerPositionX,
+                                     "Panner.positionX",
+                                     0.0)),
+      position_y_(AudioParam::Create(context,
+                                     kParamTypePannerPositionY,
+                                     "Panner.positionY",
+                                     0.0)),
+      position_z_(AudioParam::Create(context,
+                                     kParamTypePannerPositionZ,
+                                     "Panner.positionZ",
+                                     0.0)),
+      orientation_x_(AudioParam::Create(context,
+                                        kParamTypePannerOrientationX,
+                                        "Panner.orientationX",
+                                        1.0)),
+      orientation_y_(AudioParam::Create(context,
+                                        kParamTypePannerOrientationY,
+                                        "Panner.orientationY",
+                                        0.0)),
+      orientation_z_(AudioParam::Create(context,
+                                        kParamTypePannerOrientationZ,
+                                        "Panner.orientationZ",
+                                        0.0)) {
   SetHandler(PannerHandler::Create(
       *this, context.sampleRate(), position_x_->Handler(),
       position_y_->Handler(), position_z_->Handler(), orientation_x_->Handler(),
@@ -717,12 +739,18 @@ void PannerNode::setPanningModel(const String& model) {
   GetPannerHandler().SetPanningModel(model);
 }
 
-void PannerNode::setPosition(float x, float y, float z) {
-  GetPannerHandler().SetPosition(x, y, z);
+void PannerNode::setPosition(float x,
+                             float y,
+                             float z,
+                             ExceptionState& exceptionState) {
+  GetPannerHandler().SetPosition(x, y, z, exceptionState);
 }
 
-void PannerNode::setOrientation(float x, float y, float z) {
-  GetPannerHandler().SetOrientation(x, y, z);
+void PannerNode::setOrientation(float x,
+                                float y,
+                                float z,
+                                ExceptionState& exceptionState) {
+  GetPannerHandler().SetOrientation(x, y, z, exceptionState);
 }
 
 String PannerNode::distanceModel() const {
@@ -797,7 +825,7 @@ void PannerNode::setConeOuterGain(double gain) {
   GetPannerHandler().SetConeOuterGain(gain);
 }
 
-DEFINE_TRACE(PannerNode) {
+void PannerNode::Trace(blink::Visitor* visitor) {
   visitor->Trace(position_x_);
   visitor->Trace(position_y_);
   visitor->Trace(position_z_);

@@ -31,8 +31,9 @@
 #include "core/editing/VisibleUnits.h"
 
 #include "core/editing/EditingUtilities.h"
+#include "core/editing/EphemeralRange.h"
+#include "core/editing/VisiblePosition.h"
 #include "core/layout/LayoutText.h"
-#include "core/layout/api/LayoutItem.h"
 
 namespace blink {
 
@@ -56,7 +57,7 @@ PositionTemplate<Strategy> StartOfParagraphAlgorithm(
     return PositionTemplate<Strategy>::BeforeNode(*start_node);
 
   Element* const start_block = EnclosingBlock(
-      PositionTemplate<Strategy>::FirstPositionInOrBeforeNode(start_node),
+      PositionTemplate<Strategy>::FirstPositionInOrBeforeNode(*start_node),
       kCannotCrossEditingBoundary);
   ContainerNode* const highest_root = HighestEditableRoot(position);
   const bool start_node_is_editable = HasEditableStyle(*start_node);
@@ -83,24 +84,24 @@ PositionTemplate<Strategy> StartOfParagraphAlgorithm(
         break;
     }
 
-    const LayoutItem layout_item =
-        LayoutItem(previous_node_iterator->GetLayoutObject());
-    if (layout_item.IsNull()) {
+    const LayoutObject* layout_object =
+        previous_node_iterator->GetLayoutObject();
+    if (!layout_object) {
       previous_node_iterator =
           Strategy::PreviousPostOrder(*previous_node_iterator, start_block);
       continue;
     }
-    const ComputedStyle& style = layout_item.StyleRef();
+    const ComputedStyle& style = layout_object->StyleRef();
     if (style.Visibility() != EVisibility::kVisible) {
       previous_node_iterator =
           Strategy::PreviousPostOrder(*previous_node_iterator, start_block);
       continue;
     }
 
-    if (layout_item.IsBR() || IsEnclosingBlock(previous_node_iterator))
+    if (layout_object->IsBR() || IsEnclosingBlock(previous_node_iterator))
       break;
 
-    if (layout_item.IsText() &&
+    if (layout_object->IsText() &&
         ToLayoutText(previous_node_iterator->GetLayoutObject())
             ->ResolvedTextLength()) {
       SECURITY_DCHECK(previous_node_iterator->IsTextNode());
@@ -164,7 +165,7 @@ PositionTemplate<Strategy> EndOfParagraphAlgorithm(
     return PositionTemplate<Strategy>::AfterNode(*start_node);
 
   Element* const start_block = EnclosingBlock(
-      PositionTemplate<Strategy>::FirstPositionInOrBeforeNode(start_node),
+      PositionTemplate<Strategy>::FirstPositionInOrBeforeNode(*start_node),
       kCannotCrossEditingBoundary);
   ContainerNode* const highest_root = HighestEditableRoot(position);
   const bool start_node_is_editable = HasEditableStyle(*start_node);
@@ -331,10 +332,9 @@ bool IsStartOfParagraph(const VisiblePosition& pos,
                                                       boundary_crossing_rule);
 }
 
-bool IsStartOfParagraph(const VisiblePositionInFlatTree& pos,
-                        EditingBoundaryCrossingRule boundary_crossing_rule) {
+bool IsStartOfParagraph(const VisiblePositionInFlatTree& pos) {
   return IsStartOfParagraphAlgorithm<EditingInFlatTreeStrategy>(
-      pos, boundary_crossing_rule);
+      pos, kCannotCrossEditingBoundary);
 }
 
 bool IsEndOfParagraph(const VisiblePosition& pos,
@@ -343,39 +343,9 @@ bool IsEndOfParagraph(const VisiblePosition& pos,
                                                     boundary_crossing_rule);
 }
 
-bool IsEndOfParagraph(const VisiblePositionInFlatTree& pos,
-                      EditingBoundaryCrossingRule boundary_crossing_rule) {
+bool IsEndOfParagraph(const VisiblePositionInFlatTree& pos) {
   return IsEndOfParagraphAlgorithm<EditingInFlatTreeStrategy>(
-      pos, boundary_crossing_rule);
-}
-
-// TODO(editing-dev): We should move |PreviousParagraphPosition()| to
-// "SelectionModifier.cpp"
-VisiblePosition PreviousParagraphPosition(const VisiblePosition& p,
-                                          LayoutUnit x) {
-  DCHECK(p.IsValid()) << p;
-  VisiblePosition pos = p;
-  do {
-    VisiblePosition n = PreviousLinePosition(pos, x);
-    if (n.IsNull() || n.DeepEquivalent() == pos.DeepEquivalent())
-      break;
-    pos = n;
-  } while (InSameParagraph(p, pos));
-  return pos;
-}
-
-// TODO(editing-dev): We should move |NextParagraphPosition()| to
-// "SelectionModifier.cpp"
-VisiblePosition NextParagraphPosition(const VisiblePosition& p, LayoutUnit x) {
-  DCHECK(p.IsValid()) << p;
-  VisiblePosition pos = p;
-  do {
-    VisiblePosition n = NextLinePosition(pos, x);
-    if (n.IsNull() || n.DeepEquivalent() == pos.DeepEquivalent())
-      break;
-    pos = n;
-  } while (InSameParagraph(p, pos));
-  return pos;
+      pos, kCannotCrossEditingBoundary);
 }
 
 EphemeralRange ExpandToParagraphBoundary(const EphemeralRange& range) {
@@ -389,7 +359,7 @@ EphemeralRange ExpandToParagraphBoundary(const EphemeralRange& range) {
   const Position& paragraph_end = EndOfParagraph(end).DeepEquivalent();
   DCHECK(paragraph_end.IsNotNull()) << range.EndPosition();
 
-  // TODO(xiaochengh): There are some cases (crbug.com/640112) where we get
+  // TODO(editing-dev): There are some cases (crbug.com/640112) where we get
   // |paragraphStart > paragraphEnd|, which is the reason we cannot directly
   // return |EphemeralRange(paragraphStart, paragraphEnd)|. This is not
   // desired, though. We should do more investigation to ensure that why

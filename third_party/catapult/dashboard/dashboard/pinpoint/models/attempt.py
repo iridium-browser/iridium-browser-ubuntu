@@ -29,6 +29,14 @@ class Attempt(object):
     self._executions = []
 
   @property
+  def quests(self):
+    return tuple(self._quests)
+
+  @property
+  def executions(self):
+    return tuple(self._executions)
+
+  @property
   def completed(self):
     """Returns True iff the Attempt is completed. Otherwise, it is in progress.
 
@@ -36,21 +44,22 @@ class Attempt(object):
     Attempt's completed status.
     """
     if not self._executions:
-      return False
+      return not self._quests
 
     return self._last_execution.failed or (
         self._last_execution.completed and
         len(self._quests) == len(self._executions))
 
   @property
-  def result_values(self):
-    assert self.completed
-    return dict((quest, execution.result_values)
-                for quest, execution in zip(self._quests, self._executions))
+  def failed(self):
+    return bool(self._executions and self._last_execution.failed)
 
   @property
   def _last_execution(self):
     return self._executions[-1]
+
+  def AsDict(self):
+    return {'executions': [e.AsDict() for e in self._executions]}
 
   def ScheduleWork(self):
     """Run this Attempt and update its status."""
@@ -70,9 +79,8 @@ class Attempt(object):
       return
 
     next_quest = self._quests[len(self._executions)]
+    arguments = {'change': self._change}
     if self._executions:
-      arguments = self._last_execution.result_arguments
-    else:
-      arguments = {'change': self._change}
+      arguments.update(self._last_execution.result_arguments)
 
     self._executions.append(next_quest.Start(**arguments))

@@ -1,7 +1,7 @@
 {
     "extensions": [
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Settings",
             "actionId": "settings.show",
             "title": "Settings",
@@ -13,14 +13,14 @@
             ]
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Settings",
             "actionId": "settings.documentation",
             "title": "Documentation",
             "className": "Settings.SettingsScreen.ActionDelegate"
         },
         {
-            "type": "@UI.ActionDelegate",
+            "type": "action",
             "category": "Settings",
             "actionId": "settings.shortcuts",
             "title": "Shortcuts",
@@ -36,13 +36,16 @@
         {
             "type": "context-menu-item",
             "location": "mainMenu/footer",
-            "order": 10,
             "actionId": "settings.shortcuts"
         },
         {
             "type": "context-menu-item",
+            "location": "mainMenuHelp/default",
+            "actionId": "settings.documentation"
+        },
+        {
+            "type": "context-menu-item",
             "location": "mainMenu/footer",
-            "order": 20,
             "actionId": "settings.show"
         },
         {
@@ -58,7 +61,7 @@
             "location": "settings-view",
             "id": "experiments",
             "title": "Experiments",
-            "order": 2,
+            "order": 3,
             "experiment": "*",
             "className": "Settings.ExperimentsSettingsTab"
         },
@@ -67,7 +70,7 @@
             "location": "settings-view",
             "id": "blackbox",
             "title": "Blackboxing",
-            "order": 3,
+            "order": 4,
             "className": "Settings.FrameworkBlackboxSettingsTab"
         },
         {

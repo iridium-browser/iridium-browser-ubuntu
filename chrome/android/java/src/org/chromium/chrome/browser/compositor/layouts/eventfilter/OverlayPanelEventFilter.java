@@ -15,7 +15,7 @@ import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
 import org.chromium.chrome.browser.contextualsearch.SwipeRecognizer;
-import org.chromium.content.browser.ContentViewCore;
+import org.chromium.content_public.browser.ContentViewCore;
 
 import java.util.ArrayList;
 
@@ -121,8 +121,7 @@ public class OverlayPanelEventFilter extends GestureEventFilter {
 
         @Override
         public boolean onSingleTapUp(MotionEvent event) {
-            mPanel.handleClick(event.getEventTime(), event.getX() * mPxToDp,
-                    event.getY() * mPxToDp);
+            mPanel.handleClick(event.getX() * mPxToDp, event.getY() * mPxToDp);
             return true;
         }
     }

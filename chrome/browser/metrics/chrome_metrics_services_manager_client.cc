@@ -38,6 +38,7 @@
 #include "base/win/registry.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/install_static/install_util.h"
+#include "components/crash/content/app/crash_export_thunks.h"
 #include "components/crash/content/app/crashpad.h"
 #endif  // OS_WIN
 
@@ -45,27 +46,22 @@
 #include "chromeos/settings/cros_settings_names.h"
 #endif  // defined(OS_CHROMEOS)
 
-namespace {
+namespace metrics {
 
-#if defined(OS_WIN)
-// Type for the function pointer to enable and disable crash reporting on
-// windows. Needed because the function is loaded from chrome_elf.
-typedef void (*SetUploadConsentPointer)(bool);
-
-// The name of the function used to set the uploads enabled state in
-// components/crash/content/app/crashpad.cc. This is used to call the function
-// exported by the chrome_elf dll.
-const char kCrashpadUpdateConsentFunctionName[] = "SetUploadConsentImpl";
-#endif  // OS_WIN
-
-// Name of the variations param that defines the sampling rate.
-const char kRateParamName[] = "sampling_rate_per_mille";
-
+namespace internal {
 // Metrics reporting feature. This feature, along with user consent, controls if
 // recording and reporting are enabled. If the feature is enabled, but no
 // consent is given, then there will be no recording or reporting.
 const base::Feature kMetricsReportingFeature{"MetricsReporting",
                                              base::FEATURE_ENABLED_BY_DEFAULT};
+
+}  // namespace internal
+}  // namespace metrics
+
+namespace {
+
+// Name of the variations param that defines the sampling rate.
+const char kRateParamName[] = "sampling_rate_per_mille";
 
 // Posts |GoogleUpdateSettings::StoreMetricsClientInfo| on blocking pool thread
 // because it needs access to IO and cannot work from UI thread.
@@ -125,11 +121,11 @@ class ChromeMetricsServicesManagerClient::ChromeEnabledStateProvider
   ChromeEnabledStateProvider() {}
   ~ChromeEnabledStateProvider() override {}
 
-  bool IsConsentGiven() override {
+  bool IsConsentGiven() const override {
     return ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
   }
 
-  bool IsReportingEnabled() override {
+  bool IsReportingEnabled() const override {
     return IsConsentGiven() &&
            ChromeMetricsServicesManagerClient::IsClientInSample();
   }
@@ -139,17 +135,9 @@ class ChromeMetricsServicesManagerClient::ChromeEnabledStateProvider
 
 ChromeMetricsServicesManagerClient::ChromeMetricsServicesManagerClient(
     PrefService* local_state)
-    : enabled_state_provider_(new ChromeEnabledStateProvider()),
+    : enabled_state_provider_(std::make_unique<ChromeEnabledStateProvider>()),
       local_state_(local_state) {
   DCHECK(local_state);
-
-#if defined(OS_CHROMEOS)
-  cros_settings_observer_ = chromeos::CrosSettings::Get()->AddSettingsObserver(
-      chromeos::kStatsReportingPref,
-      base::Bind(&OnCrosMetricsReportingSettingChange));
-  // Invoke the callback once initially to set the metrics reporting state.
-  OnCrosMetricsReportingSettingChange();
-#endif
 }
 
 ChromeMetricsServicesManagerClient::~ChromeMetricsServicesManagerClient() {}
@@ -190,7 +178,7 @@ void ChromeMetricsServicesManagerClient::CreateFallbackSamplingTrial(
   // Setup the feature.
   const std::string& group_name = trial->GetGroupNameWithoutActivation();
   feature_list->RegisterFieldTrialOverride(
-      kMetricsReportingFeature.name,
+      metrics::internal::kMetricsReportingFeature.name,
       group_name == kSampledOutGroup
           ? base::FeatureList::OVERRIDE_DISABLE_FEATURE
           : base::FeatureList::OVERRIDE_ENABLE_FEATURE,
@@ -206,7 +194,8 @@ bool ChromeMetricsServicesManagerClient::IsClientInSample() {
   if (!IsClientEligibleForSampling())
     return true;
 
-  return base::FeatureList::IsEnabled(kMetricsReportingFeature);
+  return base::FeatureList::IsEnabled(
+      metrics::internal::kMetricsReportingFeature);
 }
 
 // static
@@ -217,7 +206,7 @@ bool ChromeMetricsServicesManagerClient::GetSamplingRatePerMille(int* rate) {
     return false;
 
   std::string rate_str = variations::GetVariationParamValueByFeature(
-      kMetricsReportingFeature, kRateParamName);
+      metrics::internal::kMetricsReportingFeature, kRateParamName);
   if (rate_str.empty())
     return false;
 
@@ -227,10 +216,20 @@ bool ChromeMetricsServicesManagerClient::GetSamplingRatePerMille(int* rate) {
   return true;
 }
 
+#if defined(OS_CHROMEOS)
+void ChromeMetricsServicesManagerClient::OnCrosSettingsCreated() {
+  cros_settings_observer_ = chromeos::CrosSettings::Get()->AddSettingsObserver(
+      chromeos::kStatsReportingPref,
+      base::Bind(&OnCrosMetricsReportingSettingChange));
+  // Invoke the callback once initially to set the metrics reporting state.
+  OnCrosMetricsReportingSettingChange();
+}
+#endif
+
 std::unique_ptr<rappor::RapporServiceImpl>
 ChromeMetricsServicesManagerClient::CreateRapporServiceImpl() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return base::MakeUnique<rappor::RapporServiceImpl>(
+  return std::make_unique<rappor::RapporServiceImpl>(
       local_state_, base::Bind(&chrome::IsIncognitoSessionActive));
 }
 
@@ -238,7 +237,7 @@ std::unique_ptr<variations::VariationsService>
 ChromeMetricsServicesManagerClient::CreateVariationsService() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return variations::VariationsService::Create(
-      base::MakeUnique<ChromeVariationsServiceClient>(), local_state_,
+      std::make_unique<ChromeVariationsServiceClient>(), local_state_,
       GetMetricsStateManager(), switches::kDisableBackgroundNetworking,
       chrome_variations::CreateUIStringOverrider());
 }
@@ -263,6 +262,10 @@ bool ChromeMetricsServicesManagerClient::IsMetricsReportingEnabled() {
   return enabled_state_provider_->IsReportingEnabled();
 }
 
+bool ChromeMetricsServicesManagerClient::IsMetricsConsentGiven() {
+  return enabled_state_provider_->IsConsentGiven();
+}
+
 #if defined(OS_WIN)
 void ChromeMetricsServicesManagerClient::UpdateRunningServices(
     bool may_record,
@@ -272,19 +275,10 @@ void ChromeMetricsServicesManagerClient::UpdateRunningServices(
   install_static::SetCollectStatsInSample(IsClientInSample());
 
   // Next, get Crashpad to pick up the sampling state for this session.
-
-  // The crash reporting is handled by chrome_elf.dll.
-  HMODULE elf_module = GetModuleHandle(chrome::kChromeElfDllName);
-  static SetUploadConsentPointer set_upload_consent =
-      reinterpret_cast<SetUploadConsentPointer>(
-          GetProcAddress(elf_module, kCrashpadUpdateConsentFunctionName));
-
-  if (set_upload_consent) {
-    // Crashpad will use the kRegUsageStatsInSample registry value to apply
-    // sampling correctly, but may_record already reflects the sampling state.
-    // This isn't a problem though, since they will be consistent.
-    set_upload_consent(may_record && may_upload);
-  }
+  // Crashpad will use the kRegUsageStatsInSample registry value to apply
+  // sampling correctly, but may_record already reflects the sampling state.
+  // This isn't a problem though, since they will be consistent.
+  SetUploadConsent_ExportThunk(may_record && may_upload);
 }
 #endif  // defined(OS_WIN)
 

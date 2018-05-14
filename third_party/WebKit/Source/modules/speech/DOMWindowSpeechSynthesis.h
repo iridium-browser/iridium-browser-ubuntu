@@ -42,16 +42,17 @@ class MODULES_EXPORT DOMWindowSpeechSynthesis final
   USING_GARBAGE_COLLECTED_MIXIN(DOMWindowSpeechSynthesis);
 
  public:
+  static const char kSupplementName[];
+
   static SpeechSynthesis* speechSynthesis(ScriptState*, LocalDOMWindow&);
   static DOMWindowSpeechSynthesis& From(LocalDOMWindow&);
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   explicit DOMWindowSpeechSynthesis(LocalDOMWindow&);
 
   SpeechSynthesis* speechSynthesis(ScriptState*);
-  static const char* SupplementName();
 
   Member<SpeechSynthesis> speech_synthesis_;
 };

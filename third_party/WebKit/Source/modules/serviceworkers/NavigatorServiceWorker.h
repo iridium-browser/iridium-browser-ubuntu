@@ -24,6 +24,8 @@ class MODULES_EXPORT NavigatorServiceWorker final
   USING_GARBAGE_COLLECTED_MIXIN(NavigatorServiceWorker);
 
  public:
+  static const char kSupplementName[];
+
   static NavigatorServiceWorker* From(Document&);
   static NavigatorServiceWorker& From(Navigator&);
   static NavigatorServiceWorker* ToNavigatorServiceWorker(Navigator&);
@@ -35,14 +37,12 @@ class MODULES_EXPORT NavigatorServiceWorker final
                                                String& error_message);
   void ClearServiceWorker();
 
-  DECLARE_VIRTUAL_TRACE();
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit NavigatorServiceWorker(Navigator&);
   ServiceWorkerContainer* serviceWorker(LocalFrame*, ExceptionState&);
   ServiceWorkerContainer* serviceWorker(LocalFrame*, String& error_message);
-
-  static const char* SupplementName();
 
   Member<ServiceWorkerContainer> service_worker_;
 };

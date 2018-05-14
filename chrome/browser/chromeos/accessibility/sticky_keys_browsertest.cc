@@ -8,8 +8,8 @@
 #include "ash/sticky_keys/sticky_keys_controller.h"
 #include "ash/sticky_keys/sticky_keys_overlay.h"
 #include "ash/system/tray/system_tray.h"
-#include "base/command_line.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -22,6 +22,7 @@
 #include "chrome/test/base/interactive_test_utils.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/prefs/pref_service.h"
+#include "ui/app_list/presenter/app_list.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
@@ -38,15 +39,13 @@ class StickyKeysBrowserTest : public InProcessBrowserTest {
   }
 
  protected:
-  StickyKeysBrowserTest() {}
-  ~StickyKeysBrowserTest() override {}
+  StickyKeysBrowserTest() = default;
+  ~StickyKeysBrowserTest() override = default;
 
-  void EnableStickyKeys() {
-    AccessibilityManager::Get()->EnableStickyKeys(true);
-  }
-
-  void DisableStickyKeys() {
-    AccessibilityManager::Get()->EnableStickyKeys(false);
+  void SetStickyKeysEnabled(bool enabled) {
+    AccessibilityManager::Get()->EnableStickyKeys(enabled);
+    // Spin the message loop to ensure ash sees the change.
+    base::RunLoop().RunUntilIdle();
   }
 
   ash::SystemTray* GetSystemTray() {
@@ -67,10 +66,10 @@ class StickyKeysBrowserTest : public InProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OpenTrayMenu) {
-  EnableStickyKeys();
+  SetStickyKeysEnabled(true);
 
   // Open system tray bubble with shortcut.
-  SendKeyPress(ui::VKEY_MENU); // alt key.
+  SendKeyPress(ui::VKEY_MENU);  // alt key.
   SendKeyPress(ui::VKEY_SHIFT);
   SendKeyPress(ui::VKEY_S);
   EXPECT_TRUE(GetSystemTray()->HasSystemBubble());
@@ -84,8 +83,8 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OpenTrayMenu) {
   EXPECT_FALSE(GetSystemTray()->HasSystemBubble());
 
   // With sticky keys disabled, we will fail to perform the shortcut.
-  DisableStickyKeys();
-  SendKeyPress(ui::VKEY_MENU); // alt key.
+  SetStickyKeysEnabled(false);
+  SendKeyPress(ui::VKEY_MENU);  // alt key.
   SendKeyPress(ui::VKEY_SHIFT);
   SendKeyPress(ui::VKEY_S);
   EXPECT_FALSE(GetSystemTray()->HasSystemBubble());
@@ -93,7 +92,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OpenTrayMenu) {
 
 IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OpenNewTabs) {
   // Lock the modifier key.
-  EnableStickyKeys();
+  SetStickyKeysEnabled(true);
   SendKeyPress(ui::VKEY_CONTROL);
   SendKeyPress(ui::VKEY_CONTROL);
 
@@ -111,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OpenNewTabs) {
   EXPECT_EQ(tab_count, tab_strip_model->count());
 
   // Shortcut should not work after disabling sticky keys.
-  DisableStickyKeys();
+  SetStickyKeysEnabled(false);
   SendKeyPress(ui::VKEY_CONTROL);
   SendKeyPress(ui::VKEY_CONTROL);
   SendKeyPress(ui::VKEY_T);
@@ -126,7 +125,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, CtrlClickHomeButton) {
   EXPECT_EQ(tab_count, tab_strip_model->count());
 
   // Test sticky keys with modified mouse click action.
-  EnableStickyKeys();
+  SetStickyKeysEnabled(true);
   SendKeyPress(ui::VKEY_CONTROL);
   ui_test_utils::ClickOnView(browser(), VIEW_ID_HOME_BUTTON);
   EXPECT_EQ(++tab_count, tab_strip_model->count());
@@ -145,14 +144,14 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, CtrlClickHomeButton) {
   EXPECT_EQ(tab_count, tab_strip_model->count());
 
   // Test disabling sticky keys prevent modified mouse click.
-  DisableStickyKeys();
+  SetStickyKeysEnabled(false);
   SendKeyPress(ui::VKEY_CONTROL);
   ui_test_utils::ClickOnView(browser(), VIEW_ID_HOME_BUTTON);
   EXPECT_EQ(tab_count, tab_strip_model->count());
 }
 
 IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
-  EnableStickyKeys();
+  SetStickyKeysEnabled(true);
 
   OmniboxView* omnibox =
       browser()->window()->GetLocationBar()->GetOmniboxView();
@@ -162,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
 
   // Make sure that the AppList is not erroneously displayed and the omnibox
   // doesn't lose focus.
-  EXPECT_FALSE(ash::Shell::Get()->GetAppListTargetVisibility());
+  EXPECT_FALSE(ash::Shell::Get()->app_list()->GetTargetVisibility());
   EXPECT_TRUE(omnibox->GetNativeView()->HasFocus());
 
   // Type 'foo'.
@@ -176,14 +175,14 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
   ASSERT_EQ(3U, start);
   ASSERT_EQ(3U, end);
 
-  EXPECT_FALSE(ash::Shell::Get()->GetAppListTargetVisibility());
+  EXPECT_FALSE(ash::Shell::Get()->app_list()->GetTargetVisibility());
   EXPECT_TRUE(omnibox->GetNativeView()->HasFocus());
 
   // Hit Home by sequencing Search (left Windows) and Left (arrow).
   SendKeyPress(ui::VKEY_LWIN);
   SendKeyPress(ui::VKEY_LEFT);
 
-  EXPECT_FALSE(ash::Shell::Get()->GetAppListTargetVisibility());
+  EXPECT_FALSE(ash::Shell::Get()->app_list()->GetTargetVisibility());
   EXPECT_TRUE(omnibox->GetNativeView()->HasFocus());
 
   // Verify caret moved to the beginning.
@@ -193,10 +192,8 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
 }
 
 IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OverlayShown) {
-  const ui::KeyboardCode modifier_keys[] = { ui::VKEY_CONTROL,
-                                             ui::VKEY_SHIFT,
-                                             ui::VKEY_MENU,
-                                             ui::VKEY_COMMAND };
+  const ui::KeyboardCode modifier_keys[] = {ui::VKEY_CONTROL, ui::VKEY_SHIFT,
+                                            ui::VKEY_MENU, ui::VKEY_COMMAND};
 
   // Overlay should not be visible if sticky keys is not enabled.
   ash::StickyKeysController* controller =
@@ -208,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OverlayShown) {
   }
 
   // Cycle through the modifier keys and make sure each gets shown.
-  EnableStickyKeys();
+  SetStickyKeysEnabled(true);
   ash::StickyKeysOverlay* sticky_keys_overlay = controller->GetOverlayForTest();
   for (auto key_code : modifier_keys) {
     SendKeyPress(key_code);
@@ -222,7 +219,7 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OverlayShown) {
   // Disabling sticky keys should hide the overlay.
   SendKeyPress(ui::VKEY_CONTROL);
   EXPECT_TRUE(sticky_keys_overlay->is_visible());
-  DisableStickyKeys();
+  SetStickyKeysEnabled(false);
   EXPECT_FALSE(controller->GetOverlayForTest());
   for (auto key_code : modifier_keys) {
     SendKeyPress(key_code);

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -115,49 +116,6 @@ class RunBuildScriptTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     self._assertRunBuildScript(in_chroot=False, sudo=True)
     self._assertRunBuildScript(in_chroot=True, sudo=True)
 
-
-class RunTestSuiteTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
-  """Test RunTestSuite functionality."""
-
-  TEST_BOARD = 'x86-generic'
-  BUILD_ROOT = '/fake/root'
-
-  def _RunTestSuite(self, test_type):
-    commands.RunTestSuite(self.BUILD_ROOT, self.TEST_BOARD, self.tempdir,
-                          '/tmp/taco', archive_dir='/fake/root',
-                          whitelist_chrome_crashes=False,
-                          test_type=test_type)
-    self.assertCommandContains(['--no_graphics', '--verbose'])
-
-  def testFull(self):
-    """Test running FULL config."""
-    self._RunTestSuite(constants.FULL_AU_TEST_TYPE)
-    self.assertCommandContains(['--quick'], expected=False)
-    self.assertCommandContains(['--only_verify'], expected=False)
-
-  def testSimple(self):
-    """Test SIMPLE config."""
-    self._RunTestSuite(constants.SIMPLE_AU_TEST_TYPE)
-    self.assertCommandContains(['--quick_update'])
-
-  def testSmoke(self):
-    """Test SMOKE config."""
-    self._RunTestSuite(constants.SMOKE_SUITE_TEST_TYPE)
-    self.assertCommandContains(['--only_verify'])
-
-  def testGceSmokeTestType(self):
-    """Test GCE_SMOKE_TEST_TYPE."""
-    self._RunTestSuite(constants.GCE_SMOKE_TEST_TYPE)
-    self.assertCommandContains(['--only_verify'])
-    self.assertCommandContains(['--type=gce'])
-    self.assertCommandContains(['--suite=gce-smoke'])
-
-  def testGceSanityTestType(self):
-    """Test GCE_SANITY_TEST_TYPE."""
-    self._RunTestSuite(constants.GCE_SANITY_TEST_TYPE)
-    self.assertCommandContains(['--only_verify'])
-    self.assertCommandContains(['--type=gce'])
-    self.assertCommandContains(['--suite=gce-sanity'])
 
 class ChromeSDKTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
   """Basic tests for ChromeSDK commands with RunCommand mocked out."""
@@ -281,13 +239,15 @@ The suite job has another 2:39:39.789250 till timeout.
   def setUp(self):
     self._build = 'test-build'
     self._board = 'test-board'
+    self._model = 'test-model'
     self._suite = 'test-suite'
     self._pool = 'test-pool'
     self._num = 42
     self._file_bugs = True
     self._wait_for_results = True
     self._priority = 'test-priority'
-    self._timeout_mins = 23
+    self._timeout_mins = 2880
+    self._max_runtime_mins = None
     self._retry = False
     self._max_retries = 3
     self._minimum_duts = 2
@@ -471,9 +431,10 @@ The suite job has another 2:39:39.789250 till timeout.
                            commands._SWARMING_ADDITIONAL_TIMEOUT)
     self.SetCmdResults(
         args=[
-            '--pool', 'test-pool', '--num', '42',
+            '--pool', 'test-pool',
             '--file_bugs', 'True',
-            '--priority', 'test-priority', '--timeout_mins', '23',
+            '--priority', 'test-priority', '--timeout_mins', '2880',
+            '--max_runtime_mins', '2880',
             '--retry', 'False', '--max_retries', '3', '--minimum_duts', '2',
             '--suite_min_duts', '2', '--subsystems', '["light", "network"]'
         ],
@@ -484,11 +445,12 @@ The suite job has another 2:39:39.789250 till timeout.
     self.PatchJson([(self.JOB_ID_OUTPUT, False, None),
                     (self.WAIT_OUTPUT, False, None)])
     with self.OutputCapturer() as output:
-      cmd_result = self.RunHWTestSuite(pool=self._pool, num=self._num,
+      cmd_result = self.RunHWTestSuite(pool=self._pool,
                                        file_bugs=self._file_bugs,
                                        wait_for_results=self._wait_for_results,
                                        priority=self._priority,
                                        timeout_mins=self._timeout_mins,
+                                       max_runtime_mins=self._max_runtime_mins,
                                        retry=self._retry,
                                        max_retries=self._max_retries,
                                        minimum_duts=self._minimum_duts,
@@ -614,9 +576,11 @@ The suite job has another 2:39:39.789250 till timeout.
     result_1 = commands._GetRunSuiteArgs(build=self._build,
                                          suite=self._suite,
                                          board=self._board,
+                                         model=self._model,
                                          subsystems=['light'])
     expected_1 = ['--build', self._build,
                   '--board', self._board,
+                  '--model', self._model,
                   '--suite_name', 'suite_attr_wrapper',
                   '--suite_args',
                   ("{'attr_filter': '(suite:%s) and (subsystem:light)'}" %
@@ -661,6 +625,7 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
   def setUp(self):
     self._board = 'test-board'
     self._buildroot = self.tempdir
+    self._boardroot = os.path.join(self.tempdir, self._board)
     self._overlays = ['%s/src/third_party/chromiumos-overlay' % self._buildroot]
     self._chroot = os.path.join(self._buildroot, 'chroot')
     os.makedirs(os.path.join(self._buildroot, '.repo'))
@@ -714,7 +679,7 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     kwargs.setdefault('event_file',
                       os.path.join(self._buildroot, 'events',
                                    'build-test-events.json'))
-    commands.Build(buildroot=self._buildroot, board='x86-generic', **kwargs)
+    commands.Build(buildroot=self._buildroot, board='amd64-generic', **kwargs)
     self.assertCommandContains(['./build_packages'])
 
   def testGetFirmwareVersions(self):
@@ -749,7 +714,8 @@ c98ca54db130886142ad582a58e90ddc *./common.sh
     osutils.Touch(os.path.join(build_sbin, 'chromeos-firmwareupdate'),
                   makedirs=True)
     result = commands.GetFirmwareVersions(self._buildroot, self._board)
-    versions = ('Google_Kevin.8785.178.0', 'kevin_v1.10.184-459421c')
+    versions = commands.FirmwareVersions(
+        None, 'Google_Kevin.8785.178.0', None, 'kevin_v1.10.184-459421c', None)
     self.assertEquals(result, versions)
 
   def testGetFirmwareVersionsMixedImage(self):
@@ -796,16 +762,171 @@ ae8cf9fca3165a1c1f12decfd910c4fe *./vpd
     osutils.Touch(os.path.join(build_sbin, 'chromeos-firmwareupdate'),
                   makedirs=True)
     result = commands.GetFirmwareVersions(self._buildroot, self._board)
-    versions = ('Google_Caroline.7820.286.0', 'caroline_v1.9.370-e8b9bd2')
+    versions = commands.FirmwareVersions(
+        None,
+        'Google_Caroline.7820.263.0',
+        'Google_Caroline.7820.286.0',
+        'caroline_v1.9.357-ac5c7b4',
+        'caroline_v1.9.370-e8b9bd2')
     self.assertEquals(result, versions)
 
+  def testGetAllFirmwareVersions(self):
+    """Verify that all model firmware versions can be extracted"""
+    self.rc.SetDefaultCmdResult(output='''
+
+flashrom(8): 68935ee2fcfcffa47af81b966269cd2b */build/reef/usr/sbin/flashrom
+             ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked, for GNU/Linux 2.6.32, BuildID[sha1]=e102cc98d45300b50088999d53775acbeff407dc, stripped
+             0.9.9  : bbb2d6a : Jul 28 2017 15:12:34 UTC
+
+Model:        reef
+BIOS image:   1b535280fe688ac284d95276492b06f6 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/image.bin
+BIOS version: Google_Reef.9042.87.1
+BIOS (RW) image:   0ef265eb8f2d228c09f75b011adbdcbb */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/image.binrw
+BIOS (RW) version: Google_Reef.9042.110.0
+EC image:     2e8b4b5fa73cc5dbca4496de97a917a9 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/ec.bin
+EC version:   reef_v1.1.5900-ab1ee51
+EC (RW) version: reef_v1.1.5909-bd1f0c9
+
+Model:        pyro
+BIOS image:   9e62447ebf22a724a4a835018ab6234e */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/pyro/image.bin
+BIOS version: Google_Pyro.9042.87.1
+BIOS (RW) image:   1897457303c85de99f3e98b2eaa0eccc */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/pyro/image.binrw
+BIOS (RW) version: Google_Pyro.9042.110.0
+EC image:     44b93ed591733519e752e05aa0529eb5 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/pyro/ec.bin
+EC version:   pyro_v1.1.5900-ab1ee51
+EC (RW) version: pyro_v1.1.5909-bd1f0c9
+
+Model:        snappy
+BIOS image:   3ab63ff080596bd7de4e7619f003bb64 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/snappy/image.bin
+BIOS version: Google_Snappy.9042.110.0
+EC image:     c4db159e84428391d2ee25368c5fe5b6 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/snappy/ec.bin
+EC version:   snappy_v1.1.5909-bd1f0c9
+
+Model:        sand
+BIOS image:   387da034a4f0a3f53e278ebfdcc2a412 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/sand/image.bin
+BIOS version: Google_Sand.9042.110.0
+EC image:     411562e0589dacec131f5fdfbe95a561 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/sand/ec.bin
+EC version:   sand_v1.1.5909-bd1f0c9
+
+Model:        electro
+BIOS image:   1b535280fe688ac284d95276492b06f6 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/image.bin
+BIOS version: Google_Reef.9042.87.1
+BIOS (RW) image:   0ef265eb8f2d228c09f75b011adbdcbb */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/image.binrw
+BIOS (RW) version: Google_Reef.9042.110.0
+EC image:     2e8b4b5fa73cc5dbca4496de97a917a9 */build/reef/tmp/portage/chromeos-base/chromeos-firmware-reef-0.0.1-r79/temp/tmp7rHApL.pack_firmware-99001/models/reef/ec.bin
+EC version:   reef_v1.1.5900-ab1ee51
+EC (RW) version: reef_v1.1.5909-bd1f0c9
+
+Package Content:
+612e7bb6ed1fb0a05abf2ebdc834c18b *./updater4.sh
+0eafbee07282315829d0f42135ec7c0c *./gbb_utility
+6074e3ca424cb30a67c378c1d9681f9c *./mosys
+68935ee2fcfcffa47af81b966269cd2b *./flashrom
+0eafbee07282315829d0f42135ec7c0c *./dump_fmap
+490c95d6123c208d20d84d7c16857c7c *./crosfw.sh
+60899148600b8673ddb711faa55aee40 *./common.sh
+3c3a99346d1ca1273cbcd86c104851ff *./shflags
+de7ce035e1f82a89f8909d888ee402c0 *./crosutil.sh
+f9334372bdb9036ba09a6fd9bf30e7a2 *./crossystem
+22257a8d5f0adc1f50a1916c3a4a35dd *./models/reef/ec.bin
+faf12dbb7cdaf21ce153bdffb67841fd *./models/reef/bios.bin
+c9bbb417b7921b85a7ed999ee42f550e *./models/reef/setvars.sh
+29823d46f1ec1491ecacd7b830fd2686 *./models/pyro/ec.bin
+2320463aba8b22eb5ea836f094d281b3 *./models/pyro/bios.bin
+81614833ad77c9cd093360ba7bea76b8 *./models/pyro/setvars.sh
+411562e0589dacec131f5fdfbe95a561 *./models/sand/ec.bin
+387da034a4f0a3f53e278ebfdcc2a412 *./models/sand/bios.bin
+fcd8cb0ac0e2ed6be220aaae435d43ff *./models/sand/setvars.sh
+c4db159e84428391d2ee25368c5fe5b6 *./models/snappy/ec.bin
+3ab63ff080596bd7de4e7619f003bb64 *./models/snappy/bios.bin
+fe5d699f2e9e4a7de031497953313dbd *./models/snappy/setvars.sh
+79aabd7cd8a215a54234c53d7bb2e6fb *./vpd
+''')
+    build_sbin = os.path.join(self._buildroot, constants.DEFAULT_CHROOT_DIR,
+                              'build', self._board, 'usr', 'sbin')
+    osutils.Touch(os.path.join(build_sbin, 'chromeos-firmwareupdate'),
+                  makedirs=True)
+    result = commands.GetAllFirmwareVersions(self._buildroot, self._board)
+    self.assertEquals(len(result), 5)
+    self.assertEquals(
+        result['reef'],
+        commands.FirmwareVersions(
+            'reef',
+            'Google_Reef.9042.87.1',
+            'Google_Reef.9042.110.0',
+            'reef_v1.1.5900-ab1ee51',
+            'reef_v1.1.5909-bd1f0c9'))
+    self.assertEquals(
+        result['pyro'],
+        commands.FirmwareVersions(
+            'pyro',
+            'Google_Pyro.9042.87.1',
+            'Google_Pyro.9042.110.0',
+            'pyro_v1.1.5900-ab1ee51',
+            'pyro_v1.1.5909-bd1f0c9'))
+    self.assertEquals(
+        result['snappy'],
+        commands.FirmwareVersions(
+            'snappy',
+            'Google_Snappy.9042.110.0',
+            None,
+            'snappy_v1.1.5909-bd1f0c9',
+            None))
+    self.assertEquals(
+        result['sand'],
+        commands.FirmwareVersions(
+            'sand',
+            'Google_Sand.9042.110.0',
+            None,
+            'sand_v1.1.5909-bd1f0c9',
+            None))
+    self.assertEquals(
+        result['electro'],
+        commands.FirmwareVersions(
+            'electro',
+            'Google_Reef.9042.87.1',
+            'Google_Reef.9042.110.0',
+            'reef_v1.1.5900-ab1ee51',
+            'reef_v1.1.5909-bd1f0c9'))
+
   def testGetModels(self):
-    self.rc.SetDefaultCmdResult(output='reef\npyro\nsnappy\n')
+    self.rc.SetDefaultCmdResult(output='pyro\nreef\nsnappy\n')
     build_bin = os.path.join(self._buildroot, constants.DEFAULT_CHROOT_DIR,
-                             'build', self._board, 'usr', 'bin')
-    osutils.Touch(os.path.join(build_bin, 'fdtget'), makedirs=True)
+                             'usr', 'bin')
+    osutils.Touch(os.path.join(build_bin, 'cros_config_host_py'), makedirs=True)
+    config_fname = os.path.join(
+        self._boardroot,
+        'usr',
+        'share',
+        'chromeos-config',
+        'config.dtb')
+    osutils.Touch(config_fname, makedirs=True)
+    result = commands.GetModels(self._buildroot, self._boardroot)
+    self.assertEquals(result, ['pyro', 'reef', 'snappy'])
+
+  def testGetModels_withYaml(self):
+    self.rc.SetDefaultCmdResult(output='pyro\nreef\nsnappy\n')
+    build_bin = os.path.join(self._buildroot, constants.DEFAULT_CHROOT_DIR,
+                             'usr', 'bin')
+    osutils.Touch(os.path.join(build_bin, 'cros_config_host_py'), makedirs=True)
+    config_fname = os.path.join(
+        self._boardroot,
+        'usr',
+        'share',
+        'chromeos-config',
+        'yaml',
+        'private-files.yaml')
+    osutils.Touch(config_fname, makedirs=True)
+    result = commands.GetModels(self._buildroot, self._boardroot)
+    self.assertEquals(result, ['pyro', 'reef', 'snappy'])
+
+  def testGetModels_emptyWithoutConfigDb(self):
+    self.rc.SetDefaultCmdResult(output='pyro\nreef\nsnappy\n')
+    build_bin = os.path.join(self._buildroot, constants.DEFAULT_CHROOT_DIR,
+                             'usr', 'bin')
+    osutils.Touch(os.path.join(build_bin, 'cros_config_host_py'), makedirs=True)
     result = commands.GetModels(self._buildroot, self._board)
-    self.assertEquals(result, ['reef', 'pyro', 'snappy'])
+    self.assertEquals(result, None)
 
   def testBuildMaximum(self):
     """Base case where Build is called with all options (except extra_env)."""
@@ -953,25 +1074,6 @@ class BuildTarballTests(cros_build_lib_unittest.RunCommandTempDirTestCase):
                      constants.AUTOTEST_BUILD_PATH, '..'))
     self._tarball_dir = self.tempdir
 
-  def testBuildAUTestTarball(self):
-    """Tests that our call to generate an au test tarball is correct."""
-    archive_url = 'gs://mytest/path/version'
-    with mock.patch.object(commands, 'BuildTarball') as m:
-      tarball_path = commands.BuildAUTestTarball(
-          self._buildroot, self._board, self._tarball_dir, 'R26-3928.0.0',
-          archive_url)
-      m.assert_called_once_with(self._buildroot, ['autotest/au_control_files'],
-                                os.path.join(self._tarball_dir,
-                                             'au_control.tar.bz2'),
-                                cwd=self._tarball_dir)
-
-      self.assertEquals(os.path.join(self._tarball_dir, 'au_control.tar.bz2'),
-                        tarball_path)
-
-    # Full release test with partial args defined.
-    self.assertCommandContains(['site_utils/autoupdate/full_release_test.py',
-                                '--archive_url', archive_url, '3928.0.0',
-                                self._board])
 
   def testBuildFullAutotestTarball(self):
     """Tests that our call to generate the full autotest tarball is correct."""
@@ -1060,58 +1162,6 @@ class BuildTarballTests(cros_build_lib_unittest.RunCommandTempDirTestCase):
 
 class UnmockedTests(cros_test_lib.TempDirTestCase):
   """Test cases which really run tests, instead of using mocks."""
-
-  def testListFaliedTests(self):
-    """Tests if we can list failed tests."""
-    test_report_1 = """
-/tmp/taco/taste_tests/all/results-01-has_salsa              [  PASSED  ]
-/tmp/taco/taste_tests/all/results-01-has_salsa/has_salsa    [  PASSED  ]
-/tmp/taco/taste_tests/all/results-02-has_cheese             [  FAILED  ]
-/tmp/taco/taste_tests/all/results-02-has_cheese/has_cheese  [  FAILED  ]
-/tmp/taco/taste_tests/all/results-02-has_cheese/has_cheese   FAIL: No cheese.
-"""
-    test_report_2 = """
-/tmp/taco/verify_tests/all/results-01-has_salsa              [  PASSED  ]
-/tmp/taco/verify_tests/all/results-01-has_salsa/has_salsa    [  PASSED  ]
-/tmp/taco/verify_tests/all/results-02-has_cheese             [  PASSED  ]
-/tmp/taco/verify_tests/all/results-02-has_cheese/has_cheese  [  PASSED  ]
-"""
-    results_path = os.path.join(self.tempdir, 'tmp/taco')
-    os.makedirs(results_path)
-    # Create two reports with the same content to test that we don't
-    # list the same test twice.
-    osutils.WriteFile(
-        os.path.join(results_path, 'taste_tests', 'all', 'test_report.log'),
-        test_report_1, makedirs=True)
-    osutils.WriteFile(
-        os.path.join(results_path, 'taste_tests', 'failed', 'test_report.log'),
-        test_report_1, makedirs=True)
-    osutils.WriteFile(
-        os.path.join(results_path, 'verify_tests', 'all', 'test_report.log'),
-        test_report_2, makedirs=True)
-
-    self.assertEquals(
-        commands.ListFailedTests(results_path),
-        [('has_cheese', 'taste_tests/all/results-02-has_cheese')])
-
-  def testArchiveTestResults(self):
-    """Test if we can archive a test results dir."""
-    test_results_dir = 'tmp/taco'
-    results_path = os.path.join(self.tempdir, 'chroot', test_results_dir)
-    archive_dir = os.path.join(self.tempdir, 'archived_taco')
-    os.makedirs(results_path)
-    os.makedirs(archive_dir)
-    # File that should be archived.
-    osutils.Touch(os.path.join(results_path, 'foo.txt'))
-    # Flies that should be ignored.
-    osutils.Touch(os.path.join(results_path,
-                               'chromiumos_qemu_disk.bin.foo'))
-    os.symlink('/src/foo', os.path.join(results_path, 'taco_link'))
-    commands.ArchiveTestResults(results_path, archive_dir)
-    self.assertExists(os.path.join(archive_dir, 'foo.txt'))
-    self.assertNotExists(
-        os.path.join(archive_dir, 'chromiumos_qemu_disk.bin.foo'))
-    self.assertNotExists(os.path.join(archive_dir, 'taco_link'))
 
   def testBuildFirmwareArchive(self):
     """Verifies that firmware archiver includes proper files"""
@@ -1292,6 +1342,69 @@ class UnmockedTests(cros_test_lib.TempDirTestCase):
 
     # GCE expects the tarball to be in a particular format.
     cros_test_lib.VerifyTarball(output_path, ['disk.raw'])
+
+  def testBuildEbuildLogsTarballPositive(self):
+    """Verifies that the ebuild logs archiver builds correct logs"""
+    # Names of log files typically found in a build directory.
+    log_files = (
+        '',
+        'x11-libs:libdrm-2.4.81-r24:20170816-175008.log',
+        'x11-libs:libpciaccess-0.12.902-r2:20170816-174849.log',
+        'x11-libs:libva-1.7.1-r2:20170816-175019.log',
+        'x11-libs:libva-intel-driver-1.7.1-r4:20170816-175029.log',
+        'x11-libs:libxkbcommon-0.4.3-r2:20170816-174908.log',
+        'x11-libs:pango-1.32.5-r1:20170816-174954.log',
+        'x11-libs:pixman-0.32.4:20170816-174832.log',
+        'x11-misc:xkeyboard-config-2.15-r3:20170816-174908.log',
+        'x11-proto:kbproto-1.0.5:20170816-174849.log',
+        'x11-proto:xproto-7.0.31:20170816-174849.log',
+    )
+    tarred_files = [os.path.join('logs', x) for x in log_files]
+    board = 'samus'
+    log_files_root = os.path.join(self.tempdir,
+                                  '%s/tmp/portage/logs' % board)
+    # Generate a representative set of log files produced by a typical build.
+    cros_test_lib.CreateOnDiskHierarchy(log_files_root, log_files)
+    # Create an archive from the simulated logs directory
+    tarball = os.path.join(self.tempdir,
+                           commands.BuildEbuildLogsTarball(self.tempdir, board,
+                                                           self.tempdir))
+    # Verify the tarball contents.
+    cros_test_lib.VerifyTarball(tarball, tarred_files)
+
+  def testBuildEbuildLogsTarballNegative(self):
+    """Verifies that the Ebuild logs archiver handles wrong inputs"""
+    # Names of log files typically found in a build directory.
+    log_files = (
+        '',
+        'x11-libs:libdrm-2.4.81-r24:20170816-175008.log',
+        'x11-libs:libpciaccess-0.12.902-r2:20170816-174849.log',
+        'x11-libs:libva-1.7.1-r2:20170816-175019.log',
+        'x11-libs:libva-intel-driver-1.7.1-r4:20170816-175029.log',
+        'x11-libs:libxkbcommon-0.4.3-r2:20170816-174908.log',
+        'x11-libs:pango-1.32.5-r1:20170816-174954.log',
+        'x11-libs:pixman-0.32.4:20170816-174832.log',
+        'x11-misc:xkeyboard-config-2.15-r3:20170816-174908.log',
+        'x11-proto:kbproto-1.0.5:20170816-174849.log',
+        'x11-proto:xproto-7.0.31:20170816-174849.log',
+    )
+
+    board = 'samus'
+    # Create a malformed directory name.
+    log_files_root = os.path.join(self.tempdir,
+                                  '%s/tmp/portage/wrong_dir_name' % board)
+    # Generate a representative set of log files produced by a typical build.
+    cros_test_lib.CreateOnDiskHierarchy(log_files_root, log_files)
+
+    # Create an archive from the simulated logs directory
+    wrong_board = 'chell'
+    tarball_rel_path = commands.BuildEbuildLogsTarball(self.tempdir,
+                                                       wrong_board,
+                                                       self.tempdir)
+    self.assertEquals(tarball_rel_path, None)
+    tarball_rel_path = commands.BuildEbuildLogsTarball(self.tempdir,
+                                                       board, self.tempdir)
+    self.assertEquals(tarball_rel_path, None)
 
 
 class ImageTestCommandsTest(cros_build_lib_unittest.RunCommandTestCase):

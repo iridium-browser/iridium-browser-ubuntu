@@ -6,8 +6,9 @@
 
 #include <memory>
 
-#include "base/memory/ptr_util.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_test_harness.h"
+#include "chrome/browser/page_load_metrics/page_load_tracker.h"
+#include "chrome/common/page_load_metrics/test/page_load_metrics_test_util.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_manager.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
 #include "components/subresource_filter/core/common/activation_level.h"
@@ -39,7 +40,7 @@ class SubresourceFilterMetricsObserverTest
   }
 
   void RegisterObservers(page_load_metrics::PageLoadTracker* tracker) override {
-    tracker->AddObserver(base::MakeUnique<SubresourceFilterMetricsObserver>());
+    tracker->AddObserver(std::make_unique<SubresourceFilterMetricsObserver>());
   }
 
   size_t TotalMetricsRecorded() {
@@ -102,18 +103,18 @@ class SubresourceFilterMetricsObserverTest
         internal::kHistogramSubresourceFilterActivationDecision,
         static_cast<int>(decision), 1);
 
-    ASSERT_EQ(1ul, test_ukm_recorder().entries_count());
-    const ukm::UkmSource* source = test_ukm_recorder().GetSourceForUrl(url);
-    EXPECT_TRUE(test_ukm_recorder().HasEntry(
-        *source, internal::kUkmSubresourceFilterName));
-    test_ukm_recorder().ExpectMetric(
-        *source, internal::kUkmSubresourceFilterName,
-        internal::kUkmSubresourceFilterActivationDecision,
-        static_cast<int64_t>(decision));
-    if (level == subresource_filter::ActivationLevel::DRYRUN) {
-      test_ukm_recorder().ExpectMetric(
-          *source, internal::kUkmSubresourceFilterName,
-          internal::kUkmSubresourceFilterDryRun, true);
+    const auto& entries = test_ukm_recorder().GetEntriesByName(
+        internal::kUkmSubresourceFilterName);
+    EXPECT_EQ(1u, entries.size());
+    for (const auto* entry : entries) {
+      test_ukm_recorder().ExpectEntrySourceHasUrl(entry, GURL(url));
+      test_ukm_recorder().ExpectEntryMetric(
+          entry, internal::kUkmSubresourceFilterActivationDecision,
+          static_cast<int64_t>(decision));
+      if (level == subresource_filter::ActivationLevel::DRYRUN) {
+        test_ukm_recorder().ExpectEntryMetric(
+            entry, internal::kUkmSubresourceFilterDryRun, true);
+      }
     }
   }
 
@@ -265,7 +266,8 @@ TEST_F(SubresourceFilterMetricsObserverTest, Subresources) {
                           1024 * 40 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   page_load_metrics::mojom::PageLoadTiming timing;
   page_load_metrics::InitPageLoadTimingForTest(&timing);
@@ -280,14 +282,16 @@ TEST_F(SubresourceFilterMetricsObserverTest, Subresources) {
                           1024 * 20 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   SimulateLoadedResource({GURL(kResourceUrl), net::HostPortPair(),
                           -1 /* frame_tree_node_id */, true /* was_cached */,
                           1024 * 10 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   ExpectActivationDecision(kDefaultTestUrlWithActivation,
                            subresource_filter::ActivationDecision::ACTIVATED,
@@ -371,7 +375,8 @@ TEST_F(SubresourceFilterMetricsObserverTest, SubresourcesWithMedia) {
                           1024 * 40 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   page_load_metrics::mojom::PageLoadTiming timing;
   page_load_metrics::InitPageLoadTimingForTest(&timing);
@@ -386,14 +391,16 @@ TEST_F(SubresourceFilterMetricsObserverTest, SubresourcesWithMedia) {
                           1024 * 20 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   SimulateLoadedResource({GURL(kResourceUrl), net::HostPortPair(),
                           -1 /* frame_tree_node_id */, true /* was_cached */,
                           1024 * 10 /* raw_body_bytes */,
                           0 /* original_network_content_length */,
                           nullptr /* data_reduction_proxy_data */,
-                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0});
+                          content::ResourceType::RESOURCE_TYPE_SCRIPT, 0,
+                          nullptr /* load_timing_info */});
 
   ExpectActivationDecision(kDefaultTestUrlWithActivation,
                            subresource_filter::ActivationDecision::ACTIVATED,

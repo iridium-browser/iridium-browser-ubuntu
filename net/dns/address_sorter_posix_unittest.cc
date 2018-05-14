@@ -16,6 +16,7 @@
 #include "net/socket/socket_performance_watcher.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -36,13 +37,16 @@ class TestUDPClientSocket : public DatagramClientSocket {
   explicit TestUDPClientSocket(const AddressMapping* mapping)
       : mapping_(mapping), connected_(false)  {}
 
-  ~TestUDPClientSocket() override {}
+  ~TestUDPClientSocket() override = default;
 
   int Read(IOBuffer*, int, const CompletionCallback&) override {
     NOTIMPLEMENTED();
     return OK;
   }
-  int Write(IOBuffer*, int, const CompletionCallback&) override {
+  int Write(IOBuffer*,
+            int,
+            const CompletionCallback&,
+            const NetworkTrafficAnnotationTag& traffic_annotation) override {
     NOTIMPLEMENTED();
     return OK;
   }
@@ -74,6 +78,7 @@ class TestUDPClientSocket : public DatagramClientSocket {
   NetworkChangeNotifier::NetworkHandle GetBoundNetwork() const override {
     return NetworkChangeNotifier::kInvalidNetworkHandle;
   }
+  void ApplySocketTag(const SocketTag& tag) override {}
 
   int Connect(const IPEndPoint& remote) override {
     if (connected_)
@@ -100,8 +105,8 @@ class TestUDPClientSocket : public DatagramClientSocket {
 // Creates TestUDPClientSockets and maintains an AddressMapping.
 class TestSocketFactory : public ClientSocketFactory {
  public:
-  TestSocketFactory() {}
-  ~TestSocketFactory() override {}
+  TestSocketFactory() = default;
+  ~TestSocketFactory() override = default;
 
   std::unique_ptr<DatagramClientSocket> CreateDatagramClientSocket(
       DatagramSocket::BindType,

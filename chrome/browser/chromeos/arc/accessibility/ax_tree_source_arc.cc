@@ -6,10 +6,12 @@
 
 #include <string>
 
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
 #include "components/exo/wm_helper.h"
+#include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/platform/ax_android_constants.h"
 #include "ui/aura/window.h"
 #include "ui/views/focus/focus_manager.h"
@@ -18,32 +20,33 @@
 
 namespace {
 
-ui::AXEvent ToAXEvent(arc::mojom::AccessibilityEventType arc_event_type) {
+ax::mojom::Event ToAXEvent(arc::mojom::AccessibilityEventType arc_event_type) {
   switch (arc_event_type) {
     case arc::mojom::AccessibilityEventType::VIEW_FOCUSED:
     case arc::mojom::AccessibilityEventType::VIEW_ACCESSIBILITY_FOCUSED:
-      return ui::AX_EVENT_FOCUS;
+      return ax::mojom::Event::kFocus;
     case arc::mojom::AccessibilityEventType::VIEW_CLICKED:
     case arc::mojom::AccessibilityEventType::VIEW_LONG_CLICKED:
-      return ui::AX_EVENT_CLICKED;
+      return ax::mojom::Event::kClicked;
     case arc::mojom::AccessibilityEventType::VIEW_TEXT_CHANGED:
-      return ui::AX_EVENT_TEXT_CHANGED;
+      return ax::mojom::Event::kTextChanged;
     case arc::mojom::AccessibilityEventType::VIEW_TEXT_SELECTION_CHANGED:
-      return ui::AX_EVENT_TEXT_SELECTION_CHANGED;
+      return ax::mojom::Event::kTextSelectionChanged;
     case arc::mojom::AccessibilityEventType::WINDOW_STATE_CHANGED:
     case arc::mojom::AccessibilityEventType::NOTIFICATION_STATE_CHANGED:
     case arc::mojom::AccessibilityEventType::WINDOW_CONTENT_CHANGED:
     case arc::mojom::AccessibilityEventType::WINDOWS_CHANGED:
-      return ui::AX_EVENT_LAYOUT_COMPLETE;
+      return ax::mojom::Event::kLayoutComplete;
     case arc::mojom::AccessibilityEventType::VIEW_HOVER_ENTER:
-      return ui::AX_EVENT_HOVER;
+      return ax::mojom::Event::kHover;
     case arc::mojom::AccessibilityEventType::ANNOUNCEMENT:
-      return ui::AX_EVENT_ALERT;
+      return ax::mojom::Event::kAlert;
+    case arc::mojom::AccessibilityEventType::VIEW_SCROLLED:
+      return ax::mojom::Event::kScrollPositionChanged;
     case arc::mojom::AccessibilityEventType::VIEW_SELECTED:
     case arc::mojom::AccessibilityEventType::VIEW_HOVER_EXIT:
     case arc::mojom::AccessibilityEventType::TOUCH_EXPLORATION_GESTURE_START:
     case arc::mojom::AccessibilityEventType::TOUCH_EXPLORATION_GESTURE_END:
-    case arc::mojom::AccessibilityEventType::VIEW_SCROLLED:
     case arc::mojom::AccessibilityEventType::
         VIEW_TEXT_TRAVERSED_AT_MOVEMENT_GRANULARITY:
     case arc::mojom::AccessibilityEventType::GESTURE_DETECTION_START:
@@ -52,27 +55,11 @@ ui::AXEvent ToAXEvent(arc::mojom::AccessibilityEventType arc_event_type) {
     case arc::mojom::AccessibilityEventType::TOUCH_INTERACTION_END:
     case arc::mojom::AccessibilityEventType::VIEW_CONTEXT_CLICKED:
     case arc::mojom::AccessibilityEventType::ASSIST_READING_CONTEXT:
-      return ui::AX_EVENT_CHILDREN_CHANGED;
+      return ax::mojom::Event::kChildrenChanged;
     default:
-      return ui::AX_EVENT_CHILDREN_CHANGED;
+      return ax::mojom::Event::kChildrenChanged;
   }
-  return ui::AX_EVENT_CHILDREN_CHANGED;
-}
-
-const gfx::Rect GetBounds(arc::mojom::AccessibilityNodeInfoData* node) {
-  exo::WMHelper* wm_helper = exo::WMHelper::GetInstance();
-  if (!wm_helper)
-    return gfx::Rect();
-
-  aura::Window* focused_window = wm_helper->GetFocusedWindow();
-  gfx::Rect bounds_in_screen = node->bounds_in_screen;
-  if (focused_window) {
-    aura::Window* toplevel_window = focused_window->GetToplevelWindow();
-    return gfx::ScaleToEnclosingRect(
-        bounds_in_screen,
-        1.0f / toplevel_window->layer()->device_scale_factor());
-  }
-  return bounds_in_screen;
+  return ax::mojom::Event::kChildrenChanged;
 }
 
 bool GetBooleanProperty(arc::mojom::AccessibilityNodeInfoData* node,
@@ -143,11 +130,87 @@ bool GetStringListProperty(arc::mojom::AccessibilityNodeInfoData* node,
   return true;
 }
 
+bool HasCoveringSpan(arc::mojom::AccessibilityNodeInfoData* data,
+                     arc::mojom::AccessibilityStringProperty prop,
+                     arc::mojom::SpanType span_type) {
+  if (!data->spannable_string_properties)
+    return false;
+
+  std::string text;
+  GetStringProperty(data, prop, &text);
+  if (text.empty())
+    return false;
+
+  auto span_entries_it = data->spannable_string_properties->find(prop);
+  if (span_entries_it == data->spannable_string_properties->end())
+    return false;
+
+  for (size_t i = 0; i < span_entries_it->second.size(); ++i) {
+    if (span_entries_it->second[i]->span_type != span_type)
+      continue;
+
+    size_t span_size =
+        span_entries_it->second[i]->end - span_entries_it->second[i]->start;
+    if (span_size == text.size())
+      return true;
+  }
+  return false;
+}
+
 void PopulateAXRole(arc::mojom::AccessibilityNodeInfoData* node,
                     ui::AXNodeData* out_data) {
   std::string class_name;
-  GetStringProperty(node, arc::mojom::AccessibilityStringProperty::CLASS_NAME,
-                    &class_name);
+  if (GetStringProperty(node,
+                        arc::mojom::AccessibilityStringProperty::CLASS_NAME,
+                        &class_name)) {
+    out_data->AddStringAttribute(ax::mojom::StringAttribute::kClassName,
+                                 class_name);
+  }
+
+  if (GetBooleanProperty(node,
+                         arc::mojom::AccessibilityBooleanProperty::EDITABLE)) {
+    out_data->role = ax::mojom::Role::kTextField;
+    return;
+  }
+
+  if (HasCoveringSpan(node, arc::mojom::AccessibilityStringProperty::TEXT,
+                      arc::mojom::SpanType::URL) ||
+      HasCoveringSpan(
+          node, arc::mojom::AccessibilityStringProperty::CONTENT_DESCRIPTION,
+          arc::mojom::SpanType::URL)) {
+    out_data->role = ax::mojom::Role::kLink;
+    return;
+  }
+
+  arc::mojom::AccessibilityCollectionItemInfoData* collection_item_info =
+      node->collection_item_info.get();
+  if (collection_item_info) {
+    if (collection_item_info->is_heading) {
+      out_data->role = ax::mojom::Role::kHeading;
+    } else {
+      out_data->role = ax::mojom::Role::kListItem;
+      out_data->AddIntAttribute(ax::mojom::IntAttribute::kPosInSet,
+                                collection_item_info->row_index);
+    }
+    return;
+  }
+
+  std::string chrome_role;
+  if (GetStringProperty(node,
+                        arc::mojom::AccessibilityStringProperty::CHROME_ROLE,
+                        &chrome_role)) {
+    ax::mojom::Role role_value = ui::ParseRole(chrome_role.c_str());
+    if (role_value != ax::mojom::Role::kNone) {
+      // The webView and rootWebArea roles differ between Android and Chrome. In
+      // particular, Android includes far fewer attributes which leads to
+      // undesirable behavior. Exclude their direct mapping.
+      out_data->role = (role_value != ax::mojom::Role::kWebView &&
+                        role_value != ax::mojom::Role::kRootWebArea)
+                           ? role_value
+                           : ax::mojom::Role::kGenericContainer;
+      return;
+    }
+  }
 
 #define MAP_ROLE(android_class_name, chrome_role) \
   if (class_name == android_class_name) {         \
@@ -158,43 +221,43 @@ void PopulateAXRole(arc::mojom::AccessibilityNodeInfoData* node,
   // These mappings were taken from accessibility utils (Android -> Chrome) and
   // BrowserAccessibilityAndroid. They do not completely match the above two
   // sources.
-  MAP_ROLE(ui::kAXAbsListViewClassname, ui::AX_ROLE_LIST);
-  MAP_ROLE(ui::kAXButtonClassname, ui::AX_ROLE_BUTTON);
-  MAP_ROLE(ui::kAXCheckBoxClassname, ui::AX_ROLE_CHECK_BOX);
-  MAP_ROLE(ui::kAXCheckedTextViewClassname, ui::AX_ROLE_STATIC_TEXT);
-  MAP_ROLE(ui::kAXCompoundButtonClassname, ui::AX_ROLE_CHECK_BOX);
-  MAP_ROLE(ui::kAXDialogClassname, ui::AX_ROLE_DIALOG);
-  MAP_ROLE(ui::kAXEditTextClassname, ui::AX_ROLE_TEXT_FIELD);
-  MAP_ROLE(ui::kAXGridViewClassname, ui::AX_ROLE_TABLE);
-  MAP_ROLE(ui::kAXImageClassname, ui::AX_ROLE_IMAGE);
+  MAP_ROLE(ui::kAXAbsListViewClassname, ax::mojom::Role::kList);
+  MAP_ROLE(ui::kAXButtonClassname, ax::mojom::Role::kButton);
+  MAP_ROLE(ui::kAXCheckBoxClassname, ax::mojom::Role::kCheckBox);
+  MAP_ROLE(ui::kAXCheckedTextViewClassname, ax::mojom::Role::kStaticText);
+  MAP_ROLE(ui::kAXCompoundButtonClassname, ax::mojom::Role::kCheckBox);
+  MAP_ROLE(ui::kAXDialogClassname, ax::mojom::Role::kDialog);
+  MAP_ROLE(ui::kAXEditTextClassname, ax::mojom::Role::kTextField);
+  MAP_ROLE(ui::kAXGridViewClassname, ax::mojom::Role::kTable);
+  MAP_ROLE(ui::kAXImageClassname, ax::mojom::Role::kImage);
+  MAP_ROLE(ui::kAXImageButtonClassname, ax::mojom::Role::kButton);
   if (GetBooleanProperty(node,
                          arc::mojom::AccessibilityBooleanProperty::CLICKABLE)) {
-    MAP_ROLE(ui::kAXImageViewClassname, ui::AX_ROLE_BUTTON);
+    MAP_ROLE(ui::kAXImageViewClassname, ax::mojom::Role::kButton);
   } else {
-    MAP_ROLE(ui::kAXImageViewClassname, ui::AX_ROLE_IMAGE);
+    MAP_ROLE(ui::kAXImageViewClassname, ax::mojom::Role::kImage);
   }
-  MAP_ROLE(ui::kAXListViewClassname, ui::AX_ROLE_LIST);
-  MAP_ROLE(ui::kAXMenuItemClassname, ui::AX_ROLE_MENU_ITEM);
-  MAP_ROLE(ui::kAXPagerClassname, ui::AX_ROLE_SCROLL_AREA);
-  MAP_ROLE(ui::kAXProgressBarClassname, ui::AX_ROLE_PROGRESS_INDICATOR);
-  MAP_ROLE(ui::kAXRadioButtonClassname, ui::AX_ROLE_RADIO_BUTTON);
-  MAP_ROLE(ui::kAXSeekBarClassname, ui::AX_ROLE_SLIDER);
-  MAP_ROLE(ui::kAXSpinnerClassname, ui::AX_ROLE_POP_UP_BUTTON);
-  MAP_ROLE(ui::kAXSwitchClassname, ui::AX_ROLE_SWITCH);
-  MAP_ROLE(ui::kAXTabWidgetClassname, ui::AX_ROLE_TAB_LIST);
-  MAP_ROLE(ui::kAXToggleButtonClassname, ui::AX_ROLE_TOGGLE_BUTTON);
-  MAP_ROLE(ui::kAXViewClassname, ui::AX_ROLE_GENERIC_CONTAINER);
-  MAP_ROLE(ui::kAXViewGroupClassname, ui::AX_ROLE_GROUP);
-  MAP_ROLE(ui::kAXWebViewClassname, ui::AX_ROLE_WEB_VIEW);
+  MAP_ROLE(ui::kAXListViewClassname, ax::mojom::Role::kList);
+  MAP_ROLE(ui::kAXMenuItemClassname, ax::mojom::Role::kMenuItem);
+  MAP_ROLE(ui::kAXPagerClassname, ax::mojom::Role::kGroup);
+  MAP_ROLE(ui::kAXProgressBarClassname, ax::mojom::Role::kProgressIndicator);
+  MAP_ROLE(ui::kAXRadioButtonClassname, ax::mojom::Role::kRadioButton);
+  MAP_ROLE(ui::kAXSeekBarClassname, ax::mojom::Role::kSlider);
+  MAP_ROLE(ui::kAXSpinnerClassname, ax::mojom::Role::kPopUpButton);
+  MAP_ROLE(ui::kAXSwitchClassname, ax::mojom::Role::kSwitch);
+  MAP_ROLE(ui::kAXTabWidgetClassname, ax::mojom::Role::kTabList);
+  MAP_ROLE(ui::kAXToggleButtonClassname, ax::mojom::Role::kToggleButton);
+  MAP_ROLE(ui::kAXViewClassname, ax::mojom::Role::kGenericContainer);
+  MAP_ROLE(ui::kAXViewGroupClassname, ax::mojom::Role::kGroup);
 
 #undef MAP_ROLE
 
   std::string text;
   GetStringProperty(node, arc::mojom::AccessibilityStringProperty::TEXT, &text);
   if (!text.empty())
-    out_data->role = ui::AX_ROLE_STATIC_TEXT;
+    out_data->role = ax::mojom::Role::kStaticText;
   else
-    out_data->role = ui::AX_ROLE_GENERIC_CONTAINER;
+    out_data->role = ax::mojom::Role::kGenericContainer;
 }
 
 void PopulateAXState(arc::mojom::AccessibilityNodeInfoData* node,
@@ -208,26 +271,27 @@ void PopulateAXState(arc::mojom::AccessibilityNodeInfoData* node,
   // These mappings were taken from accessibility utils (Android -> Chrome) and
   // BrowserAccessibilityAndroid. They do not completely match the above two
   // sources.
-  // The FOCUSABLE state is not mapped because Android places focusability on
-  // many ancestor nodes.
-  MAP_STATE(AXBooleanProperty::EDITABLE, ui::AX_STATE_EDITABLE);
-  MAP_STATE(AXBooleanProperty::MULTI_LINE, ui::AX_STATE_MULTILINE);
-  MAP_STATE(AXBooleanProperty::PASSWORD, ui::AX_STATE_PROTECTED);
-  MAP_STATE(AXBooleanProperty::SELECTED, ui::AX_STATE_SELECTED);
+  MAP_STATE(AXBooleanProperty::EDITABLE, ax::mojom::State::kEditable);
+  MAP_STATE(AXBooleanProperty::FOCUSABLE, ax::mojom::State::kFocusable);
+  MAP_STATE(AXBooleanProperty::MULTI_LINE, ax::mojom::State::kMultiline);
+  MAP_STATE(AXBooleanProperty::PASSWORD, ax::mojom::State::kProtected);
+  MAP_STATE(AXBooleanProperty::SELECTED, ax::mojom::State::kSelected);
 
 #undef MAP_STATE
 
   if (GetBooleanProperty(node, AXBooleanProperty::CHECKABLE)) {
     const bool is_checked =
         GetBooleanProperty(node, AXBooleanProperty::CHECKED);
-    const ui::AXCheckedState checked_state =
-        is_checked ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
-    out_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+    out_data->SetCheckedState(is_checked ? ax::mojom::CheckedState::kTrue
+                                         : ax::mojom::CheckedState::kFalse);
   }
 
   if (!GetBooleanProperty(node, AXBooleanProperty::ENABLED)) {
-    out_data->AddIntAttribute(ui::AX_ATTR_RESTRICTION,
-                              ui::AX_RESTRICTION_DISABLED);
+    out_data->SetRestriction(ax::mojom::Restriction::kDisabled);
+  }
+
+  if (!GetBooleanProperty(node, AXBooleanProperty::VISIBLE_TO_USER)) {
+    out_data->AddState(ax::mojom::State::kInvisible);
   }
 }
 
@@ -249,8 +313,8 @@ class AXTreeSourceArc::FocusStealer : public views::View {
 
   // views::View overrides.
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override {
-    node_data->AddIntAttribute(ui::AX_ATTR_CHILD_TREE_ID, id_);
-    node_data->role = ui::AX_ROLE_CLIENT;
+    node_data->AddIntAttribute(ax::mojom::IntAttribute::kChildTreeId, id_);
+    node_data->role = ax::mojom::Role::kClient;
   }
 
  private:
@@ -261,7 +325,9 @@ class AXTreeSourceArc::FocusStealer : public views::View {
 AXTreeSourceArc::AXTreeSourceArc(Delegate* delegate)
     : current_tree_serializer_(new AXTreeArcSerializer(this)),
       root_id_(-1),
+      window_id_(-1),
       focused_node_id_(-1),
+      is_notification_(false),
       delegate_(delegate),
       focus_stealer_(new FocusStealer(tree_id())) {}
 
@@ -274,6 +340,10 @@ void AXTreeSourceArc::NotifyAccessibilityEvent(
   tree_map_.clear();
   parent_map_.clear();
   root_id_ = -1;
+
+  window_id_ = event_data->window_id;
+  is_notification_ = event_data->notification_key.has_value();
+
   for (size_t i = 0; i < event_data->node_data.size(); ++i) {
     if (!event_data->node_data[i]->int_list_properties)
       continue;
@@ -305,6 +375,14 @@ void AXTreeSourceArc::NotifyAccessibilityEvent(
   params.tree_id = tree_id();
   params.id = event_data->source_id;
 
+  ui::AXTreeUpdate update;
+
+  if (event_data->event_type ==
+      arc::mojom::AccessibilityEventType::WINDOW_CONTENT_CHANGED) {
+    current_tree_serializer_->DeleteClientSubtree(
+        GetFromId(event_data->source_id));
+  }
+
   current_tree_serializer_->SerializeChanges(GetFromId(event_data->source_id),
                                              &params.update);
 
@@ -313,7 +391,16 @@ void AXTreeSourceArc::NotifyAccessibilityEvent(
   router->DispatchAccessibilityEvent(params);
 }
 
+void AXTreeSourceArc::NotifyActionResult(const ui::AXActionData& data,
+                                         bool result) {
+  extensions::AutomationEventRouter::GetInstance()->DispatchActionResult(
+      data, result);
+}
+
 void AXTreeSourceArc::Focus(aura::Window* window) {
+  if (focus_stealer_->HasFocus())
+    return;
+
   views::Widget* widget = views::Widget::GetWidgetForNativeView(window);
   if (!widget || !widget->GetContentsView())
     return;
@@ -328,7 +415,15 @@ bool AXTreeSourceArc::GetTreeData(ui::AXTreeData* data) const {
   data->tree_id = tree_id();
   if (focused_node_id_ >= 0)
     data->focus_id = focused_node_id_;
+  else if (root_id_ >= 0)
+    data->focus_id = root_id_;
   return true;
+}
+
+void AXTreeSourceArc::GetChildrenForTest(
+    mojom::AccessibilityNodeInfoData* node,
+    std::vector<mojom::AccessibilityNodeInfoData*>* out_children) const {
+  GetChildren(node, out_children);
 }
 
 mojom::AccessibilityNodeInfoData* AXTreeSourceArc::GetRoot() const {
@@ -360,9 +455,43 @@ void AXTreeSourceArc::GetChildren(
   if (it == node->int_list_properties->end())
     return;
 
-  for (size_t i = 0; i < it->second.size(); ++i) {
+  for (size_t i = 0; i < it->second.size(); ++i)
     out_children->push_back(GetFromId(it->second[i]));
-  }
+
+  // Sort children based on their enclosing bounding rectangles, based on their
+  // descendants.
+  std::sort(out_children->begin(), out_children->end(),
+            [this](auto left, auto right) {
+              auto left_bounds = ComputeEnclosingBounds(left);
+              auto right_bounds = ComputeEnclosingBounds(right);
+
+              // Top to bottom sort (non-overlapping).
+              if (!left_bounds.Intersects(right_bounds))
+                return left_bounds.y() < right_bounds.y();
+
+              // Overlapping
+              // Left to right.
+              int left_difference = left_bounds.x() - right_bounds.x();
+              if (left_difference != 0)
+                return left_difference < 0;
+
+              // Top to bottom.
+              int top_difference = left_bounds.y() - right_bounds.y();
+              if (top_difference != 0)
+                return top_difference < 0;
+
+              // Larger to smaller.
+              int height_difference =
+                  left_bounds.height() - right_bounds.height();
+              if (height_difference != 0)
+                return height_difference > 0;
+
+              int width_difference = left_bounds.width() - right_bounds.width();
+              if (width_difference != 0)
+                return width_difference > 0;
+
+              return true;
+            });
 }
 
 mojom::AccessibilityNodeInfoData* AXTreeSourceArc::GetParent(
@@ -394,44 +523,125 @@ void AXTreeSourceArc::SerializeNode(mojom::AccessibilityNodeInfoData* node,
                                     ui::AXNodeData* out_data) const {
   if (!node)
     return;
-  out_data->id = node->id;
+
+  int32_t id = node->id;
+  out_data->id = id;
+  if (id == root_id_)
+    out_data->role = ax::mojom::Role::kRootWebArea;
+  else
+    PopulateAXRole(node, out_data);
 
   using AXIntListProperty = arc::mojom::AccessibilityIntListProperty;
   using AXIntProperty = arc::mojom::AccessibilityIntProperty;
   using AXStringListProperty = arc::mojom::AccessibilityStringListProperty;
   using AXStringProperty = arc::mojom::AccessibilityStringProperty;
 
-  std::string text;
-  if (GetStringProperty(node, AXStringProperty::TEXT, &text))
-    out_data->SetName(text);
-  else if (GetStringProperty(node, AXStringProperty::CONTENT_DESCRIPTION,
-                             &text))
-    out_data->SetName(text);
+  // String properties.
+  int labelled_by = -1;
 
-  int32_t id = node->id;
-  if (id == root_id_)
-    out_data->role = ui::AX_ROLE_ROOT_WEB_AREA;
-  else
-    PopulateAXRole(node, out_data);
+  // Accessible name computation picks (in-order) content description, text, or
+  // labelled by text.
+  std::string name;
+  bool has_name = false;
+  if (GetStringProperty(node, AXStringProperty::CONTENT_DESCRIPTION, &name) ||
+      GetStringProperty(node, AXStringProperty::TEXT, &name)) {
+    has_name = true;
+  } else if (GetIntProperty(node,
+                            arc::mojom::AccessibilityIntProperty::LABELED_BY,
+                            &labelled_by)) {
+    mojom::AccessibilityNodeInfoData* labelled_by_node = GetFromId(labelled_by);
+    if (labelled_by_node) {
+      ui::AXNodeData labelled_by_data;
+      SerializeNode(labelled_by_node, &labelled_by_data);
+      has_name = labelled_by_data.GetStringAttribute(
+          ax::mojom::StringAttribute::kName, &name);
+    }
+  }
 
+  if (has_name) {
+    if (out_data->role == ax::mojom::Role::kTextField)
+      out_data->AddStringAttribute(ax::mojom::StringAttribute::kValue, name);
+    else
+      out_data->SetName(name);
+  }
+
+  std::string role_description;
+  if (GetStringProperty(node, AXStringProperty::ROLE_DESCRIPTION,
+                        &role_description)) {
+    out_data->AddStringAttribute(ax::mojom::StringAttribute::kRoleDescription,
+                                 role_description);
+  }
+
+  if (out_data->role == ax::mojom::Role::kRootWebArea) {
+    std::string package_name;
+    if (GetStringProperty(node, AXStringProperty::PACKAGE_NAME,
+                          &package_name)) {
+      const std::string& url =
+          base::StringPrintf("%s/%d", package_name.c_str(), tree_id());
+      out_data->AddStringAttribute(ax::mojom::StringAttribute::kUrl, url);
+    }
+  }
+
+  // Int properties.
+  int traversal_before = -1, traversal_after = -1;
+  if (GetIntProperty(node,
+                     arc::mojom::AccessibilityIntProperty::TRAVERSAL_BEFORE,
+                     &traversal_before)) {
+    out_data->AddIntAttribute(ax::mojom::IntAttribute::kPreviousFocusId,
+                              traversal_before);
+  }
+
+  if (GetIntProperty(node,
+                     arc::mojom::AccessibilityIntProperty::TRAVERSAL_AFTER,
+                     &traversal_after)) {
+    out_data->AddIntAttribute(ax::mojom::IntAttribute::kNextFocusId,
+                              traversal_after);
+  }
+
+  // Boolean properties.
   PopulateAXState(node, out_data);
+  if (GetBooleanProperty(
+          node, arc::mojom::AccessibilityBooleanProperty::SCROLLABLE)) {
+    out_data->AddBoolAttribute(ax::mojom::BoolAttribute::kScrollable, true);
+  }
+  if (GetBooleanProperty(node,
+                         arc::mojom::AccessibilityBooleanProperty::CLICKABLE)) {
+    out_data->AddBoolAttribute(ax::mojom::BoolAttribute::kClickable, true);
+  }
 
-  const gfx::Rect bounds_in_screen = GetBounds(node);
-  out_data->location.SetRect(bounds_in_screen.x(), bounds_in_screen.y(),
-                             bounds_in_screen.width(),
-                             bounds_in_screen.height());
+  // Range info.
+  arc::mojom::AccessibilityRangeInfoData* range_info = node->range_info.get();
+  if (range_info) {
+    out_data->AddFloatAttribute(ax::mojom::FloatAttribute::kValueForRange,
+                                range_info->current);
+    out_data->AddFloatAttribute(ax::mojom::FloatAttribute::kMinValueForRange,
+                                range_info->min);
+    out_data->AddFloatAttribute(ax::mojom::FloatAttribute::kMaxValueForRange,
+                                range_info->max);
+  }
 
-  if (out_data->role == ui::AX_ROLE_TEXT_FIELD && !text.empty())
-    out_data->AddStringAttribute(ui::AX_ATTR_VALUE, text);
+  exo::WMHelper* wm_helper =
+      exo::WMHelper::HasInstance() ? exo::WMHelper::GetInstance() : nullptr;
+
+  // To get bounds of a node which can be passed to AXNodeData.location,
+  // - Root node must exist.
+  // - Window where this tree is attached to need to be focused.
+  if (root_id_ != -1 && wm_helper) {
+    aura::Window* focused_window =
+        is_notification_ ? nullptr : wm_helper->GetFocusedWindow();
+    const gfx::Rect& local_bounds = GetBounds(node, focused_window);
+    out_data->location.SetRect(local_bounds.x(), local_bounds.y(),
+                               local_bounds.width(), local_bounds.height());
+  }
 
   // Integer properties.
   int32_t val;
   if (GetIntProperty(node, AXIntProperty::TEXT_SELECTION_START, &val) &&
       val >= 0)
-    out_data->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, val);
+    out_data->AddIntAttribute(ax::mojom::IntAttribute::kTextSelStart, val);
 
   if (GetIntProperty(node, AXIntProperty::TEXT_SELECTION_END, &val) && val >= 0)
-    out_data->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_END, val);
+    out_data->AddIntAttribute(ax::mojom::IntAttribute::kTextSelEnd, val);
 
   // Custom actions.
   std::vector<int32_t> custom_action_ids;
@@ -445,12 +655,79 @@ void AXTreeSourceArc::SerializeNode(mojom::AccessibilityNodeInfoData* node,
     CHECK(!custom_action_ids.empty());
     CHECK_EQ(custom_action_ids.size(), custom_action_descriptions.size());
 
-    out_data->AddAction(ui::AX_ACTION_CUSTOM_ACTION);
-    out_data->AddIntListAttribute(ui::AX_ATTR_CUSTOM_ACTION_IDS,
+    out_data->AddAction(ax::mojom::Action::kCustomAction);
+    out_data->AddIntListAttribute(ax::mojom::IntListAttribute::kCustomActionIds,
                                   custom_action_ids);
-    out_data->AddStringListAttribute(ui::AX_ATTR_CUSTOM_ACTION_DESCRIPTIONS,
-                                     custom_action_descriptions);
+    out_data->AddStringListAttribute(
+        ax::mojom::StringListAttribute::kCustomActionDescriptions,
+        custom_action_descriptions);
   }
+}
+
+const gfx::Rect AXTreeSourceArc::GetBounds(
+    mojom::AccessibilityNodeInfoData* node,
+    aura::Window* focused_window) const {
+  DCHECK_NE(root_id_, -1);
+
+  gfx::Rect node_bounds = node->bounds_in_screen;
+
+  if (focused_window && node->id == root_id_) {
+    // Top level window returns its bounds in dip.
+    aura::Window* toplevel_window = focused_window->GetToplevelWindow();
+    float scale = toplevel_window->layer()->device_scale_factor();
+
+    // Bounds of root node is relative to its container, i.e. focused window.
+    node_bounds.Offset(
+        static_cast<int>(-1.0f * scale *
+                         static_cast<float>(toplevel_window->bounds().x())),
+        static_cast<int>(-1.0f * scale *
+                         static_cast<float>(toplevel_window->bounds().y())));
+
+    return node_bounds;
+  }
+
+  // Bounds of non-root node is relative to its tree's root.
+  gfx::Rect root_bounds = GetFromId(root_id_)->bounds_in_screen;
+  node_bounds.Offset(-1 * root_bounds.x(), -1 * root_bounds.y());
+  return node_bounds;
+}
+
+gfx::Rect AXTreeSourceArc::ComputeEnclosingBounds(
+    mojom::AccessibilityNodeInfoData* node) const {
+  gfx::Rect computed_bounds;
+  ComputeEnclosingBoundsInternal(node, computed_bounds);
+  return computed_bounds.IsEmpty() ? node->bounds_in_screen : computed_bounds;
+}
+
+void AXTreeSourceArc::ComputeEnclosingBoundsInternal(
+    mojom::AccessibilityNodeInfoData* node,
+    gfx::Rect& computed_bounds) const {
+  // Only consider nodes that can possibly be accessibility focused. In Chrome,
+  // this amounts to nodes with a non-generic container role.
+  ui::AXNodeData data;
+  PopulateAXRole(node, &data);
+  const gfx::Rect& bounds = node->bounds_in_screen;
+  if (data.role != ax::mojom::Role::kGenericContainer &&
+      data.role != ax::mojom::Role::kGroup && !bounds.IsEmpty() &&
+      GetBooleanProperty(
+          node, arc::mojom::AccessibilityBooleanProperty::VISIBLE_TO_USER)) {
+    computed_bounds.Union(bounds);
+    return;
+  }
+
+  if (!node->int_list_properties)
+    return;
+
+  auto it = node->int_list_properties->find(
+      arc::mojom::AccessibilityIntListProperty::CHILD_NODE_IDS);
+  if (it == node->int_list_properties->end())
+    return;
+
+  for (size_t i = 0; i < it->second.size(); ++i) {
+    ComputeEnclosingBoundsInternal(GetFromId(it->second[i]), computed_bounds);
+  }
+
+  return;
 }
 
 void AXTreeSourceArc::PerformAction(const ui::AXActionData& data) {
@@ -463,6 +740,12 @@ void AXTreeSourceArc::Reset() {
   current_tree_serializer_.reset(new AXTreeArcSerializer(this));
   root_id_ = -1;
   focused_node_id_ = -1;
+  if (focus_stealer_->parent()) {
+    views::View* parent = focus_stealer_->parent();
+    parent->RemoveChildView(focus_stealer_.get());
+    parent->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
+  }
+  focus_stealer_.reset();
   extensions::AutomationEventRouter* router =
       extensions::AutomationEventRouter::GetInstance();
   if (!router)

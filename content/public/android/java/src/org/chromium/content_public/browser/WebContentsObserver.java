@@ -16,7 +16,7 @@ public abstract class WebContentsObserver {
     // TODO(jdduke): Remove the destroy method and hold observer embedders
     // responsible for explicit observer detachment.
     // Using a weak reference avoids cycles that might prevent GC of WebView's WebContents.
-    private WeakReference<WebContents> mWebContents;
+    protected WeakReference<WebContents> mWebContents;
 
     public WebContentsObserver(WebContents webContents) {
         mWebContents = new WeakReference<WebContents>(webContents);
@@ -135,6 +135,11 @@ public abstract class WebContentsObserver {
     public void navigationEntryCommitted() {}
 
     /**
+     * Called when navigation entries were removed.
+     */
+    public void navigationEntriesDeleted() {}
+
+    /**
      * Called when an interstitial page gets attached to the tab content.
      */
     public void didAttachInterstitialPage() {}
@@ -149,6 +154,12 @@ public abstract class WebContentsObserver {
      * @param color the new color in ARGB format
      */
     public void didChangeThemeColor(int color) {}
+
+    /**
+     * Called when the Web Contents leaves or enters fullscreen mode.
+     * @param isFullscreen whether fullscreen is being entered or left.
+     */
+    public void hasEffectivelyFullscreenVideoChange(boolean isFullscreen) {}
 
     /**
      * Stop observing the web contents and clean up associated references.

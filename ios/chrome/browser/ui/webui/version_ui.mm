@@ -4,8 +4,9 @@
 
 #include "ios/chrome/browser/ui/webui/version_ui.h"
 
+#include <memory>
+
 #include "base/command_line.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
@@ -94,19 +95,22 @@ web::WebUIIOSDataSource* CreateVersionUIDataSource() {
 
   html_source->AddLocalizedString(version_ui::kVariationsName,
                                   IDS_VERSION_UI_VARIATIONS);
+  html_source->AddLocalizedString(version_ui::kVariationsCmdName,
+                                  IDS_VERSION_UI_VARIATIONS_CMD);
 
   html_source->SetJsonPath("strings.js");
   html_source->AddResourcePath(version_ui::kVersionJS, IDR_VERSION_UI_JS);
   html_source->AddResourcePath(version_ui::kAboutVersionCSS,
                                IDR_VERSION_UI_CSS);
   html_source->SetDefaultResource(IDR_VERSION_UI_HTML);
+  html_source->UseGzip();
   return html_source;
 }
 
 }  // namespace
 
 VersionUI::VersionUI(web::WebUIIOS* web_ui) : web::WebUIIOSController(web_ui) {
-  web_ui->AddMessageHandler(base::MakeUnique<VersionHandler>());
+  web_ui->AddMessageHandler(std::make_unique<VersionHandler>());
   web::WebUIIOSDataSource::Add(ios::ChromeBrowserState::FromWebUIIOS(web_ui),
                                CreateVersionUIDataSource());
 }

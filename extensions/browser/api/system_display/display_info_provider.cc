@@ -72,11 +72,15 @@ api::system_display::DisplayUnitInfo DisplayInfoProvider::CreateDisplayUnitInfo(
   unit.work_area.width = work_area.width();
   unit.work_area.height = work_area.height();
   unit.has_touch_support =
-      display.touch_support() == display::Display::TOUCH_SUPPORT_AVAILABLE;
+      display.touch_support() == display::Display::TouchSupport::AVAILABLE;
+  unit.has_accelerometer_support =
+      display.accelerometer_support() ==
+      display::Display::AccelerometerSupport::AVAILABLE;
   return unit;
 }
 
-bool DisplayInfoProvider::SetDisplayLayout(const DisplayLayoutList& layout) {
+bool DisplayInfoProvider::SetDisplayLayout(const DisplayLayoutList& layout,
+                                           std::string* error) {
   NOTREACHED();  // Implemented on Chrome OS only in override.
   return false;
 }
@@ -124,7 +128,7 @@ bool DisplayInfoProvider::OverscanCalibrationComplete(const std::string& id) {
 bool DisplayInfoProvider::ShowNativeTouchCalibration(
     const std::string& id,
     std::string* error,
-    const TouchCalibrationCallback& callback) {
+    TouchCalibrationCallback callback) {
   NOTREACHED();  // Implemented on Chrome OS only in override.
   return false;
 }
@@ -150,6 +154,13 @@ bool DisplayInfoProvider::ClearTouchCalibration(const std::string& id,
 }
 
 bool DisplayInfoProvider::IsNativeTouchCalibrationActive(std::string* error) {
+  NOTREACHED();  // Implemented on Chrome OS only in override.
+  return true;
+}
+
+bool DisplayInfoProvider::SetMirrorMode(
+    const api::system_display::MirrorModeInfo& info,
+    std::string* out_error) {
   NOTREACHED();  // Implemented on Chrome OS only in override.
   return true;
 }

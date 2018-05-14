@@ -41,6 +41,7 @@ blink::WebMediaPlayer::NetworkState PipelineErrorToNetworkState(
     case DEMUXER_ERROR_COULD_NOT_OPEN:
     case DEMUXER_ERROR_COULD_NOT_PARSE:
     case DEMUXER_ERROR_NO_SUPPORTED_STREAMS:
+    case DEMUXER_ERROR_DETECTED_HLS:
     case DECODER_ERROR_NOT_SUPPORTED:
       return blink::WebMediaPlayer::kNetworkStateFormatError;
 
@@ -199,7 +200,7 @@ class SetSinkIdCallback {
       : web_callback_(web_callback) {}
   SetSinkIdCallback(const SetSinkIdCallback& other)
       : web_callback_(std::move(other.web_callback_)) {}
-  ~SetSinkIdCallback() {}
+  ~SetSinkIdCallback() = default;
   friend void RunSetSinkIdCallback(const SetSinkIdCallback& callback,
                                    OutputDeviceStatus result);
 

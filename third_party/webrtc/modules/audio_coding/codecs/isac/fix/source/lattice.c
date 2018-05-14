@@ -15,9 +15,9 @@
  *
  */
 
-#include "codec.h"
-#include "settings.h"
-#include "webrtc/rtc_base/sanitizer.h"
+#include "modules/audio_coding/codecs/isac/fix/source/codec.h"
+#include "modules/audio_coding/codecs/isac/fix/source/settings.h"
+#include "rtc_base/sanitizer.h"
 
 #define LATTICE_MUL_32_32_RSFT16(a32a, a32b, b32)                  \
   ((int32_t)(WEBRTC_SPL_MUL(a32a, b32) + (WEBRTC_SPL_MUL_16_32_RSFT16(a32b, b32))))

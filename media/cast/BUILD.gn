@@ -102,14 +102,22 @@ source_set("net") {
     "net/rtp/rtp_parser.h",
     "net/rtp/rtp_sender.cc",
     "net/rtp/rtp_sender.h",
-    "net/udp_transport.cc",
-    "net/udp_transport.h",
+    "net/udp_packet_pipe.cc",
+    "net/udp_packet_pipe.h",
+    "net/udp_socket_client.cc",
+    "net/udp_socket_client.h",
+    "net/udp_transport_impl.cc",
+    "net/udp_transport_impl.h",
+    "net/udp_transport_interface.h",
   ]
 
   deps = [
     ":common",
     "//base",
+    "//media/mojo/common",
+    "//mojo/public/cpp/system",
     "//net",
+    "//services/network/public/mojom",
   ]
 
   public_deps = [
@@ -159,8 +167,6 @@ source_set("sender") {
     ":net",
     "//base",
     "//media",
-    "//media:media_features",
-    "//media:shared_memory_support",
     "//third_party/libvpx",
     "//third_party/opus",
     "//ui/gfx/geometry",
@@ -210,7 +216,6 @@ source_set("receiver") {
     ":net",
     "//base",
     "//media",
-    "//media:shared_memory_support",
     "//third_party/libvpx",
     "//third_party/libyuv",
     "//third_party/opus",
@@ -256,12 +261,10 @@ static_library("test_support") {
     ":receiver",
     ":sender",
     "//base/test:test_support",
-    "//media:test_support",
-    "//media/base:test_support",
+    "//media",
     "//net",
     "//testing/gtest",
     "//third_party/libyuv",
-    "//third_party/mt19937ar",
     "//ui/gfx:test_support",
   ]
 
@@ -315,6 +318,8 @@ test("cast_unittests") {
     "net/rtp/rtp_packet_builder.h",
     "net/rtp/rtp_packetizer_unittest.cc",
     "net/rtp/rtp_parser_unittest.cc",
+    "net/udp_packet_pipe_unittest.cc",
+    "net/udp_socket_client_unittest.cc",
     "net/udp_transport_unittest.cc",
     "receiver/audio_decoder_unittest.cc",
     "receiver/frame_receiver_unittest.cc",
@@ -340,11 +345,12 @@ test("cast_unittests") {
     ":sender",
     ":test_support",
     "//base",
-    "//base/test:run_all_unittests",
     "//base/test:test_support",
-    "//media",
-    "//media/base:test_support",
+    "//media:test_support",
+    "//media/test:run_all_unittests",
+    "//mojo/public/cpp/bindings",
     "//net",
+    "//services/network/public/mojom",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/opus",
@@ -390,8 +396,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       ":test_support",
       "//base",
       "//base/test:test_support",
-      "//media",
-      "//media/base:test_support",
+      "//media:test_support",
       "//net",
       "//testing/gtest",
       "//ui/gfx/geometry",
@@ -411,13 +416,12 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       "//base",
       "//build/config:exe_and_shlib_deps",
       "//build/win:default_exe_manifest",
-      "//media",
-      "//media/audio:test_support",
+      "//media:test_support",
       "//net",
       "//ui/gfx/geometry",
     ]
 
-    if (is_linux && !is_chromeos && use_x11) {
+    if (use_x11) {
       sources += [
         "test/linux_output_window.cc",
         "test/linux_output_window.h",
@@ -470,8 +474,7 @@ if (is_win || is_mac || (is_linux && !is_chromeos)) {
       "//base/test:test_support",
       "//build/config:exe_and_shlib_deps",
       "//build/win:default_exe_manifest",
-      "//media",
-      "//media/base:test_support",
+      "//media:test_support",
     ]
   }
 

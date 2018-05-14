@@ -205,6 +205,9 @@ void ApplyFramebufferAttachmentCMAAINTELResourceManager::
   glDisable(GL_STENCIL_TEST);
   glDisable(GL_CULL_FACE);
   glDisable(GL_BLEND);
+  if (decoder->GetFeatureInfo()->feature_flags().ext_window_rectangles) {
+    glWindowRectanglesEXT(GL_EXCLUSIVE_EXT, 0, nullptr);
+  }
 
   // Process each color attachment of the current draw framebuffer.
   uint32_t max_draw_buffers = decoder->GetContextGroup()->max_draw_buffers();
@@ -279,7 +282,7 @@ void ApplyFramebufferAttachmentCMAAINTELResourceManager::
                                  GL_RGBA8, GL_TEXTURE_2D, source_texture, 0,
                                  internal_format, 0, 0, 0, 0, width_, height_,
                                  width_, height_, width_, height_, false, false,
-                                 false, method, nullptr);
+                                 false, false, method, nullptr);
       } else {
         ApplyCMAAEffectTexture(source_texture, source_texture, do_copy);
       }

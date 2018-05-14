@@ -9,7 +9,9 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "chrome/browser/vr/elements/textured_element.h"
+#include "chrome/browser/vr/elements/draw_phase.h"
+#include "chrome/browser/vr/elements/ui_element.h"
+#include "chrome/browser/vr/model/color_scheme.h"
 
 namespace gfx {
 class PointF;
@@ -17,28 +19,65 @@ class PointF;
 
 namespace vr {
 
-class ButtonTexture;
+class Rect;
 
-class Button : public TexturedElement {
+// Button has a circle as the background and a vector icon as the foreground.
+// When hovered, background and foreground both move forward on Z axis.
+// This matches the Daydream disk-style button.
+class Button : public UiElement {
  public:
-  explicit Button(base::Callback<void()> click_handler,
-                  std::unique_ptr<ButtonTexture> texture);
+  explicit Button(base::RepeatingCallback<void()> click_handler);
   ~Button() override;
 
-  void OnHoverLeave() override;
-  void OnHoverEnter(const gfx::PointF& position) override;
-  void OnMove(const gfx::PointF& position) override;
-  void OnButtonDown(const gfx::PointF& position) override;
-  void OnButtonUp(const gfx::PointF& position) override;
-  bool HitTest(const gfx::PointF& point) const override;
+  void Render(UiElementRenderer* renderer,
+              const CameraModel& model) const final;
+
+  Rect* background() const { return background_; }
+  UiElement* hit_plane() const { return hit_plane_; }
+  void SetButtonColors(const ButtonColors& colors);
+
+  void set_enabled(bool enabled) { enabled_ = enabled; }
+
+  // TODO(vollick): once all elements are scaled by a ScaledDepthAdjuster, we
+  // will never have to change the button hover offset from the default and this
+  // method and the associated field can be removed.
+  void set_hover_offset(float hover_offset) { hover_offset_ = hover_offset; }
+
+  bool hovered() const { return hovered_; }
+  bool down() const { return down_; }
+  bool pressed() const { return pressed_; }
+  bool enabled() const { return enabled_; }
+
+ protected:
+  const ButtonColors& colors() const { return colors_; }
+  float hover_offset() const { return hover_offset_; }
+
+  void OnSetDrawPhase() override;
+  void OnSetName() override;
+  void OnSetSize(const gfx::SizeF& size) override;
+  void OnSetCornerRadii(const CornerRadii& radii) override;
+  void NotifyClientSizeAnimated(const gfx::SizeF& size,
+                                int target_property_id,
+                                cc::KeyframeModel* keyframe_model) override;
+  virtual void OnStateUpdated();
 
  private:
-  UiTexture* GetTexture() const override;
-  void OnStateUpdated(const gfx::PointF& position);
+  void HandleHoverEnter();
+  void HandleHoverMove(const gfx::PointF& position);
+  void HandleHoverLeave();
+  void HandleButtonDown();
+  void HandleButtonUp();
 
-  std::unique_ptr<ButtonTexture> texture_;
   bool down_ = false;
-  base::Callback<void()> click_handler_;
+  bool hovered_ = false;
+  bool pressed_ = false;
+  bool enabled_ = true;
+  base::RepeatingCallback<void()> click_handler_;
+  ButtonColors colors_;
+  float hover_offset_;
+
+  Rect* background_;
+  UiElement* hit_plane_;
 
   DISALLOW_COPY_AND_ASSIGN(Button);
 };

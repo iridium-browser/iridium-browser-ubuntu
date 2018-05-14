@@ -8,13 +8,14 @@
 #include <stdint.h>
 
 #include <memory>
+#include <set>
 
 #include "base/strings/string16.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
-#include "net/proxy/proxy_retry_info.h"
+#include "net/proxy_resolution/proxy_retry_info.h"
 
 class GURL;
 
@@ -75,13 +76,13 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
   bool OnCanGetCookies(const URLRequest& request,
                        const CookieList& cookie_list) final;
   bool OnCanSetCookie(const URLRequest& request,
-                      const std::string& cookie_line,
+                      const net::CanonicalCookie& cookie,
                       CookieOptions* options) final;
   bool OnCanAccessFile(const URLRequest& request,
                        const base::FilePath& original_path,
                        const base::FilePath& absolute_path) const final;
   bool OnCanEnablePrivacyMode(const GURL& url,
-                              const GURL& first_party_for_cookies) const final;
+                              const GURL& site_for_cookies) const final;
   bool OnAreExperimentalCookieFeaturesEnabled() const final;
   bool OnCancelURLRequestWithPolicyViolatingReferrerHeader(
       const URLRequest& request,
@@ -90,7 +91,9 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
 
   bool OnCanQueueReportingReport(const url::Origin& origin) const final;
 
-  bool OnCanSendReportingReport(const url::Origin& origin) const final;
+  void OnCanSendReportingReports(std::set<url::Origin> origins,
+                                 base::OnceCallback<void(std::set<url::Origin>)>
+                                     result_callback) const final;
 
   bool OnCanSetReportingClient(const url::Origin& origin,
                                const GURL& endpoint) const final;
@@ -146,7 +149,7 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
                                        const CookieList& cookie_list);
 
   virtual void OnCanSetCookieInternal(const URLRequest& request,
-                                      const std::string& cookie_line,
+                                      const net::CanonicalCookie& cookie,
                                       CookieOptions* options);
 
   virtual void OnAuthRequiredInternal(URLRequest* request,
@@ -161,7 +164,7 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
 
   virtual void OnCanEnablePrivacyModeInternal(
       const GURL& url,
-      const GURL& first_party_for_cookies) const;
+      const GURL& site_for_cookies) const;
 
   virtual void OnAreExperimentalCookieFeaturesEnabledInternal() const;
 
@@ -173,8 +176,8 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
   virtual void OnCanQueueReportingReportInternal(
       const url::Origin& origin) const;
 
-  virtual void OnCanSendReportingReportInternal(
-      const url::Origin& origin) const;
+  virtual void OnCanSendReportingReportsInternal(
+      const std::set<url::Origin>& origins) const;
 
   virtual void OnCanSetReportingClientInternal(const url::Origin& origin,
                                                const GURL& endpoint) const;

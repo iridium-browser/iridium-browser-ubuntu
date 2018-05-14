@@ -97,10 +97,12 @@ class MOJO_CPP_BINDINGS_EXPORT AssociatedInterfacePtrStateBase {
 template <typename Interface>
 class AssociatedInterfacePtrState : public AssociatedInterfacePtrStateBase {
  public:
+  using Proxy = typename Interface::Proxy_;
+
   AssociatedInterfacePtrState() {}
   ~AssociatedInterfacePtrState() = default;
 
-  Interface* instance() {
+  Proxy* instance() {
     // This will be null if the object is not bound.
     return proxy_.get();
   }
@@ -115,7 +117,7 @@ class AssociatedInterfacePtrState : public AssociatedInterfacePtrStateBase {
     DCHECK(!proxy_);
     AssociatedInterfacePtrStateBase::Bind(
         info.PassHandle(), info.version(),
-        base::MakeUnique<typename Interface::ResponseValidator_>(),
+        std::make_unique<typename Interface::ResponseValidator_>(),
         std::move(runner));
     proxy_.reset(new Proxy(endpoint_client()));
   }
@@ -129,8 +131,6 @@ class AssociatedInterfacePtrState : public AssociatedInterfacePtrStateBase {
   }
 
  private:
-  using Proxy = typename Interface::Proxy_;
-
   std::unique_ptr<Proxy> proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(AssociatedInterfacePtrState);

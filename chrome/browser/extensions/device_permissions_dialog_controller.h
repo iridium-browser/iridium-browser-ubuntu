@@ -22,14 +22,12 @@ class DevicePermissionsDialogController
   ~DevicePermissionsDialogController() override;
 
   // ChooserController:
-  bool ShouldShowFootnoteView() const override;
+  bool ShouldShowHelpButton() const override;
   bool AllowMultipleSelection() const override;
   base::string16 GetNoOptionsText() const override;
   base::string16 GetOkButtonLabel() const override;
   size_t NumOptions() const override;
   base::string16 GetOption(size_t index) const override;
-  void RefreshOptions() override;
-  base::string16 GetStatus() const override;
   void Select(const std::vector<size_t>& indices) override;
   void Cancel() override;
   void Close() override;

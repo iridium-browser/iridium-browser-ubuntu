@@ -122,6 +122,17 @@ GLuint CompileProgramWithTransformFeedback(
     const std::vector<std::string> &transformFeedbackVaryings,
     GLenum bufferMode)
 {
+    return CompileProgramWithGSAndTransformFeedback(vsSource, "", fsSource,
+                                                    transformFeedbackVaryings, bufferMode);
+}
+
+GLuint CompileProgramWithGSAndTransformFeedback(
+    const std::string &vsSource,
+    const std::string &gsSource,
+    const std::string &fsSource,
+    const std::vector<std::string> &transformFeedbackVaryings,
+    GLenum bufferMode)
+{
     GLuint program = glCreateProgram();
 
     GLuint vs = CompileShader(GL_VERTEX_SHADER, vsSource);
@@ -140,6 +151,21 @@ GLuint CompileProgramWithTransformFeedback(
 
     glAttachShader(program, fs);
     glDeleteShader(fs);
+
+    if (!gsSource.empty())
+    {
+        GLuint gs = CompileShader(GL_GEOMETRY_SHADER_EXT, gsSource);
+        if (gs == 0)
+        {
+            glDeleteShader(vs);
+            glDeleteShader(fs);
+            glDeleteProgram(program);
+            return 0;
+        }
+
+        glAttachShader(program, gs);
+        glDeleteShader(gs);
+    }
 
     if (transformFeedbackVaryings.size() > 0)
     {
@@ -161,8 +187,16 @@ GLuint CompileProgramWithTransformFeedback(
 
 GLuint CompileProgram(const std::string &vsSource, const std::string &fsSource)
 {
+    return CompileProgramWithGS(vsSource, "", fsSource);
+}
+
+GLuint CompileProgramWithGS(const std::string &vsSource,
+                            const std::string &gsSource,
+                            const std::string &fsSource)
+{
     std::vector<std::string> emptyVector;
-    return CompileProgramWithTransformFeedback(vsSource, fsSource, emptyVector, GL_NONE);
+    return CompileProgramWithGSAndTransformFeedback(vsSource, gsSource, fsSource, emptyVector,
+                                                    GL_NONE);
 }
 
 GLuint CompileProgramFromFiles(const std::string &vsPath, const std::string &fsPath)
@@ -207,4 +241,10 @@ GLuint LoadBinaryProgramES3(const std::vector<uint8_t> &binary, GLenum binaryFor
     GLuint program = glCreateProgram();
     glProgramBinary(program, binaryFormat, binary.data(), static_cast<GLint>(binary.size()));
     return CheckLinkStatusAndReturnProgram(program, true);
+}
+
+bool LinkAttachedProgram(GLuint program)
+{
+    glLinkProgram(program);
+    return (CheckLinkStatusAndReturnProgram(program, true) != 0);
 }

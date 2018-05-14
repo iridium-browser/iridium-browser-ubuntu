@@ -27,8 +27,7 @@ ChromeLoginPerformer::ChromeLoginPerformer(Delegate* delegate)
     : LoginPerformer(base::ThreadTaskRunnerHandle::Get(), delegate),
       weak_factory_(this) {}
 
-ChromeLoginPerformer::~ChromeLoginPerformer() {
-}
+ChromeLoginPerformer::~ChromeLoginPerformer() {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // ChromeLoginPerformer, public:
@@ -39,8 +38,7 @@ bool ChromeLoginPerformer::RunTrustedCheck(const base::Closure& callback) {
   CrosSettingsProvider::TrustedStatus status =
       cros_settings->PrepareTrustedValues(
           base::Bind(&ChromeLoginPerformer::DidRunTrustedCheck,
-                     weak_factory_.GetWeakPtr(),
-                     callback));
+                     weak_factory_.GetWeakPtr(), callback));
   // Must not proceed without signature verification.
   if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
     if (delegate_)
@@ -66,8 +64,7 @@ void ChromeLoginPerformer::DidRunTrustedCheck(const base::Closure& callback) {
   CrosSettingsProvider::TrustedStatus status =
       cros_settings->PrepareTrustedValues(
           base::Bind(&ChromeLoginPerformer::DidRunTrustedCheck,
-                     weak_factory_.GetWeakPtr(),
-                     callback));
+                     weak_factory_.GetWeakPtr(), callback));
   // Must not proceed without signature verification.
   if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
     if (delegate_)
@@ -86,7 +83,8 @@ void ChromeLoginPerformer::DidRunTrustedCheck(const base::Closure& callback) {
 
 bool ChromeLoginPerformer::IsUserWhitelisted(const AccountId& account_id,
                                              bool* wildcard_match) {
-  return CrosSettings::IsWhitelisted(account_id.GetUserEmail(), wildcard_match);
+  return CrosSettings::Get()->IsUserWhitelisted(account_id.GetUserEmail(),
+                                                wildcard_match);
 }
 
 void ChromeLoginPerformer::RunOnlineWhitelistCheck(
@@ -95,10 +93,10 @@ void ChromeLoginPerformer::RunOnlineWhitelistCheck(
     const std::string& refresh_token,
     const base::Closure& success_callback,
     const base::Closure& failure_callback) {
-  // On enterprise devices, reconfirm login permission with the server.
+  // On cloud managed devices, reconfirm login permission with the server.
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (connector->IsEnterpriseManaged() && wildcard_match &&
+  if (connector->IsCloudManaged() && wildcard_match &&
       !connector->IsNonEnterpriseUser(account_id.GetUserEmail())) {
     wildcard_login_checker_.reset(new policy::WildcardLoginChecker());
     if (refresh_token.empty()) {

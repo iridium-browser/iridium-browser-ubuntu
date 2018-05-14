@@ -7,32 +7,49 @@
 
 #include <memory>
 
+#include "ash/public/interfaces/shell_test_api.mojom.h"
 #include "base/macros.h"
 
+class PrefService;
+
 namespace ash {
-class NativeCursorManagerAsh;
 class DragDropController;
-class TabletModeWindowManager;
-class PaletteDelegate;
+class MessageCenterController;
+class NativeCursorManagerAsh;
 class ScreenPositionController;
 class Shell;
 class SystemGestureEventFilter;
 class WorkspaceController;
 
 // Accesses private data from a Shell for testing.
-class ShellTestApi {
+class ShellTestApi : public mojom::ShellTestApi {
  public:
   ShellTestApi();
   explicit ShellTestApi(Shell* shell);
 
+  // Creates and binds an instance from a remote request (e.g. from chrome).
+  static void BindRequest(mojom::ShellTestApiRequest request);
+
+  MessageCenterController* message_center_controller();
   SystemGestureEventFilter* system_gesture_event_filter();
   WorkspaceController* workspace_controller();
   ScreenPositionController* screen_position_controller();
   NativeCursorManagerAsh* native_cursor_manager_ash();
   DragDropController* drag_drop_controller();
-  TabletModeWindowManager* tablet_mode_window_manager();
 
-  void SetPaletteDelegate(std::unique_ptr<PaletteDelegate> palette_delegate);
+  // Calls the private method.
+  void OnLocalStatePrefServiceInitialized(
+      std::unique_ptr<PrefService> pref_service);
+
+  // Resets |shell_->power_button_controller_| to hold a new object to simulate
+  // Chrome starting.
+  void ResetPowerButtonControllerForTest();
+
+  // Simulates a modal dialog being open.
+  void SimulateModalWindowOpenForTest(bool modal_window_open);
+
+  // mojom::ShellTestApi:
+  void IsSystemModalWindowOpen(IsSystemModalWindowOpenCallback cb) override;
 
  private:
   Shell* shell_;  // not owned

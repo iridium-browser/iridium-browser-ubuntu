@@ -12,21 +12,23 @@
 #include "base/cancelable_callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/sequenced_task_runner.h"
 #include "components/spellcheck/browser/spellcheck_dictionary.h"
 #include "components/sync/model/sync_data.h"
 #include "components/sync/model/sync_error.h"
 #include "components/sync/model/sync_merge_result.h"
 #include "components/sync/model/syncable_service.h"
 
+namespace base {
+class Location;
+}
+
 namespace syncer {
 class SyncErrorFactory;
 class SyncChangeProcessor;
-}
-
-namespace tracked_objects {
-class Location;
 }
 
 // Defines a custom dictionary where users can add their own words. All words
@@ -153,7 +155,7 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   void StopSyncing(syncer::ModelType type) override;
   syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
   syncer::SyncError ProcessSyncChanges(
-      const tracked_objects::Location& from_here,
+      const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
  private:
@@ -196,6 +198,9 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   // changed.
   void Notify(const Change& dictionary_change);
 
+  // Task runner where the file operations takes place.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
   // In-memory cache of the custom words file.
   std::set<std::string> words_;
 
@@ -215,7 +220,7 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   bool is_loaded_;
 
   // A post-startup task to fix the invalid custom dictionary file.
-  base::CancelableClosure fix_invalid_file_;
+  base::CancelableOnceClosure fix_invalid_file_;
 
   // Used to create weak pointers for an instance of this class.
   base::WeakPtrFactory<SpellcheckCustomDictionary> weak_ptr_factory_;

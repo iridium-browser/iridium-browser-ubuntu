@@ -55,11 +55,14 @@ AXTable::AXTable(LayoutObject* layout_object,
       header_container_(nullptr),
       is_ax_table_(true) {}
 
-AXTable::~AXTable() {}
+AXTable::~AXTable() = default;
 
 void AXTable::Init() {
   AXLayoutObject::Init();
+  // Can it be exposed with any kind of table structure / interface?
   is_ax_table_ = IsTableExposableThroughAccessibility();
+  // Data tables are a subset of AX Tables. The rest are layout tables.
+  is_data_table_ = is_ax_table_ && ComputeIsDataTable();
 }
 
 AXTable* AXTable::Create(LayoutObject* layout_object,
@@ -67,38 +70,37 @@ AXTable* AXTable::Create(LayoutObject* layout_object,
   return new AXTable(layout_object, ax_object_cache);
 }
 
-bool AXTable::HasARIARole() const {
-  if (!layout_object_)
-    return false;
-
-  AccessibilityRole aria_role = AriaRoleAttribute();
-  if (aria_role != kUnknownRole)
-    return true;
-
-  return false;
-}
-
 bool AXTable::IsAXTable() const {
-  if (!layout_object_)
-    return false;
-
-  return is_ax_table_;
+  return layout_object_ && is_ax_table_;
 }
 
-static bool ElementHasAriaRole(const Element* element) {
+static AccessibilityRole AriaRole(const Element* element) {
+  if (!element)
+    return kUnknownRole;
+
+  const AtomicString& aria_role = element->FastGetAttribute(roleAttr);
+  if (aria_role.IsEmpty())
+    return kUnknownRole;
+  return AXObject::AriaRoleToWebCoreRole(aria_role);
+}
+
+static bool ElementHasSignificantAriaRole(const Element* element) {
   if (!element)
     return false;
 
-  const AtomicString& aria_role = element->FastGetAttribute(roleAttr);
-  return (!aria_role.IsNull() && !aria_role.IsEmpty());
+  AccessibilityRole role = AriaRole(element);
+  return role != kUnknownRole && role != kNoneRole &&
+         role != kPresentationalRole;
 }
 
 bool AXTable::IsDataTable() const {
-  if (!layout_object_ || !GetNode())
-    return false;
+  return layout_object_ && is_data_table_;
+}
 
-  // Do not consider it a data table if it has an ARIA role.
-  if (HasARIARole())
+// The following is a heuristic used to determine if a
+// <table> should be with kTableRole or kLayoutTableRole.
+bool AXTable::ComputeIsDataTable() const {
+  if (!layout_object_ || !GetNode())
     return false;
 
   // When a section of the document is contentEditable, all tables should be
@@ -114,36 +116,8 @@ bool AXTable::IsDataTable() const {
 
   LayoutTable* table = ToLayoutTable(layout_object_);
   Node* table_node = table->GetNode();
-  if (!isHTMLTableElement(table_node))
-    return false;
-
-  // Do not consider it a data table if any of its descendants have an ARIA
-  // role.
-  HTMLTableElement* table_element = toHTMLTableElement(table_node);
-  if (ElementHasAriaRole(table_element->tHead()))
-    return false;
-  if (ElementHasAriaRole(table_element->tFoot()))
-    return false;
-
-  HTMLCollection* bodies = table_element->tBodies();
-  for (unsigned body_index = 0; body_index < bodies->length(); ++body_index) {
-    Element* body_element = bodies->item(body_index);
-    if (ElementHasAriaRole(body_element))
-      return false;
-  }
-
-  HTMLTableRowsCollection* rows = table_element->rows();
-  unsigned row_count = rows->length();
-  for (unsigned row_index = 0; row_index < row_count; ++row_index) {
-    HTMLTableRowElement* row_element = rows->Item(row_index);
-    if (ElementHasAriaRole(row_element))
-      return false;
-    HTMLCollection* cells = row_element->cells();
-    for (unsigned cell_index = 0; cell_index < cells->length(); ++cell_index) {
-      if (ElementHasAriaRole(cells->item(cell_index)))
-        return false;
-    }
-  }
+  DCHECK(IsHTMLTableElement(table_node));
+  HTMLTableElement* table_element = ToHTMLTableElement(table_node);
 
   // If there is a caption element, summary, THEAD, or TFOOT section, it's most
   // certainly a data table
@@ -183,7 +157,7 @@ bool AXTable::IsDataTable() const {
   if (!table_style)
     return false;
   Color table_bg_color =
-      table_style->VisitedDependentColor(CSSPropertyBackgroundColor);
+      table_style->VisitedDependentColor(GetCSSPropertyBackgroundColor());
 
   // check enough of the cells to find if the table matches our criteria
   // Criteria:
@@ -202,9 +176,7 @@ bool AXTable::IsDataTable() const {
   Color alternating_row_colors[5];
   int alternating_row_color_count = 0;
 
-  int headers_in_first_column_count = 0;
   for (int row = 0; row < num_rows; ++row) {
-    int headers_in_first_row_count = 0;
     int n_cols = first_body->NumCols(row);
     for (int col = 0; col < n_cols; ++col) {
       LayoutTableCell* cell = first_body->PrimaryCellAt(row, col);
@@ -219,16 +191,9 @@ bool AXTable::IsDataTable() const {
 
       valid_cell_count++;
 
-      bool is_th_cell = cell_node->HasTagName(thTag);
-      // If the first row is comprised of all <th> tags, assume it is a data
-      // table.
-      if (!row && is_th_cell)
-        headers_in_first_row_count++;
-
-      // If the first column is comprised of all <th> tags, assume it is a data
-      // table.
-      if (!col && is_th_cell)
-        headers_in_first_column_count++;
+      // Any <th> tag -> treat as data table.
+      if (cell_node->HasTagName(thTag))
+        return true;
 
       // In this case, the developer explicitly assigned a "data" table
       // attribute.
@@ -267,8 +232,8 @@ bool AXTable::IsDataTable() const {
       // If the cell has a different color from the table and there is cell
       // spacing, then it is probably a data table cell (spacing and colors take
       // the place of borders).
-      Color cell_color =
-          computed_style->VisitedDependentColor(CSSPropertyBackgroundColor);
+      Color cell_color = computed_style->VisitedDependentColor(
+          GetCSSPropertyBackgroundColor());
       if (table->HBorderSpacing() > 0 && table->VBorderSpacing() > 0 &&
           table_bg_color != cell_color && cell_color.Alpha() != 1)
         background_difference_cell_count++;
@@ -288,19 +253,12 @@ bool AXTable::IsDataTable() const {
         if (!row_computed_style)
           continue;
         Color row_color = row_computed_style->VisitedDependentColor(
-            CSSPropertyBackgroundColor);
+            GetCSSPropertyBackgroundColor());
         alternating_row_colors[alternating_row_color_count] = row_color;
         alternating_row_color_count++;
       }
     }
-
-    if (!row && headers_in_first_row_count == num_cols_in_first_body &&
-        num_cols_in_first_body > 1)
-      return true;
   }
-
-  if (headers_in_first_column_count == num_rows && num_rows > 1)
-    return true;
 
   // if there is less than two valid cells, it's not a data table
   if (valid_cell_count <= 1)
@@ -337,21 +295,47 @@ bool AXTable::IsDataTable() const {
   return false;
 }
 
+// If this returns false, the table will be exposed as a generic object
+// instead of a kTableRole object with kRowRole children and kCellRole
+// grandchildren.
 bool AXTable::IsTableExposableThroughAccessibility() const {
-  // The following is a heuristic used to determine if a
-  // <table> should be exposed as an AXTable. The goal
-  // is to only show "data" tables.
-
   if (!layout_object_)
     return false;
 
   // If the developer assigned an aria role to this, then we
   // shouldn't expose it as a table, unless, of course, the aria
   // role is a table.
-  if (HasARIARole())
+  if (AriaRole(GetElement()) != kUnknownRole)
     return false;
 
-  return IsDataTable();
+  LayoutTable* table = ToLayoutTable(layout_object_);
+  Node* table_node = table->GetNode();
+  if (!IsHTMLTableElement(table_node))
+    return false;
+
+  // Do not expose as table if any of its child sections or rows has an ARIA
+  // role.
+  HTMLTableElement* table_element = ToHTMLTableElement(table_node);
+  if (ElementHasSignificantAriaRole(table_element->tHead()))
+    return false;
+  if (ElementHasSignificantAriaRole(table_element->tFoot()))
+    return false;
+
+  HTMLCollection* bodies = table_element->tBodies();
+  for (unsigned body_index = 0; body_index < bodies->length(); ++body_index) {
+    Element* body_element = bodies->item(body_index);
+    if (ElementHasSignificantAriaRole(body_element))
+      return false;
+  }
+
+  HTMLTableRowsCollection* rows = table_element->rows();
+  for (unsigned row_index = 0; row_index < rows->length(); ++row_index) {
+    Element* row_element = rows->item(row_index);
+    if (AriaRole(row_element) != kUnknownRole)
+      return false;
+  }
+
+  return true;
 }
 
 void AXTable::ClearChildren() {
@@ -379,15 +363,15 @@ void AXTable::AddChildren() {
     return;
 
   LayoutTable* table = ToLayoutTable(layout_object_);
-  AXObjectCacheImpl& ax_cache = AxObjectCache();
+  AXObjectCacheImpl& ax_cache = AXObjectCache();
 
   Node* table_node = table->GetNode();
-  if (!isHTMLTableElement(table_node))
+  if (!IsHTMLTableElement(table_node))
     return;
 
   // Add caption
   if (HTMLTableCaptionElement* caption =
-          toHTMLTableElement(table_node)->caption()) {
+          ToHTMLTableElement(table_node)->caption()) {
     AXObject* caption_object = ax_cache.GetOrCreate(caption);
     if (caption_object && !caption_object->AccessibilityIsIgnored())
       children_.push_back(caption_object);
@@ -451,7 +435,7 @@ AXObject* AXTable::HeaderContainer() {
     return header_container_.Get();
 
   AXMockObject* table_header =
-      ToAXMockObject(AxObjectCache().GetOrCreate(kTableHeaderContainerRole));
+      ToAXMockObject(AXObjectCache().GetOrCreate(kTableHeaderContainerRole));
   table_header->SetParent(this);
 
   header_container_ = table_header;
@@ -548,7 +532,7 @@ unsigned AXTable::RowCount() {
 AXTableCell* AXTable::CellForColumnAndRow(unsigned column, unsigned row) {
   UpdateChildrenIfNecessary();
   if (column >= ColumnCount() || row >= RowCount())
-    return 0;
+    return nullptr;
 
   // Iterate backwards through the rows in case the desired cell has a rowspan
   // and exists in a previous row.
@@ -581,14 +565,14 @@ AXTableCell* AXTable::CellForColumnAndRow(unsigned column, unsigned row) {
     }
   }
 
-  return 0;
+  return nullptr;
 }
 
 AccessibilityRole AXTable::RoleValue() const {
   if (!IsAXTable())
     return AXLayoutObject::RoleValue();
 
-  return kTableRole;
+  return IsDataTable() ? kTableRole : kLayoutTableRole;
 }
 
 bool AXTable::ComputeAccessibilityIsIgnored(
@@ -605,7 +589,7 @@ bool AXTable::ComputeAccessibilityIsIgnored(
   return false;
 }
 
-DEFINE_TRACE(AXTable) {
+void AXTable::Trace(blink::Visitor* visitor) {
   visitor->Trace(rows_);
   visitor->Trace(columns_);
   visitor->Trace(header_container_);

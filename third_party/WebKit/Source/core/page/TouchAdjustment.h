@@ -20,10 +20,12 @@
 #ifndef TouchAdjustment_h
 #define TouchAdjustment_h
 
+#include "base/memory/scoped_refptr.h"
+#include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/geometry/IntRect.h"
+#include "platform/geometry/LayoutSize.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -40,12 +42,13 @@ bool FindBestContextMenuCandidate(Node*& target_node,
                                   const IntPoint& touch_hotspot,
                                   const IntRect& touch_area,
                                   const HeapVector<Member<Node>>&);
-bool FindBestZoomableArea(Node*& target_node,
-                          IntRect& target_area,
-                          const IntPoint& touch_hotspot,
-                          const IntRect& touch_area,
-                          const HeapVector<Member<Node>>&);
-// FIXME: Implement the similar functions for other gestures here as well.
+
+LayoutSize GetHitTestRectForAdjustment(const IntSize& touch_area);
+
+struct TouchAdjustmentResult {
+  uint32_t unique_event_id;
+  FloatPoint adjusted_point;
+};
 
 }  // namespace blink
 

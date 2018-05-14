@@ -41,6 +41,7 @@ import org.chromium.chromoting.help.HelpSingleton;
 import org.chromium.chromoting.jni.Client;
 import org.chromium.chromoting.jni.ConnectionListener;
 import org.chromium.chromoting.jni.JniInterface;
+import org.chromium.chromoting.jni.JniOAuthTokenGetter;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -508,7 +509,7 @@ public class Chromoting extends AppCompatActivity implements ConnectionListener,
         String message = getString(R.string.confirm_host_delete_android, hostInfo.name);
         new AlertDialog.Builder(this)
                 .setMessage(message)
-                .setPositiveButton(android.R.string.yes,
+                .setPositiveButton(android.R.string.ok,
                         new DialogInterface.OnClickListener() {
                             @Override
                             public void onClick(DialogInterface dialog, int which) {
@@ -516,8 +517,9 @@ public class Chromoting extends AppCompatActivity implements ConnectionListener,
                                 dialog.dismiss();
                             }
                         })
-                .setNegativeButton(android.R.string.no, null)
-                .create().show();
+                .setNegativeButton(android.R.string.cancel, null)
+                .create()
+                .show();
     }
 
     /** Called when the user taps on a host entry. */
@@ -614,10 +616,12 @@ public class Chromoting extends AppCompatActivity implements ConnectionListener,
     @Override
     public void onAccountSelected(String accountName) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-            String logInAnnouncement = getString(R.string.log_in_account_description, accountName);
+            String logInAnnouncement =
+                    getString(R.string.log_in_account_accessibility_description, accountName);
             mAccountSwitcher.getView().announceForAccessibility(logInAnnouncement);
         }
         mAccount = accountName;
+        JniOAuthTokenGetter.setAccount(accountName);
         JniInterface.setAccountForLogging(accountName);
 
         // The current host list is no longer valid for the new account, so clear the list.

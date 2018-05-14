@@ -35,19 +35,18 @@
 
 namespace blink {
 
-WorkerGlobalScopeCrypto::WorkerGlobalScopeCrypto() {}
+WorkerGlobalScopeCrypto::WorkerGlobalScopeCrypto() = default;
 
-const char* WorkerGlobalScopeCrypto::SupplementName() {
-  return "WorkerGlobalScopeCrypto";
-}
+const char WorkerGlobalScopeCrypto::kSupplementName[] =
+    "WorkerGlobalScopeCrypto";
 
 WorkerGlobalScopeCrypto& WorkerGlobalScopeCrypto::From(
     Supplementable<WorkerGlobalScope>& context) {
-  WorkerGlobalScopeCrypto* supplement = static_cast<WorkerGlobalScopeCrypto*>(
-      Supplement<WorkerGlobalScope>::From(context, SupplementName()));
+  WorkerGlobalScopeCrypto* supplement =
+      Supplement<WorkerGlobalScope>::From<WorkerGlobalScopeCrypto>(context);
   if (!supplement) {
     supplement = new WorkerGlobalScopeCrypto;
-    ProvideTo(context, SupplementName(), supplement);
+    ProvideTo(context, supplement);
   }
   return *supplement;
 }
@@ -63,7 +62,7 @@ Crypto* WorkerGlobalScopeCrypto::crypto() const {
   return crypto_.Get();
 }
 
-DEFINE_TRACE(WorkerGlobalScopeCrypto) {
+void WorkerGlobalScopeCrypto::Trace(blink::Visitor* visitor) {
   visitor->Trace(crypto_);
   Supplement<WorkerGlobalScope>::Trace(visitor);
 }

@@ -8,14 +8,18 @@
 #include <stddef.h>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_controller.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image.h"
 
 class OmniboxPopupModelObserver;
 class OmniboxPopupView;
+class GURL;
 
 namespace gfx {
 class Image;
@@ -68,12 +72,6 @@ class OmniboxPopupModel {
     return autocomplete_controller()->result();
   }
 
-  size_t hovered_line() const { return hovered_line_; }
-
-  // Call to change the hovered line.  |line| should be within the range of
-  // valid lines (to enable hover) or kNoMatch (to disable hover).
-  void SetHoveredLine(size_t line);
-
   size_t selected_line() const { return selected_line_; }
 
   LineState selected_line_state() const { return selected_line_state_; }
@@ -82,8 +80,8 @@ class OmniboxPopupModel {
   // the necessary parts of the window, as well as updating the edit with the
   // new temporary text.  |line| will be clamped to the range of valid lines.
   // |reset_to_default| is true when the selection is being reset back to the
-  // default match, and thus there is no temporary text (and no
-  // |manually_selected_match_|). If |force| is true then the selected line will
+  // default match, and thus there is no temporary text (and not
+  // |has_selected_match_|). If |force| is true then the selected line will
   // be updated forcibly even if the |line| is same as the current selected
   // line.
   // NOTE: This assumes the popup is open, and thus both old and new values for
@@ -116,17 +114,11 @@ class OmniboxPopupModel {
   // can be removed from history, and if so, remove it and update the popup.
   void TryDeletingCurrentItem();
 
-  // If |match| is from an extension, returns the extension icon; otherwise
-  // returns an empty Image.
-  gfx::Image GetIconIfExtensionMatch(const AutocompleteMatch& match) const;
-
   // Returns true if the destination URL of the match is bookmarked.
   bool IsStarredMatch(const AutocompleteMatch& match) const;
 
-  // The match the user has manually chosen, if any.
-  const AutocompleteResult::Selection& manually_selected_match() const {
-    return manually_selected_match_;
-  }
+  // The user has manually selected a match.
+  bool has_selected_match() { return has_selected_match_; }
 
   // Invoked from the edit model any time the result set of the controller
   // changes.
@@ -140,20 +132,24 @@ class OmniboxPopupModel {
   void SetAnswerBitmap(const SkBitmap& bitmap);
   const SkBitmap& answer_bitmap() const { return answer_bitmap_; }
 
-  // The token value for selected_line_, hover_line_ and functions dealing with
-  // a "line number" that indicates "no line".
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // Gets the icon for the match index.
+  gfx::Image GetMatchIcon(const AutocompleteMatch& match,
+                          SkColor vector_icon_color);
+#endif
+
+  // The token value for selected_line_ and functions dealing with a "line
+  // number" that indicates "no line".
   static const size_t kNoMatch;
 
  private:
+  void OnFaviconFetched(const GURL& page_url, const gfx::Image& icon);
+
   SkBitmap answer_bitmap_;
 
   OmniboxPopupView* view_;
 
   OmniboxEditModel* edit_model_;
-
-  // The line that's currently hovered.  If we're not drawing a hover rect,
-  // this will be kNoMatch, even if the cursor is over the popup contents.
-  size_t hovered_line_;
 
   // The currently selected line.  This is kNoMatch when nothing is selected,
   // which should only be true when the popup is closed.
@@ -164,11 +160,13 @@ class OmniboxPopupModel {
   // (if KEYWORD) is selected.
   LineState selected_line_state_;
 
-  // The match the user has manually chosen, if any.
-  AutocompleteResult::Selection manually_selected_match_;
+  // The user has manually selected a match.
+  bool has_selected_match_;
 
   // Observers.
   base::ObserverList<OmniboxPopupModelObserver> observers_;
+
+  base::WeakPtrFactory<OmniboxPopupModel> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxPopupModel);
 };

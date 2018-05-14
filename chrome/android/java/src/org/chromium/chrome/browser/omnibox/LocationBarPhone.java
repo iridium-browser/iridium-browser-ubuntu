@@ -8,8 +8,8 @@ import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.support.annotation.Nullable;
 import android.support.v4.view.animation.FastOutLinearInInterpolator;
-import android.text.Selection;
 import android.util.AttributeSet;
 import android.view.TouchDelegate;
 import android.view.View;
@@ -19,15 +19,15 @@ import android.widget.FrameLayout;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.WindowDelegate;
-import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
 import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.BottomSheetContent;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.StateChangeReason;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetContentController.ContentType;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
 import org.chromium.ui.UiUtils;
 
@@ -44,16 +44,16 @@ public class LocationBarPhone extends LocationBarLayout {
             new FastOutLinearInInterpolator();
 
     private View mFirstVisibleFocusedView;
-    private View mIncognitoBadge;
+    private @Nullable View mIncognitoBadge;
     private View mGoogleGContainer;
     private View mGoogleG;
-    private View mUrlActionsContainer;
     private int mIncognitoBadgePadding;
     private int mGoogleGWidth;
     private int mGoogleGMargin;
-    private float mUrlFocusChangePercent;
+
     private Runnable mKeyboardResizeModeTask;
     private ObjectAnimator mOmniboxBackgroundAnimator;
+    private boolean mCloseSheetOnBackButton;
 
     /**
      * Constructor used to inflate from XML.
@@ -76,12 +76,11 @@ public class LocationBarPhone extends LocationBarLayout {
         mGoogleGWidth = getResources().getDimensionPixelSize(R.dimen.location_bar_google_g_width);
         mGoogleGMargin = getResources().getDimensionPixelSize(R.dimen.location_bar_google_g_margin);
 
-        mUrlActionsContainer = findViewById(R.id.url_action_container);
         Rect delegateArea = new Rect();
-        mUrlActionsContainer.getHitRect(delegateArea);
+        mUrlActionContainer.getHitRect(delegateArea);
         delegateArea.left -= ACTION_BUTTON_TOUCH_OVERFLOW_LEFT;
-        TouchDelegate touchDelegate = new TouchDelegate(delegateArea, mUrlActionsContainer);
-        assert mUrlActionsContainer.getParent() == this;
+        TouchDelegate touchDelegate = new TouchDelegate(delegateArea, mUrlActionContainer);
+        assert mUrlActionContainer.getParent() == this;
         setTouchDelegate(touchDelegate);
     }
 
@@ -100,12 +99,12 @@ public class LocationBarPhone extends LocationBarLayout {
         mUrlFocusChangePercent = percent;
 
         if (percent > 0f) {
-            mUrlActionsContainer.setVisibility(VISIBLE);
+            mUrlActionContainer.setVisibility(VISIBLE);
         } else if (percent == 0f && !isUrlFocusChangeInProgress()) {
             // If a URL focus change is in progress, then it will handle setting the visibility
             // correctly after it completes.  If done here, it would cause the URL to jump due
             // to a badly timed layout call.
-            mUrlActionsContainer.setVisibility(GONE);
+            mUrlActionContainer.setVisibility(GONE);
         }
 
         updateButtonVisibility();
@@ -130,17 +129,17 @@ public class LocationBarPhone extends LocationBarLayout {
     @Override
     protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
         boolean needsCanvasRestore = false;
-        if (child == mUrlBar && mUrlActionsContainer.getVisibility() == VISIBLE) {
+        if (child == mUrlBar && mUrlActionContainer.getVisibility() == VISIBLE) {
             canvas.save();
 
             // Clip the URL bar contents to ensure they do not draw under the URL actions during
             // focus animations.  Based on the RTL state of the location bar, the url actions
             // container can be on the left or right side, so clip accordingly.
-            if (mUrlBar.getLeft() < mUrlActionsContainer.getLeft()) {
-                canvas.clipRect(0, 0, (int) mUrlActionsContainer.getX(), getBottom());
+            if (mUrlBar.getLeft() < mUrlActionContainer.getLeft()) {
+                canvas.clipRect(0, 0, (int) mUrlActionContainer.getX(), getBottom());
             } else {
-                canvas.clipRect(mUrlActionsContainer.getX() + mUrlActionsContainer.getWidth(),
-                        0, getWidth(), getBottom());
+                canvas.clipRect(mUrlActionContainer.getX() + mUrlActionContainer.getWidth(), 0,
+                        getWidth(), getBottom());
             }
             needsCanvasRestore = true;
         }
@@ -159,23 +158,7 @@ public class LocationBarPhone extends LocationBarLayout {
      */
     public void finishUrlFocusChange(boolean hasFocus) {
         if (!hasFocus) {
-            // Remove the selection from the url text.  The ending selection position
-            // will determine the scroll position when the url field is restored.  If
-            // we do not clear this, it will scroll to the end of the text when you
-            // enter/exit the tab stack.
-            // We set the selection to 0 instead of removing the selection to avoid a crash that
-            // happens if you clear the selection instead.
-            //
-            // Triggering the bug happens by:
-            // 1.) Selecting some portion of the URL (where the two selection handles
-            //     appear)
-            // 2.) Trigger a text change in the URL bar (i.e. by triggering a new URL load
-            //     by a command line intent)
-            // 3.) Simultaneously moving one of the selection handles left and right.  This will
-            //     occasionally throw an AssertionError on the bounds of the selection.
-            if (!mUrlBar.scrollToTLD()) {
-                Selection.setSelection(mUrlBar.getText(), 0);
-            }
+            mUrlBar.scrollToTLD();
 
             // The animation rendering may not yet be 100% complete and hiding the keyboard makes
             // the animation quite choppy.
@@ -191,7 +174,7 @@ public class LocationBarPhone extends LocationBarLayout {
             if (mBottomSheet == null) {
                 setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE, true);
             }
-            mUrlActionsContainer.setVisibility(GONE);
+            mUrlActionContainer.setVisibility(GONE);
         } else {
             // If Chrome Home is enabled, it will handle its own mode changes.
             if (mBottomSheet == null) {
@@ -221,27 +204,17 @@ public class LocationBarPhone extends LocationBarLayout {
     }
 
     private void updateGoogleG() {
+        if (!mNativeInitialized) {
+            mGoogleGContainer.setVisibility(View.GONE);
+            return;
+        }
+
         // The toolbar data provider can be null during startup, before the ToolbarManager has been
         // initialized.
         ToolbarDataProvider toolbarDataProvider = getToolbarDataProvider();
         if (toolbarDataProvider == null) return;
 
-        if (LocaleManager.getInstance().hasShownSearchEnginePromo()) {
-            mGoogleGContainer.setVisibility(View.GONE);
-            return;
-        }
-
-        // Only access ChromeFeatureList and TemplateUrlService after the NTP check,
-        // to prevent native method calls before the native side has been initialized.
-        NewTabPage ntp = toolbarDataProvider.getNewTabPageForCurrentTab();
-        boolean isShownInRegularNtp = ntp != null && ntp.isLocationBarShownInNTP()
-                && ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_SHOW_GOOGLE_G_IN_OMNIBOX)
-                && TemplateUrlService.getInstance().isDefaultSearchEngineGoogle();
-
-        boolean isShownInBottomSheetNtp =
-                mBottomSheet != null && mBottomSheet.shouldShowGoogleGInLocationBar();
-
-        if (!isShownInRegularNtp && !isShownInBottomSheetNtp) {
+        if (!getToolbarDataProvider().shouldShowGoogleG(mUrlBar.getEditableText().toString())) {
             mGoogleGContainer.setVisibility(View.GONE);
             return;
         }
@@ -297,9 +270,11 @@ public class LocationBarPhone extends LocationBarLayout {
     public void updateVisualsForState() {
         super.updateVisualsForState();
 
-        boolean isIncognito =
+        if (mIncognitoBadge == null) return;
+
+        boolean showIncognitoBadge =
                 getToolbarDataProvider() != null && getToolbarDataProvider().isIncognito();
-        mIncognitoBadge.setVisibility(isIncognito ? VISIBLE : GONE);
+        mIncognitoBadge.setVisibility(showIncognitoBadge ? VISIBLE : GONE);
         updateIncognitoBadgePadding();
     }
 
@@ -312,6 +287,13 @@ public class LocationBarPhone extends LocationBarLayout {
     public void setLayoutDirection(int layoutDirection) {
         super.setLayoutDirection(layoutDirection);
         updateIncognitoBadgePadding();
+    }
+
+    /**
+     * @return Whether the incognito badge is currently visible.
+     */
+    public boolean isIncognitoBadgeVisible() {
+        return mIncognitoBadge != null && mIncognitoBadge.getVisibility() == View.VISIBLE;
     }
 
     /**
@@ -361,22 +343,60 @@ public class LocationBarPhone extends LocationBarLayout {
                                 WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING, false);
                 }
             }
+
+            @Override
+            public void onSheetOpened(@StateChangeReason int reason) {
+                if (reason == StateChangeReason.OMNIBOX_FOCUS) mCloseSheetOnBackButton = true;
+
+                updateGoogleG();
+            }
+
+            @Override
+            public void onSheetClosed(@StateChangeReason int reason) {
+                updateGoogleG();
+            }
+
+            @Override
+            public void onSheetContentChanged(BottomSheetContent newContent) {
+                if (newContent == null) return;
+
+                @ContentType
+                int type = newContent.getType();
+                if (type != BottomSheetContentController.TYPE_AUXILIARY_CONTENT) {
+                    mCloseSheetOnBackButton = false;
+                }
+            }
         });
 
-        mGoogleGWidth = getResources().getDimensionPixelSize(
-                R.dimen.location_bar_google_g_width_bottom_sheet);
-        mGoogleG.getLayoutParams().width = mGoogleGWidth;
+        // Chrome Home does not use the incognito badge. Remove the View to save memory.
+        removeView(mIncognitoBadge);
+        mIncognitoBadge = null;
+
+        // TODO(twellington): remove and null out mGoogleG and mGoogleGContainer if we remove
+        //                    support for the Google 'G' to save memory.
     }
 
     @Override
     public void backKeyPressed() {
-        super.backKeyPressed();
-
-        // If the back button was pressed while the placeholder content was showing, hide the sheet.
-        if (mBottomSheet != null && mBottomSheet.getCurrentSheetContent() != null
-                && mBottomSheet.getCurrentSheetContent().getType()
-                        == BottomSheetContentController.TYPE_PLACEHOLDER) {
+        if (mCloseSheetOnBackButton) {
             mBottomSheet.setSheetState(BottomSheet.SHEET_STATE_PEEK, true);
+        }
+        mCloseSheetOnBackButton = false;
+
+        super.backKeyPressed();
+    }
+
+    @Override
+    public void onNativeLibraryReady() {
+        super.onNativeLibraryReady();
+        if (mBottomSheet != null) updateGoogleG();
+
+        // TODO(twellington): Move this to constructor when isModernUiEnabled() is available before
+        // native is loaded.
+        if (useModernDesign()) {
+            // Modern does not use the incognito badge. Remove the View to save memory.
+            removeView(mIncognitoBadge);
+            mIncognitoBadge = null;
         }
     }
 }

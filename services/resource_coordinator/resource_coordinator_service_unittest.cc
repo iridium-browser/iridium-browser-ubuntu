@@ -7,20 +7,22 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/resource_coordinator/public/interfaces/coordination_unit_provider.mojom.h"
-#include "services/resource_coordinator/public/interfaces/service_constants.mojom.h"
+#include "services/resource_coordinator/public/mojom/coordination_unit_provider.mojom.h"
+#include "services/resource_coordinator/public/mojom/service_constants.mojom.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_test.h"
 
 namespace resource_coordinator {
 
-class ResourceCoordinatorTest : public service_manager::test::ServiceTest,
-                                public mojom::CoordinationPolicyCallback {
+class ResourceCoordinatorTest : public service_manager::test::ServiceTest {
  public:
   ResourceCoordinatorTest()
-      : service_manager::test::ServiceTest("resource_coordinator_unittests"),
-        binding_(this) {}
+      : service_manager::test::ServiceTest("resource_coordinator_unittests") {}
   ~ResourceCoordinatorTest() override {}
+
+  void GetIDCallback(const CoordinationUnitID& cu_id) {
+    loop_->Quit();
+  }
 
  protected:
   void SetUp() override {
@@ -28,22 +30,9 @@ class ResourceCoordinatorTest : public service_manager::test::ServiceTest,
     connector()->StartService(mojom::kServiceName);
   }
 
-  mojom::CoordinationPolicyCallbackPtr GetPolicyCallback() {
-    mojom::CoordinationPolicyCallbackPtr callback_proxy;
-    binding_.Bind(mojo::MakeRequest(&callback_proxy));
-    return callback_proxy;
-  }
-
-  void QuitOnPolicyCallback(base::RunLoop* loop) { loop_ = loop; }
+  void SetRunLoopToQuit(base::RunLoop* loop) { loop_ = loop; }
 
  private:
-  // mojom::CoordinationPolicyCallback:
-  void SetCoordinationPolicy(
-      resource_coordinator::mojom::CoordinationPolicyPtr policy) override {
-    loop_->Quit();
-  }
-
-  mojo::Binding<mojom::CoordinationPolicyCallback> binding_;
   base::RunLoop* loop_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceCoordinatorTest);
@@ -53,15 +42,16 @@ TEST_F(ResourceCoordinatorTest, ResourceCoordinatorInstantiate) {
   mojom::CoordinationUnitProviderPtr provider;
   connector()->BindInterface(mojom::kServiceName, mojo::MakeRequest(&provider));
 
-  CoordinationUnitID new_id(CoordinationUnitType::kWebContents, "test_id");
-  mojom::CoordinationUnitPtr coordination_unit;
-  provider->CreateCoordinationUnit(mojo::MakeRequest(&coordination_unit),
-                                   new_id);
+  CoordinationUnitID new_id(CoordinationUnitType::kPage, "test_id");
+  mojom::PageCoordinationUnitPtr coordination_unit;
+  provider->CreatePageCoordinationUnit(mojo::MakeRequest(&coordination_unit),
+                                       new_id);
 
-  coordination_unit->SetCoordinationPolicyCallback(GetPolicyCallback());
+  coordination_unit->GetID(base::Bind(&ResourceCoordinatorTest::GetIDCallback,
+                                      base::Unretained(this)));
 
   base::RunLoop loop;
-  QuitOnPolicyCallback(&loop);
+  SetRunLoopToQuit(&loop);
   loop.Run();
 }
 

@@ -7,10 +7,9 @@
 #include <memory>
 #include <unordered_map>
 
-#include "base/memory/ptr_util.h"
 #include "chromeos/components/tether/fake_host_scan_cache.h"
 #include "chromeos/components/tether/host_scan_test_util.h"
-#include "components/prefs/testing_pref_service.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -23,12 +22,13 @@ class PersistentHostScanCacheImplTest : public testing::Test {
       : test_entries_(host_scan_test_util::CreateTestEntries()) {}
 
   void SetUp() override {
-    test_pref_service_ = base::MakeUnique<TestingPrefServiceSimple>();
+    test_pref_service_ =
+        std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
     PersistentHostScanCacheImpl::RegisterPrefs(test_pref_service_->registry());
 
     host_scan_cache_ =
-        base::MakeUnique<PersistentHostScanCacheImpl>(test_pref_service_.get());
-    expected_cache_ = base::MakeUnique<FakeHostScanCache>();
+        std::make_unique<PersistentHostScanCacheImpl>(test_pref_service_.get());
+    expected_cache_ = std::make_unique<FakeHostScanCache>();
   }
 
   void SetHostScanResult(const HostScanCacheEntry& entry) {
@@ -57,7 +57,8 @@ class PersistentHostScanCacheImplTest : public testing::Test {
 
   const std::unordered_map<std::string, HostScanCacheEntry> test_entries_;
 
-  std::unique_ptr<TestingPrefServiceSimple> test_pref_service_;
+  std::unique_ptr<sync_preferences::TestingPrefServiceSyncable>
+      test_pref_service_;
   std::unique_ptr<FakeHostScanCache> expected_cache_;
 
   std::unique_ptr<PersistentHostScanCacheImpl> host_scan_cache_;
@@ -129,7 +130,7 @@ TEST_F(PersistentHostScanCacheImplTest, TestStoredPersistently) {
 
   // Create a new object.
   host_scan_cache_ =
-      base::MakeUnique<PersistentHostScanCacheImpl>(test_pref_service_.get());
+      std::make_unique<PersistentHostScanCacheImpl>(test_pref_service_.get());
 
   // The new object should still access the stored scanned data.
   VerifyPersistentCacheMatchesInMemoryCache(2u /* expected_size */);

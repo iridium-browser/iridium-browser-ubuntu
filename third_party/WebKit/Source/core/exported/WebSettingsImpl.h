@@ -41,11 +41,10 @@ namespace blink {
 class DevToolsEmulator;
 class Settings;
 
-class CORE_EXPORT WebSettingsImpl final
-    : NON_EXPORTED_BASE(public WebSettings) {
+class CORE_EXPORT WebSettingsImpl final : public WebSettings {
  public:
   WebSettingsImpl(Settings*, DevToolsEmulator*);
-  virtual ~WebSettingsImpl() {}
+  virtual ~WebSettingsImpl() = default;
 
   void SetFromStrings(const WebString& name, const WebString& value) override;
 
@@ -74,7 +73,6 @@ class CORE_EXPORT WebSettingsImpl final
   void SetCursiveFontFamily(const WebString&,
                             UScriptCode = USCRIPT_COMMON) override;
   void SetDNSPrefetchingEnabled(bool) override;
-  void SetDataSaverEnabled(bool) override;
   void SetDOMPasteAllowed(bool) override;
   void SetDefaultFixedFontSize(int) override;
   void SetDefaultFontSize(int) override;
@@ -90,11 +88,13 @@ class CORE_EXPORT WebSettingsImpl final
   void SetEnableTouchAdjustment(bool) override;
   bool MultiTargetTapNotificationEnabled() override;
   void SetMultiTargetTapNotificationEnabled(bool) override;
-  void SetExperimentalWebGLEnabled(bool) override;
+  void SetWebGL1Enabled(bool) override;
+  void SetWebGL2Enabled(bool) override;
   void SetFantasyFontFamily(const WebString&,
                             UScriptCode = USCRIPT_COMMON) override;
   void SetFixedFontFamily(const WebString&,
                           UScriptCode = USCRIPT_COMMON) override;
+  void SetForceMainWorldInitialization(bool) override;
   void SetForcePreloadNoneForMediaElements(bool) override;
   void SetForceZeroLayoutHeight(bool) override;
   void SetFullscreenSupported(bool) override;
@@ -111,15 +111,16 @@ class CORE_EXPORT WebSettingsImpl final
   void SetLoadsImagesAutomatically(bool) override;
   void SetLoadWithOverviewMode(bool) override;
   void SetShouldReuseGlobalForUnownedMainFrame(bool) override;
-  void SetProgressBarCompletion(ProgressBarCompletion) override;
+  void SetSavePreviousDocumentResources(SavePreviousDocumentResources) override;
   void SetLocalStorageEnabled(bool) override;
   void SetMainFrameClipsContent(bool) override;
   void SetMainFrameResizesAreOrientationChanges(bool) override;
   void SetMaxTouchPoints(int) override;
+  void SetPictureInPictureEnabled(bool) override;
   void SetMediaPlaybackGestureWhitelistScope(const WebString&) override;
   void SetPresentationRequiresUserGesture(bool) override;
   void SetEmbeddedMediaExperienceEnabled(bool) override;
-  void SetPagePopupsSuppressed(bool) override;
+  void SetImmersiveModeEnabled(bool) override;
   void SetMinimumAccelerated2dCanvasSize(int) override;
   void SetMinimumFontSize(int) override;
   void SetMinimumLogicalFontSize(int) override;
@@ -133,7 +134,6 @@ class CORE_EXPORT WebSettingsImpl final
   void SetPictographFontFamily(const WebString&,
                                UScriptCode = USCRIPT_COMMON) override;
   void SetPluginsEnabled(bool) override;
-  void SetEncryptedMediaEnabled(bool) override;
   void SetAvailablePointerTypes(int) override;
   void SetPrimaryPointerType(PointerType) override;
   void SetAvailableHoverTypes(int) override;
@@ -182,13 +182,12 @@ class CORE_EXPORT WebSettingsImpl final
   void SetTextTrackTextSize(const WebString&) override;
   void SetThreadedScrollingEnabled(bool) override;
   void SetTouchDragDropEnabled(bool) override;
+  void SetBarrelButtonForDragEnabled(bool) override;
   void SetUseLegacyBackgroundSizeShorthandBehavior(bool) override;
   void SetViewportStyle(WebViewportStyle) override;
   void SetUseSolidColorScrollbars(bool) override;
   void SetUseWideViewport(bool) override;
   void SetV8CacheOptions(V8CacheOptions) override;
-  void SetV8CacheStrategiesForCacheStorage(
-      V8CacheStrategiesForCacheStorage) override;
   void SetValidationMessageTimerMagnification(int) override;
   void SetViewportEnabled(bool) override;
   void SetViewportMetaEnabled(bool) override;
@@ -202,6 +201,8 @@ class CORE_EXPORT WebSettingsImpl final
   void SetXSSAuditorEnabled(bool) override;
   void SetMediaControlsEnabled(bool) override;
   void SetDoNotUpdateSelectionOnMutatingSelectionRange(bool) override;
+  void SetMediaDownloadInProductHelpEnabled(bool) override;
+  void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) override;
 
   bool ShowFPSCounter() const { return show_fps_counter_; }
   bool ShowPaintRects() const { return show_paint_rects_; }

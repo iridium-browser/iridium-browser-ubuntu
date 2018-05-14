@@ -4,6 +4,8 @@
 
 #include "core/css/cssom/CSSUnparsedValue.h"
 
+#include "core/css/CSSVariableData.h"
+#include "core/css/CSSVariableReferenceValue.h"
 #include "core/css/cssom/CSSStyleVariableReferenceValue.h"
 #include "core/css/parser/CSSTokenizer.h"
 #include "platform/wtf/text/StringBuilder.h"
@@ -17,31 +19,29 @@ StringView FindVariableName(CSSParserTokenRange& range) {
   return range.Consume().Value();
 }
 
-StringOrCSSVariableReferenceValue VariableReferenceValue(
+CSSUnparsedSegment VariableReferenceValue(
     const StringView& variable_name,
-    const HeapVector<StringOrCSSVariableReferenceValue>& fragments) {
+    const HeapVector<CSSUnparsedSegment>& tokens) {
   CSSUnparsedValue* unparsed_value;
-  if (fragments.size() == 0)
+  if (tokens.size() == 0)
     unparsed_value = nullptr;
   else
-    unparsed_value = CSSUnparsedValue::Create(fragments);
+    unparsed_value = CSSUnparsedValue::Create(tokens);
 
   CSSStyleVariableReferenceValue* variable_reference =
       CSSStyleVariableReferenceValue::Create(variable_name.ToString(),
                                              unparsed_value);
-  return StringOrCSSVariableReferenceValue::fromCSSVariableReferenceValue(
-      variable_reference);
+  return CSSUnparsedSegment::FromCSSVariableReferenceValue(variable_reference);
 }
 
-HeapVector<StringOrCSSVariableReferenceValue> ParserTokenRangeToFragments(
+HeapVector<CSSUnparsedSegment> ParserTokenRangeToTokens(
     CSSParserTokenRange range) {
-  HeapVector<StringOrCSSVariableReferenceValue> fragments;
+  HeapVector<CSSUnparsedSegment> tokens;
   StringBuilder builder;
   while (!range.AtEnd()) {
     if (range.Peek().FunctionId() == CSSValueVar) {
       if (!builder.IsEmpty()) {
-        fragments.push_back(
-            StringOrCSSVariableReferenceValue::fromString(builder.ToString()));
+        tokens.push_back(CSSUnparsedSegment::FromString(builder.ToString()));
         builder.Clear();
       }
       CSSParserTokenRange block = range.ConsumeBlock();
@@ -49,51 +49,94 @@ HeapVector<StringOrCSSVariableReferenceValue> ParserTokenRangeToFragments(
       block.ConsumeWhitespace();
       if (block.Peek().GetType() == CSSParserTokenType::kCommaToken)
         block.Consume();
-      fragments.push_back(VariableReferenceValue(
-          variable_name, ParserTokenRangeToFragments(block)));
+      tokens.push_back(VariableReferenceValue(variable_name,
+                                              ParserTokenRangeToTokens(block)));
     } else {
       range.Consume().Serialize(builder);
     }
   }
   if (!builder.IsEmpty()) {
-    fragments.push_back(
-        StringOrCSSVariableReferenceValue::fromString(builder.ToString()));
+    tokens.push_back(CSSUnparsedSegment::FromString(builder.ToString()));
   }
-  return fragments;
+  return tokens;
 }
 
 }  // namespace
 
 CSSUnparsedValue* CSSUnparsedValue::FromCSSValue(
-    const CSSVariableReferenceValue& css_variable_reference_value) {
-  return CSSUnparsedValue::Create(ParserTokenRangeToFragments(
-      css_variable_reference_value.VariableDataValue()->TokenRange()));
+    const CSSVariableReferenceValue& value) {
+  DCHECK(value.VariableDataValue());
+  return FromCSSValue(*value.VariableDataValue());
 }
 
-CSSValue* CSSUnparsedValue::ToCSSValue() const {
-  StringBuilder tokens;
+CSSUnparsedValue* CSSUnparsedValue::FromCSSValue(const CSSVariableData& value) {
+  return CSSUnparsedValue::Create(ParserTokenRangeToTokens(value.TokenRange()));
+}
 
-  for (unsigned i = 0; i < fragments_.size(); i++) {
+CSSUnparsedSegment CSSUnparsedValue::AnonymousIndexedGetter(
+    unsigned index,
+    ExceptionState& exception_state) {
+  if (index < tokens_.size())
+    return tokens_[index];
+  return {};
+}
+
+bool CSSUnparsedValue::AnonymousIndexedSetter(unsigned index,
+                                              const CSSUnparsedSegment& segment,
+                                              ExceptionState& exception_state) {
+  if (index < tokens_.size()) {
+    tokens_[index] = segment;
+    return true;
+  }
+
+  if (index == tokens_.size()) {
+    tokens_.push_back(segment);
+    return true;
+  }
+
+  exception_state.ThrowRangeError(
+      ExceptionMessages::IndexOutsideRange<unsigned>(
+          "index", index, 0, ExceptionMessages::kInclusiveBound, tokens_.size(),
+          ExceptionMessages::kInclusiveBound));
+  return false;
+}
+
+const CSSValue* CSSUnparsedValue::ToCSSValue() const {
+  if (tokens_.IsEmpty()) {
+    return CSSVariableReferenceValue::Create(CSSVariableData::Create());
+  }
+
+  CSSTokenizer tokenizer(ToString());
+  const auto tokens = tokenizer.TokenizeToEOF();
+  return CSSVariableReferenceValue::Create(CSSVariableData::Create(
+      CSSParserTokenRange(tokens), false /* isAnimationTainted */,
+      false /* needsVariableResolution */));
+}
+
+String CSSUnparsedValue::ToString() const {
+  StringBuilder input;
+
+  for (unsigned i = 0; i < tokens_.size(); i++) {
     if (i) {
-      tokens.Append("/**/");
+      input.Append("/**/");
     }
-    if (fragments_[i].isString()) {
-      tokens.Append(fragments_[i].getAsString());
-    } else if (fragments_[i].isCSSVariableReferenceValue()) {
-      tokens.Append(fragments_[i].getAsCSSVariableReferenceValue()->variable());
+    if (tokens_[i].IsString()) {
+      input.Append(tokens_[i].GetAsString());
+    } else if (tokens_[i].IsCSSVariableReferenceValue()) {
+      const auto* reference_value = tokens_[i].GetAsCSSVariableReferenceValue();
+      input.Append("var(");
+      input.Append(reference_value->variable());
+      if (reference_value->fallback()) {
+        input.Append(",");
+        input.Append(reference_value->fallback()->ToString());
+      }
+      input.Append(")");
     } else {
       NOTREACHED();
     }
   }
 
-  CSSTokenizer tokenizer(tokens.ToString());
-  // TODO(alancutter): This should be using a real parser context instead of
-  // StrictCSSParserContext.
-  return CSSVariableReferenceValue::Create(
-      CSSVariableData::Create(tokenizer.TokenRange(),
-                              false /* isAnimationTainted */,
-                              true /* needsVariableResolution */),
-      *StrictCSSParserContext());
+  return input.ToString();
 }
 
 }  // namespace blink

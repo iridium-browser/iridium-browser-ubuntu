@@ -10,19 +10,20 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_piece.h"
 #include "content/browser/speech/endpointer/endpointer.h"
 #include "content/browser/speech/speech_recognition_engine.h"
 #include "content/browser/speech/speech_recognizer.h"
 #include "content/public/common/speech_recognition_error.h"
 #include "content/public/common/speech_recognition_result.h"
 #include "media/audio/audio_input_controller.h"
-#include "media/audio/audio_logging.h"
+#include "media/mojo/interfaces/audio_logging.mojom.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace media {
 class AudioBus;
 class AudioSystem;
-}
+}  // namespace media
 
 namespace content {
 
@@ -35,7 +36,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
     : public SpeechRecognizer,
       public media::AudioInputController::EventHandler,
       public media::AudioInputController::SyncWriter,
-      public NON_EXPORTED_BASE(SpeechRecognitionEngine::Delegate) {
+      public SpeechRecognitionEngine::Delegate {
  public:
   static const int kAudioSampleRate;
   static const media::ChannelLayout kChannelLayout;
@@ -112,7 +113,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   void ProcessAudioPipeline(const AudioChunk& raw_audio);
 
   // Callback from AudioSystem.
-  void OnDeviceInfo(const media::AudioParameters& params);
+  void OnDeviceInfo(const base::Optional<media::AudioParameters>& params);
 
   // The methods below handle transitions of the recognizer FSM.
   FSMState PrepareRecognition(const FSMEventArgs&);
@@ -143,20 +144,16 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   void OnAudioClosed(media::AudioInputController*);
 
   // AudioInputController::EventHandler methods.
-  void OnCreated(media::AudioInputController* controller,
-                 bool initially_muted) override {}
-  void OnError(media::AudioInputController* controller,
-               media::AudioInputController::ErrorCode error_code) override;
-  void OnLog(media::AudioInputController* controller,
-             const std::string& message) override {}
-  void OnMuted(media::AudioInputController* controller,
-               bool is_muted) override {}
+  void OnCreated(bool initially_muted) override {}
+  void OnError(media::AudioInputController::ErrorCode error_code) override;
+  void OnLog(base::StringPiece) override {}
+  void OnMuted(bool is_muted) override {}
 
   // AudioInputController::SyncWriter methods.
   void Write(const media::AudioBus* data,
              double volume,
              bool key_pressed,
-             uint32_t hardware_delay_bytes) override;
+             base::TimeTicks capture_time) override;
   void Close() override;
 
   // SpeechRecognitionEngineDelegate methods.
@@ -177,7 +174,7 @@ class CONTENT_EXPORT SpeechRecognizerImpl
   std::unique_ptr<SpeechRecognitionEngine> recognition_engine_;
   Endpointer endpointer_;
   scoped_refptr<media::AudioInputController> audio_controller_;
-  std::unique_ptr<media::AudioLog> audio_log_;
+  media::mojom::AudioLogPtr audio_log_;
   int num_samples_recorded_;
   float audio_level_;
   bool is_dispatching_event_;

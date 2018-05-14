@@ -6,9 +6,9 @@
 
 #include "platform/mojo/MojoHelper.h"
 #include "platform/wtf/Assertions.h"
+#include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
-#include "services/device/public/interfaces/constants.mojom-blink.h"
-#include "services/service_manager/public/cpp/connector.h"
+#include "services/device/public/mojom/constants.mojom-blink.h"
 
 namespace blink {
 
@@ -21,8 +21,8 @@ BatteryDispatcher& BatteryDispatcher::Instance() {
 BatteryDispatcher::BatteryDispatcher() : has_latest_data_(false) {}
 
 void BatteryDispatcher::QueryNextStatus() {
-  monitor_->QueryNextStatus(ConvertToBaseCallback(
-      WTF::Bind(&BatteryDispatcher::OnDidChange, WrapPersistent(this))));
+  monitor_->QueryNextStatus(
+      WTF::Bind(&BatteryDispatcher::OnDidChange, WrapPersistent(this)));
 }
 
 void BatteryDispatcher::OnDidChange(
@@ -45,8 +45,8 @@ void BatteryDispatcher::UpdateBatteryStatus(
 
 void BatteryDispatcher::StartListening() {
   DCHECK(!monitor_.is_bound());
-  Platform::Current()->GetConnector()->BindInterface(
-      device::mojom::blink::kServiceName, mojo::MakeRequest(&monitor_));
+  Platform::Current()->GetInterfaceProvider()->GetInterface(
+      mojo::MakeRequest(&monitor_));
   QueryNextStatus();
 }
 

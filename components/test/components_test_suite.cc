@@ -10,8 +10,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
-#include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
@@ -31,15 +29,16 @@
 #include "ui/gl/test/gl_surface_test_support.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "base/android/jni_android.h"
-#include "content/public/test/test_utils.h"
-#include "net/android/net_jni_registrar.h"
-#include "ui/base/android/ui_base_jni_registrar.h"
-#include "ui/gfx/android/gfx_jni_registrar.h"
+#if defined(OS_WIN)
+#include "base/win/scoped_com_initializer.h"
 #endif
 
 namespace {
+
+// Not using kExtensionScheme and kChromeSearchScheme to avoid the dependency
+// to extensions and chrome/common.
+const char* const kNonWildcardDomainNonPortSchemes[] = {"chrome-extension",
+                                                        "chrome-search"};
 
 class ComponentsTestSuite : public base::TestSuite {
  public:
@@ -51,11 +50,6 @@ class ComponentsTestSuite : public base::TestSuite {
 
     mojo::edk::Init();
 
-    // Initialize the histograms subsystem, so that any histograms hit in tests
-    // are correctly registered with the statistics recorder and can be queried
-    // by tests.
-    base::StatisticsRecorder::Initialize();
-
 #if !defined(OS_IOS)
     gl::GLSurfaceTestSupport::InitializeOneOff();
 
@@ -64,14 +58,6 @@ class ComponentsTestSuite : public base::TestSuite {
       content::ContentClient content_client;
       content::ContentTestSuiteBase::RegisterContentSchemes(&content_client);
     }
-#endif
-#if defined(OS_ANDROID)
-    // Register JNI bindings for android.
-    JNIEnv* env = base::android::AttachCurrentThread();
-    ASSERT_TRUE(content::RegisterJniForTesting(env));
-    ASSERT_TRUE(gfx::android::RegisterJni(env));
-    ASSERT_TRUE(net::android::RegisterJni(env));
-    ASSERT_TRUE(ui::android::RegisterJni(env));
 #endif
 
     ui::RegisterPathProvider();
@@ -98,9 +84,9 @@ class ComponentsTestSuite : public base::TestSuite {
     url::AddStandardScheme("chrome-devtools", url::SCHEME_WITHOUT_PORT);
     url::AddStandardScheme("chrome-search", url::SCHEME_WITHOUT_PORT);
 
-    // Not using kExtensionScheme to avoid the dependency to extensions.
-    ContentSettingsPattern::SetNonWildcardDomainNonPortScheme(
-        "chrome-extension");
+    ContentSettingsPattern::SetNonWildcardDomainNonPortSchemes(
+        kNonWildcardDomainNonPortSchemes,
+        arraysize(kNonWildcardDomainNonPortSchemes));
   }
 
   void Shutdown() override {
@@ -108,6 +94,10 @@ class ComponentsTestSuite : public base::TestSuite {
 
     base::TestSuite::Shutdown();
   }
+
+#if defined(OS_WIN)
+  base::win::ScopedCOMInitializer com_initializer_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(ComponentsTestSuite);
 };
@@ -141,10 +131,10 @@ class ComponentsUnitTestEventListener : public testing::EmptyTestEventListener {
 
 base::RunTestSuiteCallback GetLaunchCallback(int argc, char** argv) {
 #if !defined(OS_IOS)
-  auto test_suite = base::MakeUnique<content::UnitTestTestSuite>(
+  auto test_suite = std::make_unique<content::UnitTestTestSuite>(
       new ComponentsTestSuite(argc, argv));
 #else
-  auto test_suite = base::MakeUnique<ComponentsTestSuite>(argc, argv);
+  auto test_suite = std::make_unique<ComponentsTestSuite>(argc, argv);
 #endif
 
   // The listener will set up common test environment for all components unit

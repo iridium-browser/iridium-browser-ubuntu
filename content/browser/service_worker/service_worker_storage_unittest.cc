@@ -5,6 +5,7 @@
 #include "content/browser/service_worker/service_worker_storage.h"
 
 #include <stdint.h>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/histogram_tester.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/browser/browser_thread_impl.h"
@@ -27,26 +29,29 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/origin_trial_policy.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_utils.h"
 #include "ipc/ipc_message.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
+#include "net/disk_cache/disk_cache.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_object.mojom.h"
+#include "third_party/WebKit/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 using net::IOBuffer;
 using net::TestCompletionCallback;
 using net::WrappedIOBuffer;
 
 namespace content {
+namespace service_worker_storage_unittest {
 
-namespace {
-
-typedef ServiceWorkerDatabase::RegistrationData RegistrationData;
-typedef ServiceWorkerDatabase::ResourceRecord ResourceRecord;
+using RegistrationData = ServiceWorkerDatabase::RegistrationData;
+using ResourceRecord = ServiceWorkerDatabase::ResourceRecord;
 
 // This is a sample public key for testing the API. The corresponding private
 // key (use this to generate new samples for this test file) is:
@@ -80,7 +85,7 @@ void StatusCallback(bool* was_called,
 ServiceWorkerStorage::StatusCallback MakeStatusCallback(
     bool* was_called,
     ServiceWorkerStatusCode* result) {
-  return base::Bind(&StatusCallback, was_called, result);
+  return base::BindOnce(&StatusCallback, was_called, result);
 }
 
 void FindCallback(bool* was_called,
@@ -97,7 +102,7 @@ ServiceWorkerStorage::FindRegistrationCallback MakeFindCallback(
     bool* was_called,
     ServiceWorkerStatusCode* result,
     scoped_refptr<ServiceWorkerRegistration>* found) {
-  return base::Bind(&FindCallback, was_called, result, found);
+  return base::BindOnce(&FindCallback, was_called, result, found);
 }
 
 void GetAllCallback(
@@ -126,7 +131,7 @@ ServiceWorkerStorage::GetRegistrationsCallback MakeGetRegistrationsCallback(
     bool* was_called,
     ServiceWorkerStatusCode* status,
     std::vector<scoped_refptr<ServiceWorkerRegistration>>* all) {
-  return base::Bind(&GetAllCallback, was_called, status, all);
+  return base::BindOnce(&GetAllCallback, was_called, status, all);
 }
 
 ServiceWorkerStorage::GetRegistrationsInfosCallback
@@ -134,7 +139,7 @@ MakeGetRegistrationsInfosCallback(
     bool* was_called,
     ServiceWorkerStatusCode* status,
     std::vector<ServiceWorkerRegistrationInfo>* all) {
-  return base::Bind(&GetAllInfosCallback, was_called, status, all);
+  return base::BindOnce(&GetAllInfosCallback, was_called, status, all);
 }
 
 void GetUserDataCallback(bool* was_called,
@@ -264,7 +269,7 @@ int WriteResponseMetadata(ServiceWorkerStorage* storage,
 int WriteMetadata(ServiceWorkerVersion* version,
                   const GURL& url,
                   const std::string& metadata) {
-  const std::vector<char> data(metadata.begin(), metadata.end());
+  const std::vector<uint8_t> data(metadata.begin(), metadata.end());
   EXPECT_TRUE(version);
   TestCompletionCallback cb;
   version->script_cache_map()->WriteMetadata(url, data, cb.callback());
@@ -299,8 +304,6 @@ bool VerifyResponseMetadata(ServiceWorkerStorage* storage,
   return true;
 }
 
-}  // namespace
-
 class ServiceWorkerStorageTest : public testing::Test {
  public:
   ServiceWorkerStorageTest()
@@ -311,7 +314,8 @@ class ServiceWorkerStorageTest : public testing::Test {
 
   void TearDown() override {
     helper_.reset();
-    base::RunLoop().RunUntilIdle();
+    disk_cache::FlushCacheThreadForTesting();
+    content::RunAllTasksUntilIdle();
   }
 
   bool InitUserDataDirectory() {
@@ -327,7 +331,8 @@ class ServiceWorkerStorageTest : public testing::Test {
   }
 
   ServiceWorkerContextCore* context() { return helper_->context(); }
-  ServiceWorkerStorage* storage() { return helper_->context()->storage(); }
+  ServiceWorkerStorage* storage() { return context()->storage(); }
+  ServiceWorkerDatabase* database() { return storage()->database_.get(); }
 
   // A static class method for friendliness.
   static void VerifyPurgeableListStatusCallback(
@@ -343,9 +348,34 @@ class ServiceWorkerStorageTest : public testing::Test {
   }
 
  protected:
+  const std::set<GURL>& registered_origins() {
+    return storage()->registered_origins_;
+  }
+
   void LazyInitialize() {
-    storage()->LazyInitialize(base::Bind(&base::DoNothing));
+    storage()->LazyInitializeForTest(base::DoNothing());
     base::RunLoop().RunUntilIdle();
+  }
+
+  // Creates a registration with a waiting version in INSTALLED state.
+  scoped_refptr<ServiceWorkerRegistration> CreateLiveRegistrationAndVersion(
+      const GURL& scope,
+      const GURL& script) {
+    blink::mojom::ServiceWorkerRegistrationOptions options;
+    options.scope = scope;
+    auto registration = base::MakeRefCounted<ServiceWorkerRegistration>(
+        options, storage()->NewRegistrationId(), context()->AsWeakPtr());
+    auto version = base::MakeRefCounted<ServiceWorkerVersion>(
+        registration.get(), script, storage()->NewVersionId(),
+        context()->AsWeakPtr());
+    std::vector<ResourceRecord> records = {
+        ResourceRecord(storage()->NewResourceId(), script, 100)};
+    version->script_cache_map()->SetResources(records);
+    version->set_fetch_handler_existence(
+        ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+    version->SetStatus(ServiceWorkerVersion::INSTALLED);
+    registration->SetWaitingVersion(version);
+    return registration;
   }
 
   ServiceWorkerStatusCode StoreRegistration(
@@ -407,7 +437,22 @@ class ServiceWorkerStorageTest : public testing::Test {
     ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_MAX_VALUE;
     storage()->GetUserData(
         registration_id, keys,
-        base::Bind(&GetUserDataCallback, &was_called, data, &result));
+        base::BindOnce(&GetUserDataCallback, &was_called, data, &result));
+    EXPECT_FALSE(was_called);  // always async
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(was_called);
+    return result;
+  }
+
+  ServiceWorkerStatusCode GetUserDataByKeyPrefix(
+      int64_t registration_id,
+      const std::string& key_prefix,
+      std::vector<std::string>* data) {
+    bool was_called = false;
+    ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_MAX_VALUE;
+    storage()->GetUserDataByKeyPrefix(
+        registration_id, key_prefix,
+        base::BindOnce(&GetUserDataCallback, &was_called, data, &result));
     EXPECT_FALSE(was_called);  // always async
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(was_called);
@@ -440,14 +485,28 @@ class ServiceWorkerStorageTest : public testing::Test {
     return result;
   }
 
+  ServiceWorkerStatusCode ClearUserDataByKeyPrefixes(
+      int64_t registration_id,
+      const std::vector<std::string>& key_prefixes) {
+    bool was_called = false;
+    ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_MAX_VALUE;
+    storage()->ClearUserDataByKeyPrefixes(
+        registration_id, key_prefixes,
+        MakeStatusCallback(&was_called, &result));
+    EXPECT_FALSE(was_called);  // always async
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(was_called);
+    return result;
+  }
+
   ServiceWorkerStatusCode GetUserDataForAllRegistrations(
       const std::string& key,
       std::vector<std::pair<int64_t, std::string>>* data) {
     bool was_called = false;
     ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_MAX_VALUE;
     storage()->GetUserDataForAllRegistrations(
-        key, base::Bind(&GetUserDataForAllRegistrationsCallback, &was_called,
-                        data, &result));
+        key, base::BindOnce(&GetUserDataForAllRegistrationsCallback,
+                            &was_called, data, &result));
     EXPECT_FALSE(was_called);  // always async
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(was_called);
@@ -529,13 +588,13 @@ class ServiceWorkerStorageTest : public testing::Test {
   // registration written by an earlier version of Chrome.
   void WriteRegistration(const RegistrationData& registration,
                          const std::vector<ResourceRecord>& resources) {
-    ServiceWorkerDatabase::RegistrationData deleted_version;
+    RegistrationData deleted_version;
     std::vector<int64_t> newly_purgeable_resources;
 
-    ASSERT_EQ(ServiceWorkerDatabase::STATUS_OK,
-              storage()->database_->WriteRegistration(
-                  registration, resources, &deleted_version,
-                  &newly_purgeable_resources));
+    ASSERT_EQ(
+        ServiceWorkerDatabase::STATUS_OK,
+        database()->WriteRegistration(registration, resources, &deleted_version,
+                                      &newly_purgeable_resources));
   }
 
   // user_data_directory_ must be declared first to preserve destructor order.
@@ -577,9 +636,11 @@ TEST_F(ServiceWorkerStorageTest, DisabledStorage) {
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
             GetAllRegistrationsInfos(&all_registrations));
 
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = kScope;
   scoped_refptr<ServiceWorkerRegistration> live_registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
+      new ServiceWorkerRegistration(options, kRegistrationId,
+                                    context()->AsWeakPtr());
   scoped_refptr<ServiceWorkerVersion> live_version = new ServiceWorkerVersion(
       live_registration.get(), kScript, kVersionId, context()->AsWeakPtr());
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
@@ -605,21 +666,23 @@ TEST_F(ServiceWorkerStorageTest, DisabledStorage) {
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
             GetUserData(kRegistrationId, {kUserDataKey}, &user_data_out));
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
+            GetUserDataByKeyPrefix(kRegistrationId, "prefix", &user_data_out));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
             StoreUserData(kRegistrationId, kScope.GetOrigin(),
                           {{kUserDataKey, "foo"}}));
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
             ClearUserData(kRegistrationId, {kUserDataKey}));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
+            ClearUserDataByKeyPrefixes(kRegistrationId, {"prefix"}));
   std::vector<std::pair<int64_t, std::string>> data_list_out;
   EXPECT_EQ(SERVICE_WORKER_ERROR_ABORT,
             GetUserDataForAllRegistrations(kUserDataKey, &data_list_out));
 
-  EXPECT_FALSE(
-      storage()->OriginHasForeignFetchRegistrations(kScope.GetOrigin()));
-
   // Next available ids should be invalid.
-  EXPECT_EQ(kInvalidServiceWorkerRegistrationId,
+  EXPECT_EQ(blink::mojom::kInvalidServiceWorkerRegistrationId,
             storage()->NewRegistrationId());
-  EXPECT_EQ(kInvalidServiceWorkerVersionId, storage()->NewVersionId());
+  EXPECT_EQ(blink::mojom::kInvalidServiceWorkerVersionId,
+            storage()->NewVersionId());
   EXPECT_EQ(kInvalidServiceWorkerResourceId, storage()->NewRegistrationId());
 }
 
@@ -632,8 +695,6 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   const int64_t kResource2Size = 51;
   const int64_t kRegistrationId = 0;
   const int64_t kVersionId = 0;
-  const GURL kForeignFetchScope("http://www.test.not/scope/ff/");
-  const url::Origin kForeignFetchOrigin(GURL("https://example.com/"));
   const base::Time kToday = base::Time::Now();
   const base::Time kYesterday = kToday - base::TimeDelta::FromDays(1);
   std::set<uint32_t> used_features = {124, 901, 1019};
@@ -654,26 +715,22 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
   EXPECT_FALSE(found_registration.get());
 
-  std::vector<ServiceWorkerDatabase::ResourceRecord> resources;
-  resources.push_back(
-      ServiceWorkerDatabase::ResourceRecord(1, kResource1, kResource1Size));
-  resources.push_back(
-      ServiceWorkerDatabase::ResourceRecord(2, kResource2, kResource2Size));
+  std::vector<ResourceRecord> resources;
+  resources.push_back(ResourceRecord(1, kResource1, kResource1Size));
+  resources.push_back(ResourceRecord(2, kResource2, kResource2Size));
 
   // Store something.
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = kScope;
   scoped_refptr<ServiceWorkerRegistration> live_registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
+      new ServiceWorkerRegistration(options, kRegistrationId,
+                                    context()->AsWeakPtr());
   scoped_refptr<ServiceWorkerVersion> live_version = new ServiceWorkerVersion(
       live_registration.get(), kResource1, kVersionId, context()->AsWeakPtr());
   live_version->set_fetch_handler_existence(
       ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
   live_version->SetStatus(ServiceWorkerVersion::INSTALLED);
   live_version->script_cache_map()->SetResources(resources);
-  live_version->set_foreign_fetch_scopes(
-      std::vector<GURL>(1, kForeignFetchScope));
-  live_version->set_foreign_fetch_origins(
-      std::vector<url::Origin>(1, kForeignFetchOrigin));
   live_version->set_used_features(used_features);
   live_registration->SetWaitingVersion(live_version);
   live_registration->set_last_update_check(kYesterday);
@@ -690,13 +747,13 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
             found_registration->resources_total_size_bytes());
   EXPECT_EQ(used_features,
             found_registration->waiting_version()->used_features());
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // But FindRegistrationForPattern is always async.
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForPattern(kScope, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Can be found by id too.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -705,7 +762,7 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   ASSERT_TRUE(found_registration.get());
   EXPECT_EQ(kRegistrationId, found_registration->id());
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Can be found by just the id too.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -713,10 +770,10 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   ASSERT_TRUE(found_registration.get());
   EXPECT_EQ(kRegistrationId, found_registration->id());
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Drop the live registration, but keep the version live.
-  live_registration = NULL;
+  live_registration = nullptr;
 
   // Now FindRegistrationForDocument should be async.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -750,10 +807,10 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
                                       &registrations_for_origin));
   EXPECT_TRUE(registrations_for_origin.empty());
 
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Drop the live version too.
-  live_version = NULL;
+  live_version = nullptr;
 
   // And FindRegistrationForPattern is always async.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -766,36 +823,26 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   EXPECT_EQ(kYesterday, found_registration->last_update_check());
   EXPECT_EQ(ServiceWorkerVersion::INSTALLED,
             found_registration->waiting_version()->status());
-  EXPECT_EQ(
-      1u, found_registration->waiting_version()->foreign_fetch_scopes().size());
-  EXPECT_EQ(kForeignFetchScope,
-            found_registration->waiting_version()->foreign_fetch_scopes()[0]);
-  EXPECT_EQ(
-      1u,
-      found_registration->waiting_version()->foreign_fetch_origins().size());
-  EXPECT_EQ(kForeignFetchOrigin,
-            found_registration->waiting_version()->foreign_fetch_origins()[0]);
 
   // Update to active and update the last check time.
   scoped_refptr<ServiceWorkerVersion> temp_version =
       found_registration->waiting_version();
   temp_version->SetStatus(ServiceWorkerVersion::ACTIVATED);
   found_registration->SetActiveVersion(temp_version);
-  temp_version = NULL;
+  temp_version = nullptr;
   EXPECT_EQ(SERVICE_WORKER_OK, UpdateToActiveState(found_registration));
   found_registration->set_last_update_check(kToday);
   UpdateLastUpdateCheckTime(found_registration.get());
 
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Trying to update a unstored registration to active should fail.
   scoped_refptr<ServiceWorkerRegistration> unstored_registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId + 1,
+      new ServiceWorkerRegistration(options, kRegistrationId + 1,
                                     context()->AsWeakPtr());
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
             UpdateToActiveState(unstored_registration));
-  unstored_registration = NULL;
+  unstored_registration = nullptr;
 
   // The Find methods should return a registration with an active version
   // and the expected update time.
@@ -840,9 +887,11 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   scoped_refptr<ServiceWorkerRegistration> found_registration;
 
   // Create an unstored registration.
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = kScope;
   scoped_refptr<ServiceWorkerRegistration> live_registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
+      new ServiceWorkerRegistration(options, kRegistrationId,
+                                    context()->AsWeakPtr());
   scoped_refptr<ServiceWorkerVersion> live_version = new ServiceWorkerVersion(
       live_registration.get(), kScript, kVersionId, context()->AsWeakPtr());
   live_version->SetStatus(ServiceWorkerVersion::INSTALLING);
@@ -890,22 +939,22 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
             FindRegistrationForId(
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForIdOnly(kRegistrationId, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(kDocumentUrl, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForPattern(kScope, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   EXPECT_EQ(SERVICE_WORKER_OK, GetAllRegistrationsInfos(&all_registrations));
   EXPECT_EQ(1u, all_registrations.size());
@@ -924,8 +973,8 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_TRUE(registrations_for_origin.empty());
 
   // Notify storage of installation no longer happening.
-  storage()->NotifyDoneInstallingRegistration(
-      live_registration.get(), NULL, SERVICE_WORKER_OK);
+  storage()->NotifyDoneInstallingRegistration(live_registration.get(), nullptr,
+                                              SERVICE_WORKER_OK);
 
   // Once again, should not be findable.
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
@@ -962,27 +1011,15 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
 TEST_F(ServiceWorkerStorageTest, StoreUserData) {
   const GURL kScope("http://www.test.not/scope/");
   const GURL kScript("http://www.test.not/script.js");
-  const int64_t kRegistrationId = 0;
-  const int64_t kVersionId = 0;
-
   LazyInitialize();
 
   // Store a registration.
   scoped_refptr<ServiceWorkerRegistration> live_registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version = new ServiceWorkerVersion(
-      live_registration.get(), kScript, kVersionId, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
-  records.push_back(ServiceWorkerDatabase::ResourceRecord(
-      1, live_version->script_url(), 100));
-  live_version->script_cache_map()->SetResources(records);
-  live_version->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration->SetWaitingVersion(live_version);
+      CreateLiveRegistrationAndVersion(kScope, kScript);
   EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration, live_version));
+            StoreRegistration(live_registration,
+                              live_registration->waiting_version()));
+  const int64_t kRegistrationId = live_registration->id();
 
   // Store user data associated with the registration.
   std::vector<std::string> data_out;
@@ -1042,6 +1079,27 @@ TEST_F(ServiceWorkerStorageTest, StoreUserData) {
   ASSERT_EQ(1u, data_out.size());
   EXPECT_EQ("data4", data_out[0]);
 
+  // Get/delete multiple user data keys by prefixes.
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            StoreUserData(kRegistrationId, kScope.GetOrigin(),
+                          {{"prefixA", "data1"},
+                           {"prefixA2", "data2"},
+                           {"prefixB", "data3"},
+                           {"prefixC", "data4"}}));
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            GetUserDataByKeyPrefix(kRegistrationId, "prefix", &data_out));
+  ASSERT_EQ(4u, data_out.size());
+  EXPECT_EQ("data1", data_out[0]);
+  EXPECT_EQ("data2", data_out[1]);
+  EXPECT_EQ("data3", data_out[2]);
+  EXPECT_EQ("data4", data_out[3]);
+  EXPECT_EQ(SERVICE_WORKER_OK, ClearUserDataByKeyPrefixes(
+                                   kRegistrationId, {"prefixA", "prefixC"}));
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            GetUserDataByKeyPrefix(kRegistrationId, "prefix", &data_out));
+  ASSERT_EQ(1u, data_out.size());
+  EXPECT_EQ("data3", data_out[0]);
+
   // User data should be deleted when the associated registration is deleted.
   ASSERT_EQ(
       SERVICE_WORKER_OK,
@@ -1062,13 +1120,21 @@ TEST_F(ServiceWorkerStorageTest, StoreUserData) {
 
   // Data access with an invalid registration id should be failed.
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
-            StoreUserData(kInvalidServiceWorkerRegistrationId,
+            StoreUserData(blink::mojom::kInvalidServiceWorkerRegistrationId,
                           kScope.GetOrigin(), {{"key", "data"}}));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
+            GetUserData(blink::mojom::kInvalidServiceWorkerRegistrationId,
+                        {"key"}, &data_out));
   EXPECT_EQ(
       SERVICE_WORKER_ERROR_FAILED,
-      GetUserData(kInvalidServiceWorkerRegistrationId, {"key"}, &data_out));
+      GetUserDataByKeyPrefix(blink::mojom::kInvalidServiceWorkerRegistrationId,
+                             "prefix", &data_out));
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
-            ClearUserData(kInvalidServiceWorkerRegistrationId, {"key"}));
+            ClearUserData(blink::mojom::kInvalidServiceWorkerRegistrationId,
+                          {"key"}));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
+            ClearUserDataByKeyPrefixes(
+                blink::mojom::kInvalidServiceWorkerRegistrationId, {"prefix"}));
 
   // Data access with an empty key should be failed.
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
@@ -1084,6 +1150,8 @@ TEST_F(ServiceWorkerStorageTest, StoreUserData) {
       SERVICE_WORKER_ERROR_FAILED,
       GetUserData(kRegistrationId, std::vector<std::string>(), &data_out));
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
+            GetUserDataByKeyPrefix(kRegistrationId, std::string(), &data_out));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
             GetUserData(kRegistrationId, {std::string()}, &data_out));
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
             GetUserData(kRegistrationId, {std::string(), "key"}, &data_out));
@@ -1093,6 +1161,10 @@ TEST_F(ServiceWorkerStorageTest, StoreUserData) {
             ClearUserData(kRegistrationId, {std::string()}));
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
             ClearUserData(kRegistrationId, {std::string(), "key"}));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
+            ClearUserDataByKeyPrefixes(kRegistrationId, {}));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
+            ClearUserDataByKeyPrefixes(kRegistrationId, {std::string()}));
   data_list_out.clear();
   EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED,
             GetUserDataForAllRegistrations(std::string(), &data_list_out));
@@ -1112,11 +1184,15 @@ TEST_F(ServiceWorkerStorageTest, GetUserData_BeforeInitialize) {
   std::vector<std::string> data_out;
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
             GetUserData(kRegistrationId, {"key"}, &data_out));
+  EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
+            GetUserDataByKeyPrefix(kRegistrationId, "prefix", &data_out));
 }
 
 TEST_F(ServiceWorkerStorageTest, ClearUserData_BeforeInitialize) {
   const int kRegistrationId = 0;
   EXPECT_EQ(SERVICE_WORKER_OK, ClearUserData(kRegistrationId, {"key"}));
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            ClearUserDataByKeyPrefixes(kRegistrationId, {"prefix"}));
 }
 
 TEST_F(ServiceWorkerStorageTest,
@@ -1165,7 +1241,7 @@ class ServiceWorkerResourceStorageTest : public ServiceWorkerStorageTest {
     base::RunLoop().RunUntilIdle();
     std::set<int64_t> verify_ids;
     EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-              storage()->database_->GetUncommittedResourceIds(&verify_ids));
+              database()->GetUncommittedResourceIds(&verify_ids));
     EXPECT_EQ(2u, verify_ids.size());
 
     // And dump something in the disk cache for them.
@@ -1181,7 +1257,7 @@ class ServiceWorkerResourceStorageTest : public ServiceWorkerStorageTest {
         StoreRegistration(registration_, registration_->waiting_version()));
     verify_ids.clear();
     EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-              storage()->database_->GetUncommittedResourceIds(&verify_ids));
+              database()->GetUncommittedResourceIds(&verify_ids));
     EXPECT_TRUE(verify_ids.empty());
   }
 
@@ -1206,7 +1282,6 @@ class ServiceWorkerResourceStorageDiskTest
     ASSERT_TRUE(InitUserDataDirectory());
     ServiceWorkerResourceStorageTest::SetUp();
   }
-
 };
 
 TEST_F(ServiceWorkerResourceStorageTest,
@@ -1273,27 +1348,24 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_NoLiveVersion) {
   ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_FAILED;
   std::set<int64_t> verify_ids;
 
-  registration_->SetWaitingVersion(NULL);
-  registration_ = NULL;
+  registration_->SetWaitingVersion(nullptr);
+  registration_ = nullptr;
 
   // Deleting the registration should result in the resources being added to the
   // purgeable list and then doomed in the disk cache and removed from that
   // list.
   storage()->DeleteRegistration(
-      registration_id_,
-      scope_.GetOrigin(),
-      base::Bind(&VerifyPurgeableListStatusCallback,
-                 base::Unretained(storage()->database_.get()),
-                 &verify_ids,
-                 &was_called,
-                 &result));
+      registration_id_, scope_.GetOrigin(),
+      base::BindOnce(&VerifyPurgeableListStatusCallback,
+                     base::Unretained(database()), &verify_ids, &was_called,
+                     &result));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_TRUE(verify_ids.empty());
 
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1309,20 +1381,17 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_WaitingVersion) {
   // purgeable list and then doomed in the disk cache and removed from that
   // list.
   storage()->DeleteRegistration(
-      registration_->id(),
-      scope_.GetOrigin(),
-      base::Bind(&VerifyPurgeableListStatusCallback,
-                 base::Unretained(storage()->database_.get()),
-                 &verify_ids,
-                 &was_called,
-                 &result));
+      registration_->id(), scope_.GetOrigin(),
+      base::BindOnce(&VerifyPurgeableListStatusCallback,
+                     base::Unretained(database()), &verify_ids, &was_called,
+                     &result));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_EQ(2u, verify_ids.size());
 
   EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1335,7 +1404,7 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_WaitingVersion) {
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_TRUE(verify_ids.empty());
 
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1345,8 +1414,7 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_WaitingVersion) {
 TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
   // Promote the worker to active and add a controllee.
   registration_->SetActiveVersion(registration_->waiting_version());
-  storage()->UpdateToActiveState(
-      registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
+  storage()->UpdateToActiveState(registration_.get(), base::DoNothing());
   ServiceWorkerRemoteProviderEndpoint remote_endpoint;
   std::unique_ptr<ServiceWorkerProviderHost> host = CreateProviderHostForWindow(
       33 /* dummy render process id */, 1 /* dummy provider_id */,
@@ -1361,20 +1429,17 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
   // Deleting the registration should move the resources to the purgeable list
   // but keep them available.
   storage()->DeleteRegistration(
-      registration_->id(),
-      scope_.GetOrigin(),
-      base::Bind(&VerifyPurgeableListStatusCallback,
-                 base::Unretained(storage()->database_.get()),
-                 &verify_ids,
-                 &was_called,
-                 &result));
+      registration_->id(), scope_.GetOrigin(),
+      base::BindOnce(&VerifyPurgeableListStatusCallback,
+                     base::Unretained(database()), &verify_ids, &was_called,
+                     &result));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_EQ(2u, verify_ids.size());
 
   EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
@@ -1386,7 +1451,7 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
   base::RunLoop().RunUntilIdle();
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_TRUE(verify_ids.empty());
 
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1396,9 +1461,8 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
 TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   // Promote the worker to active and add a controllee.
   registration_->SetActiveVersion(registration_->waiting_version());
-  registration_->SetWaitingVersion(NULL);
-  storage()->UpdateToActiveState(
-      registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
+  registration_->SetWaitingVersion(nullptr);
+  storage()->UpdateToActiveState(registration_.get(), base::DoNothing());
   ServiceWorkerRemoteProviderEndpoint remote_endpoint;
   std::unique_ptr<ServiceWorkerProviderHost> host = CreateProviderHostForWindow(
       33 /* dummy render process id */, 1 /* dummy provider_id */,
@@ -1413,20 +1477,17 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   // Deleting the registration should move the resources to the purgeable list
   // but keep them available.
   storage()->DeleteRegistration(
-      registration_->id(),
-      scope_.GetOrigin(),
-      base::Bind(&VerifyPurgeableListStatusCallback,
-                 base::Unretained(storage()->database_.get()),
-                 &verify_ids,
-                 &was_called,
-                 &result));
+      registration_->id(), scope_.GetOrigin(),
+      base::BindOnce(&VerifyPurgeableListStatusCallback,
+                     base::Unretained(database()), &verify_ids, &was_called,
+                     &result));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_EQ(2u, verify_ids.size());
 
   EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
@@ -1438,7 +1499,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   base::RunLoop().RunUntilIdle();
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetUncommittedResourceIds(&verify_ids));
+            database()->GetUncommittedResourceIds(&verify_ids));
   EXPECT_EQ(1u, verify_ids.size());
   WriteBasicResponse(storage(), kStaleUncommittedResourceId);
   EXPECT_TRUE(
@@ -1458,7 +1519,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   // The stale resources should be purged, but the new resource should persist.
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetUncommittedResourceIds(&verify_ids));
+            database()->GetUncommittedResourceIds(&verify_ids));
   ASSERT_EQ(1u, verify_ids.size());
   EXPECT_EQ(kNewResourceId, *verify_ids.begin());
 
@@ -1469,7 +1530,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
 
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_TRUE(verify_ids.empty());
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id1_, false));
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id2_, false));
@@ -1486,7 +1547,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, DeleteAndStartOver) {
   base::RunLoop run_loop;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
   storage()->DeleteAndStartOver(
-      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+      base::BindOnce(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
   run_loop.Run();
 
   EXPECT_EQ(SERVICE_WORKER_OK, status);
@@ -1511,7 +1572,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest,
   base::RunLoop run_loop;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
   storage()->DeleteAndStartOver(
-      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+      base::BindOnce(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
   run_loop.Run();
 
   EXPECT_EQ(SERVICE_WORKER_OK, status);
@@ -1537,7 +1598,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest,
   base::RunLoop run_loop;
   ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_MAX_VALUE;
   storage()->DeleteAndStartOver(
-      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+      base::BindOnce(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
   run_loop.Run();
 
 #if defined(OS_WIN)
@@ -1557,8 +1618,7 @@ TEST_F(ServiceWorkerResourceStorageDiskTest,
 TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   // Promote the worker to active worker and add a controllee.
   registration_->SetActiveVersion(registration_->waiting_version());
-  storage()->UpdateToActiveState(
-      registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
+  storage()->UpdateToActiveState(registration_.get(), base::DoNothing());
   ServiceWorkerRemoteProviderEndpoint remote_endpoint;
   std::unique_ptr<ServiceWorkerProviderHost> host = CreateProviderHostForWindow(
       33 /* dummy render process id */, 1 /* dummy provider_id */,
@@ -1576,9 +1636,8 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
       context()->AsWeakPtr());
   live_version->SetStatus(ServiceWorkerVersion::NEW);
   registration_->SetWaitingVersion(live_version);
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
-  records.push_back(ServiceWorkerDatabase::ResourceRecord(
-      10, live_version->script_url(), 100));
+  std::vector<ResourceRecord> records;
+  records.push_back(ResourceRecord(10, live_version->script_url(), 100));
   live_version->script_cache_map()->SetResources(records);
   live_version->set_fetch_handler_existence(
       ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
@@ -1586,20 +1645,17 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   // Writing the registration should move the old version's resources to the
   // purgeable list but keep them available.
   storage()->StoreRegistration(
-      registration_.get(),
-      registration_->waiting_version(),
-      base::Bind(&VerifyPurgeableListStatusCallback,
-                 base::Unretained(storage()->database_.get()),
-                 &verify_ids,
-                 &was_called,
-                 &result));
+      registration_.get(), registration_->waiting_version(),
+      base::BindOnce(&VerifyPurgeableListStatusCallback,
+                     base::Unretained(database()), &verify_ids, &was_called,
+                     &result));
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
   EXPECT_EQ(2u, verify_ids.size());
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_EQ(2u, verify_ids.size());
 
   EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1612,7 +1668,7 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   base::RunLoop().RunUntilIdle();
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
-            storage()->database_->GetPurgeableResourceIds(&verify_ids));
+            database()->GetPurgeableResourceIds(&verify_ids));
   EXPECT_TRUE(verify_ids.empty());
 
   EXPECT_FALSE(VerifyBasicResponse(storage(), resource_id1_, false));
@@ -1620,67 +1676,29 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
 }
 
 TEST_F(ServiceWorkerStorageTest, FindRegistration_LongestScopeMatch) {
+  LazyInitialize();
   const GURL kDocumentUrl("http://www.example.com/scope/foo");
   scoped_refptr<ServiceWorkerRegistration> found_registration;
 
   // Registration for "/scope/".
   const GURL kScope1("http://www.example.com/scope/");
   const GURL kScript1("http://www.example.com/script1.js");
-  const int64_t kRegistrationId1 = 1;
-  const int64_t kVersionId1 = 1;
   scoped_refptr<ServiceWorkerRegistration> live_registration1 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope1),
-                                    kRegistrationId1, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version1 = new ServiceWorkerVersion(
-      live_registration1.get(), kScript1, kVersionId1, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records1;
-  records1.push_back(ServiceWorkerDatabase::ResourceRecord(
-      1, live_version1->script_url(), 100));
-  live_version1->script_cache_map()->SetResources(records1);
-  live_version1->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version1->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration1->SetWaitingVersion(live_version1);
+      CreateLiveRegistrationAndVersion(kScope1, kScript1);
 
   // Registration for "/scope/foo".
   const GURL kScope2("http://www.example.com/scope/foo");
   const GURL kScript2("http://www.example.com/script2.js");
-  const int64_t kRegistrationId2 = 2;
-  const int64_t kVersionId2 = 2;
   scoped_refptr<ServiceWorkerRegistration> live_registration2 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope2),
-                                    kRegistrationId2, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version2 = new ServiceWorkerVersion(
-      live_registration2.get(), kScript2, kVersionId2, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records2;
-  records2.push_back(ServiceWorkerDatabase::ResourceRecord(
-      2, live_version2->script_url(), 100));
-  live_version2->script_cache_map()->SetResources(records2);
-  live_version2->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version2->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration2->SetWaitingVersion(live_version2);
+      CreateLiveRegistrationAndVersion(kScope2, kScript2);
 
   // Registration for "/scope/foobar".
   const GURL kScope3("http://www.example.com/scope/foobar");
   const GURL kScript3("http://www.example.com/script3.js");
-  const int64_t kRegistrationId3 = 3;
-  const int64_t kVersionId3 = 3;
   scoped_refptr<ServiceWorkerRegistration> live_registration3 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope3),
-                                    kRegistrationId3, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version3 = new ServiceWorkerVersion(
-      live_registration3.get(), kScript3, kVersionId3, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records3;
-  records3.push_back(ServiceWorkerDatabase::ResourceRecord(
-      3, live_version3->script_url(), 100));
-  live_version3->script_cache_map()->SetResources(records3);
-  live_version3->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version3->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration3->SetWaitingVersion(live_version3);
+      CreateLiveRegistrationAndVersion(kScope3, kScript3);
 
-  // Notify storage of they being installed.
+  // Notify storage of them being installed.
   storage()->NotifyInstallingRegistration(live_registration1.get());
   storage()->NotifyInstallingRegistration(live_registration2.get());
   storage()->NotifyInstallingRegistration(live_registration3.get());
@@ -1689,23 +1707,26 @@ TEST_F(ServiceWorkerStorageTest, FindRegistration_LongestScopeMatch) {
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(kDocumentUrl, &found_registration));
   EXPECT_EQ(live_registration2, found_registration);
-  found_registration = NULL;
+  found_registration = nullptr;
 
   // Store registrations.
   EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration1, live_version1));
+            StoreRegistration(live_registration1,
+                              live_registration1->waiting_version()));
   EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration2, live_version2));
+            StoreRegistration(live_registration2,
+                              live_registration2->waiting_version()));
   EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration3, live_version3));
+            StoreRegistration(live_registration3,
+                              live_registration3->waiting_version()));
 
   // Notify storage of installations no longer happening.
-  storage()->NotifyDoneInstallingRegistration(
-      live_registration1.get(), NULL, SERVICE_WORKER_OK);
-  storage()->NotifyDoneInstallingRegistration(
-      live_registration2.get(), NULL, SERVICE_WORKER_OK);
-  storage()->NotifyDoneInstallingRegistration(
-      live_registration3.get(), NULL, SERVICE_WORKER_OK);
+  storage()->NotifyDoneInstallingRegistration(live_registration1.get(), nullptr,
+                                              SERVICE_WORKER_OK);
+  storage()->NotifyDoneInstallingRegistration(live_registration2.get(), nullptr,
+                                              SERVICE_WORKER_OK);
+  storage()->NotifyDoneInstallingRegistration(live_registration3.get(), nullptr,
+                                              SERVICE_WORKER_OK);
 
   // Find a registration among installed ones.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -1723,117 +1744,6 @@ class ServiceWorkerStorageDiskTest : public ServiceWorkerStorageTest {
   }
 };
 
-TEST_F(ServiceWorkerStorageDiskTest, OriginHasForeignFetchRegistrations) {
-  LazyInitialize();
-
-  // Registration 1 for http://www.example.com
-  const GURL kScope1("http://www.example.com/scope/");
-  const GURL kScript1("http://www.example.com/script1.js");
-  const int64_t kRegistrationId1 = 1;
-  const int64_t kVersionId1 = 1;
-  scoped_refptr<ServiceWorkerRegistration> live_registration1 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope1),
-                                    kRegistrationId1, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version1 = new ServiceWorkerVersion(
-      live_registration1.get(), kScript1, kVersionId1, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records1;
-  records1.push_back(ServiceWorkerDatabase::ResourceRecord(
-      1, live_version1->script_url(), 100));
-  live_version1->script_cache_map()->SetResources(records1);
-  live_version1->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version1->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_version1->set_foreign_fetch_scopes(std::vector<GURL>(1, kScope1));
-  live_registration1->SetWaitingVersion(live_version1);
-
-  // Registration 2 for http://www.example.com
-  const GURL kScope2("http://www.example.com/scope/foo");
-  const GURL kScript2("http://www.example.com/script2.js");
-  const int64_t kRegistrationId2 = 2;
-  const int64_t kVersionId2 = 2;
-  scoped_refptr<ServiceWorkerRegistration> live_registration2 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope2),
-                                    kRegistrationId2, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version2 = new ServiceWorkerVersion(
-      live_registration2.get(), kScript2, kVersionId2, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records2;
-  records2.push_back(ServiceWorkerDatabase::ResourceRecord(
-      2, live_version2->script_url(), 100));
-  live_version2->script_cache_map()->SetResources(records2);
-  live_version2->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version2->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_version2->set_foreign_fetch_scopes(std::vector<GURL>(1, kScope2));
-  live_registration2->SetWaitingVersion(live_version2);
-
-  // Registration for http://www.test.com
-  const GURL kScope3("http://www.test.com/scope/foobar");
-  const GURL kScript3("http://www.test.com/script3.js");
-  const int64_t kRegistrationId3 = 3;
-  const int64_t kVersionId3 = 3;
-  scoped_refptr<ServiceWorkerRegistration> live_registration3 =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope3),
-                                    kRegistrationId3, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> live_version3 = new ServiceWorkerVersion(
-      live_registration3.get(), kScript3, kVersionId3, context()->AsWeakPtr());
-  std::vector<ServiceWorkerDatabase::ResourceRecord> records3;
-  records3.push_back(ServiceWorkerDatabase::ResourceRecord(
-      3, live_version3->script_url(), 100));
-  live_version3->script_cache_map()->SetResources(records3);
-  live_version3->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
-  live_version3->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration3->SetWaitingVersion(live_version3);
-
-  // Neither origin should have registrations before they are stored.
-  const GURL kOrigin1 = kScope1.GetOrigin();
-  const GURL kOrigin2 = kScope3.GetOrigin();
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin1));
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin2));
-
-  // Store all registrations.
-  EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration1, live_version1));
-  EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration2, live_version2));
-  EXPECT_EQ(SERVICE_WORKER_OK,
-            StoreRegistration(live_registration3, live_version3));
-
-  // Now first origin should have foreign fetch registrations, second doesn't.
-  EXPECT_TRUE(storage()->OriginHasForeignFetchRegistrations(kOrigin1));
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin2));
-
-  // Remove one registration at first origin.
-  EXPECT_EQ(SERVICE_WORKER_OK,
-            DeleteRegistration(kRegistrationId1, kScope1.GetOrigin()));
-
-  // First origin should still have a registration left.
-  EXPECT_TRUE(storage()->OriginHasForeignFetchRegistrations(kOrigin1));
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin2));
-
-  // Simulate browser shutdown and restart.
-  live_registration1 = nullptr;
-  live_version1 = nullptr;
-  live_registration2 = nullptr;
-  live_version2 = nullptr;
-  live_registration3 = nullptr;
-  live_version3 = nullptr;
-  InitializeTestHelper();
-  LazyInitialize();
-
-  // First origin should still have a registration left.
-  EXPECT_TRUE(storage()->OriginHasForeignFetchRegistrations(kOrigin1));
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin2));
-
-  // Remove other registration at first origin.
-  EXPECT_EQ(SERVICE_WORKER_OK,
-            DeleteRegistration(kRegistrationId2, kScope2.GetOrigin()));
-
-  // No foreign fetch registrations remain.
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin1));
-  EXPECT_FALSE(storage()->OriginHasForeignFetchRegistrations(kOrigin2));
-}
-
 TEST_F(ServiceWorkerStorageTest, OriginTrialsAbsentEntryAndEmptyEntry) {
   const GURL origin1("http://www1.example.com");
   const GURL scope1("http://www1.example.com/foo/");
@@ -1845,9 +1755,8 @@ TEST_F(ServiceWorkerStorageTest, OriginTrialsAbsentEntryAndEmptyEntry) {
   data1.is_active = true;
   data1.resources_total_size_bytes = 100;
   // Don't set origin_trial_tokens to simulate old database entry.
-  std::vector<ServiceWorkerDatabase::ResourceRecord> resources1;
-  resources1.push_back(
-      ServiceWorkerDatabase::ResourceRecord(1, data1.script, 100));
+  std::vector<ResourceRecord> resources1;
+  resources1.push_back(ResourceRecord(1, data1.script, 100));
   WriteRegistration(data1, resources1);
 
   const GURL origin2("http://www2.example.com");
@@ -1860,10 +1769,9 @@ TEST_F(ServiceWorkerStorageTest, OriginTrialsAbsentEntryAndEmptyEntry) {
   data2.is_active = true;
   data2.resources_total_size_bytes = 200;
   // Set empty origin_trial_tokens.
-  data2.origin_trial_tokens = TrialTokenValidator::FeatureToTokensMap();
-  std::vector<ServiceWorkerDatabase::ResourceRecord> resources2;
-  resources2.push_back(
-      ServiceWorkerDatabase::ResourceRecord(2, data2.script, 200));
+  data2.origin_trial_tokens = blink::TrialTokenValidator::FeatureToTokensMap();
+  std::vector<ResourceRecord> resources2;
+  resources2.push_back(ResourceRecord(2, data2.script, 200));
   WriteRegistration(data2, resources2);
 
   scoped_refptr<ServiceWorkerRegistration> found_registration;
@@ -1924,9 +1832,11 @@ TEST_F(ServiceWorkerStorageOriginTrialsDiskTest, FromMainScript) {
   const GURL kScript("https://valid.example.com/script.js");
   const int64_t kRegistrationId = 1;
   const int64_t kVersionId = 1;
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = kScope;
   scoped_refptr<ServiceWorkerRegistration> registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
+      new ServiceWorkerRegistration(options, kRegistrationId,
+                                    context()->AsWeakPtr());
   scoped_refptr<ServiceWorkerVersion> version = new ServiceWorkerVersion(
       registration.get(), kScript, kVersionId, context()->AsWeakPtr());
 
@@ -1967,14 +1877,14 @@ TEST_F(ServiceWorkerStorageOriginTrialsDiskTest, FromMainScript) {
       "AtSAc03z4qvid34W4MHMxyRFUJKlubZ+P5cs5yg6EiBWcagVbnm5uBgJMJN34pag7D5RywGV"
       "ol2RFf+4Sdm1hQ4AAABYeyJvcmlnaW4iOiAiaHR0cHM6Ly92YWxpZC5leGFtcGxlLmNvbTo0"
       "NDMiLCAiZmVhdHVyZSI6ICJGZWF0dXJlMyIsICJleHBpcnkiOiAxMDAwMDAwMDAwfQ==");
-  http_info.headers = make_scoped_refptr(new net::HttpResponseHeaders(""));
+  http_info.headers = base::MakeRefCounted<net::HttpResponseHeaders>("");
   http_info.headers->AddHeader(kOriginTrial + kFeature1Token);
   http_info.headers->AddHeader(kOriginTrial + kFeature2Token1);
   http_info.headers->AddHeader(kOriginTrial + kFeature2Token2);
   http_info.headers->AddHeader(kOriginTrial + kFeature3ExpiredToken);
   version->SetMainScriptHttpResponseInfo(http_info);
   ASSERT_TRUE(version->origin_trial_tokens());
-  const TrialTokenValidator::FeatureToTokensMap& tokens =
+  const blink::TrialTokenValidator::FeatureToTokensMap& tokens =
       *version->origin_trial_tokens();
   ASSERT_EQ(2UL, tokens.size());
   ASSERT_EQ(1UL, tokens.at("Feature1").size());
@@ -1983,8 +1893,8 @@ TEST_F(ServiceWorkerStorageOriginTrialsDiskTest, FromMainScript) {
   EXPECT_EQ(kFeature2Token1, tokens.at("Feature2")[0]);
   EXPECT_EQ(kFeature2Token2, tokens.at("Feature2")[1]);
 
-  std::vector<ServiceWorkerDatabase::ResourceRecord> record;
-  record.push_back(ServiceWorkerDatabase::ResourceRecord(1, kScript, 100));
+  std::vector<ResourceRecord> record;
+  record.push_back(ResourceRecord(1, kScript, 100));
   version->script_cache_map()->SetResources(record);
   version->set_fetch_handler_existence(
       ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
@@ -2003,7 +1913,7 @@ TEST_F(ServiceWorkerStorageOriginTrialsDiskTest, FromMainScript) {
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(kScope, &found_registration));
   ASSERT_TRUE(found_registration->active_version());
-  const TrialTokenValidator::FeatureToTokensMap& found_tokens =
+  const blink::TrialTokenValidator::FeatureToTokensMap& found_tokens =
       *found_registration->active_version()->origin_trial_tokens();
   ASSERT_EQ(2UL, found_tokens.size());
   ASSERT_EQ(1UL, found_tokens.at("Feature1").size());
@@ -2025,23 +1935,73 @@ TEST_F(ServiceWorkerStorageTest, AbsentNavigationPreloadState) {
   data1.is_active = true;
   data1.resources_total_size_bytes = 100;
   // Don't set navigation preload state to simulate old database entry.
-  std::vector<ServiceWorkerDatabase::ResourceRecord> resources1;
-  resources1.push_back(
-      ServiceWorkerDatabase::ResourceRecord(1, data1.script, 100));
+  std::vector<ResourceRecord> resources1;
+  resources1.push_back(ResourceRecord(1, data1.script, 100));
   WriteRegistration(data1, resources1);
 
   scoped_refptr<ServiceWorkerRegistration> found_registration;
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(scope1, &found_registration));
-  const NavigationPreloadState& registration_state =
+  const blink::mojom::NavigationPreloadState& registration_state =
       found_registration->navigation_preload_state();
   EXPECT_FALSE(registration_state.enabled);
   EXPECT_EQ("true", registration_state.header);
   ASSERT_TRUE(found_registration->active_version());
-  const NavigationPreloadState& state =
+  const blink::mojom::NavigationPreloadState& state =
       found_registration->active_version()->navigation_preload_state();
   EXPECT_FALSE(state.enabled);
   EXPECT_EQ("true", state.header);
+}
+
+TEST_F(ServiceWorkerStorageDiskTest, RegisteredOriginCount) {
+  {
+    base::HistogramTester histogram_tester;
+    LazyInitialize();
+    EXPECT_TRUE(registered_origins().empty());
+    histogram_tester.ExpectUniqueSample("ServiceWorker.RegisteredOriginCount",
+                                        0, 1);
+  }
+
+  std::pair<GURL, GURL> scope_and_script_pairs[] = {
+      {GURL("https://www.example.com/scope/"),
+       GURL("https://www.example.com/script.js")},
+      {GURL("https://www.example.com/scope/foo"),
+       GURL("https://www.example.com/script.js")},
+      {GURL("https://www.test.com/scope/foobar"),
+       GURL("https://www.test.com/script.js")},
+      {GURL("https://example.com/scope/"),
+       GURL("https://example.com/script.js")},
+  };
+  std::vector<scoped_refptr<ServiceWorkerRegistration>> registrations;
+  for (const auto& pair : scope_and_script_pairs) {
+    registrations.emplace_back(
+        CreateLiveRegistrationAndVersion(pair.first, pair.second));
+  }
+
+  // Store all registrations.
+  for (const auto& registration : registrations) {
+    EXPECT_EQ(SERVICE_WORKER_OK,
+              StoreRegistration(registration, registration->waiting_version()));
+  }
+
+  // Simulate browser shutdown and restart.
+  registrations.clear();
+  InitializeTestHelper();
+  {
+    base::HistogramTester histogram_tester;
+    LazyInitialize();
+    EXPECT_EQ(3UL, registered_origins().size());
+    histogram_tester.ExpectUniqueSample("ServiceWorker.RegisteredOriginCount",
+                                        3, 1);
+  }
+
+  // Re-initializing shouldn't re-record the histogram.
+  {
+    base::HistogramTester histogram_tester;
+    LazyInitialize();
+    EXPECT_EQ(3UL, registered_origins().size());
+    histogram_tester.ExpectTotalCount("ServiceWorker.RegisteredOriginCount", 0);
+  }
 }
 
 // Tests loading a registration with a disabled navigation preload
@@ -2050,19 +2010,9 @@ TEST_F(ServiceWorkerStorageDiskTest, DisabledNavigationPreloadState) {
   LazyInitialize();
   const GURL kScope("https://valid.example.com/scope");
   const GURL kScript("https://valid.example.com/script.js");
-  const int64_t kRegistrationId = 1;
-  const int64_t kVersionId = 1;
   scoped_refptr<ServiceWorkerRegistration> registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> version = new ServiceWorkerVersion(
-      registration.get(), kScript, kVersionId, context()->AsWeakPtr());
-
-  std::vector<ServiceWorkerDatabase::ResourceRecord> record;
-  record.push_back(ServiceWorkerDatabase::ResourceRecord(1, kScript, 100));
-  version->script_cache_map()->SetResources(record);
-  version->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+      CreateLiveRegistrationAndVersion(kScope, kScript);
+  ServiceWorkerVersion* version = registration->waiting_version();
   version->SetStatus(ServiceWorkerVersion::ACTIVATED);
   registration->SetActiveVersion(version);
   registration->EnableNavigationPreload(false);
@@ -2078,12 +2028,12 @@ TEST_F(ServiceWorkerStorageDiskTest, DisabledNavigationPreloadState) {
   scoped_refptr<ServiceWorkerRegistration> found_registration;
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(kScope, &found_registration));
-  const NavigationPreloadState& registration_state =
+  const blink::mojom::NavigationPreloadState& registration_state =
       found_registration->navigation_preload_state();
   EXPECT_FALSE(registration_state.enabled);
   EXPECT_EQ("true", registration_state.header);
   ASSERT_TRUE(found_registration->active_version());
-  const NavigationPreloadState& state =
+  const blink::mojom::NavigationPreloadState& state =
       found_registration->active_version()->navigation_preload_state();
   EXPECT_FALSE(state.enabled);
   EXPECT_EQ("true", state.header);
@@ -2096,19 +2046,9 @@ TEST_F(ServiceWorkerStorageDiskTest, EnabledNavigationPreloadState) {
   const GURL kScope("https://valid.example.com/scope");
   const GURL kScript("https://valid.example.com/script.js");
   const std::string kHeaderValue("custom header value");
-  const int64_t kRegistrationId = 1;
-  const int64_t kVersionId = 1;
   scoped_refptr<ServiceWorkerRegistration> registration =
-      new ServiceWorkerRegistration(ServiceWorkerRegistrationOptions(kScope),
-                                    kRegistrationId, context()->AsWeakPtr());
-  scoped_refptr<ServiceWorkerVersion> version = new ServiceWorkerVersion(
-      registration.get(), kScript, kVersionId, context()->AsWeakPtr());
-
-  std::vector<ServiceWorkerDatabase::ResourceRecord> record;
-  record.push_back(ServiceWorkerDatabase::ResourceRecord(1, kScript, 100));
-  version->script_cache_map()->SetResources(record);
-  version->set_fetch_handler_existence(
-      ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
+      CreateLiveRegistrationAndVersion(kScope, kScript);
+  ServiceWorkerVersion* version = registration->waiting_version();
   version->SetStatus(ServiceWorkerVersion::ACTIVATED);
   registration->SetActiveVersion(version);
   registration->EnableNavigationPreload(true);
@@ -2125,15 +2065,16 @@ TEST_F(ServiceWorkerStorageDiskTest, EnabledNavigationPreloadState) {
   scoped_refptr<ServiceWorkerRegistration> found_registration;
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForDocument(kScope, &found_registration));
-  const NavigationPreloadState& registration_state =
+  const blink::mojom::NavigationPreloadState& registration_state =
       found_registration->navigation_preload_state();
   EXPECT_TRUE(registration_state.enabled);
   EXPECT_EQ(kHeaderValue, registration_state.header);
   ASSERT_TRUE(found_registration->active_version());
-  const NavigationPreloadState& state =
+  const blink::mojom::NavigationPreloadState& state =
       found_registration->active_version()->navigation_preload_state();
   EXPECT_TRUE(state.enabled);
   EXPECT_EQ(kHeaderValue, state.header);
 }
 
+}  // namespace service_worker_storage_unittest
 }  // namespace content

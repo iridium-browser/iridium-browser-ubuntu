@@ -14,6 +14,7 @@
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/search_engines/template_url.h"
+#include "ui/app_list/app_list_features.h"
 
 namespace app_list {
 namespace test {
@@ -27,16 +28,7 @@ const char kExampleUrl[] = "http://example.com/hello";
 const int kRelevance = 750;
 const double kAppListRelevance = 0.5;
 
-const char kWeatherQuery[] = "weather";
 const char kExampleKeyword[] = "example.com";
-const char kExampleWeatherUrl[] = "http://example.com/weather";
-// Typically, this would be "google", "google.com" or "google.com.<country>",
-// but users can change it to whatever they want, so we assume they have.
-const char kGoogleKeyword[] = "mygoog";
-const char kGoogleDescription[] = "Google Search";
-const char kGoogleWeatherUrl[] = "http://google.com/search?q=weather";
-const char kGoogleInternationalWeatherUrl[] =
-    "http://google.com.au/search?q=weather";
 
 }  // namespace
 
@@ -60,8 +52,7 @@ class OmniboxResultTest : public AppListTestBase {
       const std::string& contents,
       const std::string& description,
       AutocompleteMatchType::Type type,
-      const std::string& keyword,
-      bool is_voice_query) {
+      const std::string& keyword) {
     AutocompleteMatch match;
     match.search_terms_args.reset(
         new TemplateURLRef::SearchTermsArgs(base::UTF8ToUTF16(original_query)));
@@ -73,9 +64,8 @@ class OmniboxResultTest : public AppListTestBase {
     match.type = type;
     match.keyword = base::UTF8ToUTF16(keyword);
 
-    return std::unique_ptr<OmniboxResult>(
-        new OmniboxResult(profile_.get(), app_list_controller_delegate_.get(),
-                          nullptr, is_voice_query, match));
+    return std::unique_ptr<OmniboxResult>(new OmniboxResult(
+        profile_.get(), app_list_controller_delegate_.get(), nullptr, match));
   }
 
   const GURL& GetLastOpenedUrl() const {
@@ -89,13 +79,13 @@ class OmniboxResultTest : public AppListTestBase {
   DISALLOW_COPY_AND_ASSIGN(OmniboxResultTest);
 };
 
-TEST_F(OmniboxResultTest, DISABLED_Basic) {
+TEST_F(OmniboxResultTest, Basic) {
   std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
       kFullQuery, kRelevance, kExampleUrl, kFullQuery, kExampleDescription,
-      AutocompleteMatchType::HISTORY_URL, kExampleKeyword, false);
+      AutocompleteMatchType::HISTORY_URL, kExampleKeyword);
 
-  EXPECT_EQ(base::ASCIIToUTF16(kFullQuery), result->title());
-  EXPECT_EQ(base::ASCIIToUTF16(kExampleDescription), result->details());
+  EXPECT_EQ(base::ASCIIToUTF16(kExampleDescription), result->title());
+  EXPECT_EQ(base::ASCIIToUTF16(kFullQuery), result->details());
   EXPECT_EQ(kAppListRelevance, result->relevance());
   EXPECT_FALSE(result->voice_result());
 
@@ -111,7 +101,7 @@ TEST_F(OmniboxResultTest, VoiceResult) {
     std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
         kPartialQuery, kRelevance, kExampleUrl, kPartialQuery,
         kExampleDescription, AutocompleteMatchType::HISTORY_URL,
-        kExampleKeyword, false);
+        kExampleKeyword);
     EXPECT_FALSE(result->voice_result());
   }
 
@@ -121,7 +111,7 @@ TEST_F(OmniboxResultTest, VoiceResult) {
     std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
         kPartialQuery, kRelevance, kExampleUrl, kPartialQuery,
         kExampleDescription, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
-        kExampleKeyword, false);
+        kExampleKeyword);
     EXPECT_TRUE(result->voice_result());
   }
 
@@ -131,7 +121,7 @@ TEST_F(OmniboxResultTest, VoiceResult) {
     std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
         kPartialQuery, kRelevance, kExampleUrl, kPartialQuery,
         kExampleDescription, AutocompleteMatchType::SEARCH_HISTORY,
-        kExampleKeyword, false);
+        kExampleKeyword);
     EXPECT_TRUE(result->voice_result());
   }
 
@@ -141,54 +131,8 @@ TEST_F(OmniboxResultTest, VoiceResult) {
   {
     std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
         kPartialQuery, kRelevance, kExampleUrl, kFullQuery, kExampleDescription,
-        AutocompleteMatchType::SEARCH_HISTORY, kExampleKeyword, false);
+        AutocompleteMatchType::SEARCH_HISTORY, kExampleKeyword);
     EXPECT_FALSE(result->voice_result());
-  }
-}
-
-TEST_F(OmniboxResultTest, VoiceQuery) {
-  // A voice query to a random domain. URL should not change.
-  {
-    std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
-        kWeatherQuery, kRelevance, kExampleWeatherUrl, kWeatherQuery,
-        kExampleDescription, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
-        kExampleKeyword, true);
-    result->Open(0);
-    EXPECT_EQ(kExampleWeatherUrl, GetLastOpenedUrl().spec());
-  }
-
-  // A voice query to a Google domain. URL should have magic "speak back" query
-  // parameter appended.
-  {
-    std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
-        kWeatherQuery, kRelevance, kGoogleWeatherUrl, kWeatherQuery,
-        kGoogleDescription, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
-        kGoogleKeyword, true);
-    result->Open(0);
-    EXPECT_EQ("http://google.com/search?q=weather&gs_ivs=1",
-              GetLastOpenedUrl().spec());
-  }
-
-  // A voice query to a Google international domain. URL should have magic
-  // "speak back" query parameter appended.
-  {
-    std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
-        kWeatherQuery, kRelevance, kGoogleInternationalWeatherUrl,
-        kWeatherQuery, kGoogleDescription,
-        AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, kGoogleKeyword, true);
-    result->Open(0);
-    EXPECT_EQ("http://google.com.au/search?q=weather&gs_ivs=1",
-              GetLastOpenedUrl().spec());
-  }
-
-  // A non-voice query to a Google domain. URL should not change.
-  {
-    std::unique_ptr<OmniboxResult> result = CreateOmniboxResult(
-        kWeatherQuery, kRelevance, kGoogleWeatherUrl, kWeatherQuery,
-        kGoogleDescription, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
-        kGoogleKeyword, false);
-    result->Open(0);
-    EXPECT_EQ(kGoogleWeatherUrl, GetLastOpenedUrl().spec());
   }
 }
 

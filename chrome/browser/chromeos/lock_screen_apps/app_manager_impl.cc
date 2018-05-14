@@ -13,18 +13,19 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/tick_clock.h"
+#include "chrome/browser/chromeos/lock_screen_apps/lock_screen_profile_creator.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/extension_assets_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/common/pref_names.h"
+#include "extensions/browser/extension_file_task_runner.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/install_flag.h"
@@ -41,6 +42,10 @@ namespace {
 using ExtensionCallback = base::Callback<void(
     const scoped_refptr<const extensions::Extension>& extension)>;
 
+// The max number of times the lock screen app can be relaoded if it gets
+// terminated while the lock screen is active.
+constexpr int kMaxLockScreenAppReloadsCount = 3;
+
 // The lock screen note taking availability state.
 // Used to report UMA histograms - the values should map to
 // LockScreenActionAvailability UMA enum values, and the values assigned to
@@ -51,7 +56,20 @@ enum class ActionAvailability {
   kAppNotSupportingLockScreen = 2,
   kActionNotEnabledOnLockScreen = 3,
   kDisallowedByPolicy = 4,
+  kLockScreenProfileNotCreated = 5,
   kCount,
+};
+
+// The reason the note taking app was unloaded from the lock screen apps
+// profile.
+// Used to report UMA histograms - the values should map to
+// LockScreenAppUnloadStatus UMA enum values, and the values assigned to
+// enum states should NOT be changed.
+enum class AppUnloadStatus {
+  kNotTerminated = 0,
+  kTerminatedReloadable = 1,
+  kTerminatedReloadAttemptsExceeded = 2,
+  kCount = 3
 };
 
 ActionAvailability GetLockScreenNoteTakingAvailability(
@@ -118,7 +136,7 @@ void InstallExtensionCopy(
   base::FilePath target_dir = target_install_dir.Append(extension->id());
   base::FilePath install_temp_dir =
       extensions::file_util::GetInstallTempDir(target_dir);
-  auto extension_temp_dir = base::MakeUnique<base::ScopedTempDir>();
+  auto extension_temp_dir = std::make_unique<base::ScopedTempDir>();
   if (install_temp_dir.empty() ||
       !extension_temp_dir->CreateUniqueTempDirUnderPath(install_temp_dir)) {
     callback.Run(nullptr);
@@ -149,44 +167,62 @@ void InstallExtensionCopy(
 AppManagerImpl::AppManagerImpl(base::TickClock* tick_clock)
     : tick_clock_(tick_clock),
       extensions_observer_(this),
+      lock_screen_profile_extensions_observer_(this),
       note_taking_helper_observer_(this),
       weak_ptr_factory_(this) {}
 
 AppManagerImpl::~AppManagerImpl() = default;
 
-void AppManagerImpl::Initialize(Profile* primary_profile,
-                                Profile* lock_screen_profile) {
+void AppManagerImpl::Initialize(
+    Profile* primary_profile,
+    LockScreenProfileCreator* lock_screen_profile_creator) {
   DCHECK_EQ(State::kNotInitialized, state_);
   DCHECK(primary_profile);
-  DCHECK(lock_screen_profile);
-  DCHECK_NE(primary_profile, lock_screen_profile);
+
+  primary_profile_ = primary_profile;
+  lock_screen_profile_creator_ = lock_screen_profile_creator;
+
+  state_ = State::kInactive;
+
+  note_taking_helper_observer_.Add(chromeos::NoteTakingHelper::Get());
+
+  lock_screen_profile_creator_->AddCreateProfileCallback(
+      base::Bind(&AppManagerImpl::OnLockScreenProfileLoaded,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void AppManagerImpl::OnLockScreenProfileLoaded() {
+  if (!lock_screen_profile_creator_->lock_screen_profile())
+    return;
+
+  DCHECK_NE(primary_profile_,
+            lock_screen_profile_creator_->lock_screen_profile());
+
   // Do not use OTR profile for lock screen apps. This is important for
   // profile usage in |LaunchNoteTaking| - lock screen app background page runs
   // in original, non off the record profile, so the launch event has to be
   // dispatched to that profile. For other |lock_screen_profile_|, it makes no
   // difference - the profile is used to get browser context keyed services, all
   // of which redirect OTR profile to the original one.
-  DCHECK(!lock_screen_profile->IsOffTheRecord());
+  lock_screen_profile_ =
+      lock_screen_profile_creator_->lock_screen_profile()->GetOriginalProfile();
 
-  CHECK(!chromeos::ProfileHelper::Get()->GetUserByProfile(lock_screen_profile))
+  CHECK(!chromeos::ProfileHelper::Get()->GetUserByProfile(lock_screen_profile_))
       << "Lock screen profile should not be associated with any users.";
 
-  primary_profile_ = primary_profile;
-  lock_screen_profile_ = lock_screen_profile;
-  state_ = State::kInactive;
-
-  note_taking_helper_observer_.Add(chromeos::NoteTakingHelper::Get());
+  OnNoteTakingExtensionChanged();
 }
 
 void AppManagerImpl::Start(const base::Closure& note_taking_changed_callback) {
   DCHECK_NE(State::kNotInitialized, state_);
 
   note_taking_changed_callback_ = note_taking_changed_callback;
+
+  if (state_ == State::kActive || state_ == State::kActivating)
+    return;
+
   extensions_observer_.Add(
       extensions::ExtensionRegistry::Get(primary_profile_));
-
-  if (state_ == State::kActive)
-    return;
 
   lock_screen_app_id_.clear();
   std::string app_id = FindLockScreenNoteTakingApp();
@@ -205,6 +241,7 @@ void AppManagerImpl::Stop() {
 
   note_taking_changed_callback_.Reset();
   extensions_observer_.RemoveAll();
+  available_lock_screen_app_reloads_ = 0;
 
   if (state_ == State::kInactive)
     return;
@@ -228,20 +265,22 @@ bool AppManagerImpl::LaunchNoteTaking() {
   if (!IsNoteTakingAppAvailable())
     return false;
 
-  const extensions::ExtensionRegistry* extension_registry =
-      extensions::ExtensionRegistry::Get(lock_screen_profile_);
-  const extensions::Extension* app = extension_registry->GetExtensionById(
-      lock_screen_app_id_, extensions::ExtensionRegistry::ENABLED);
-  if (!app)
+  const extensions::Extension* app = GetAppForLockScreenAppLaunch();
+  // If the app cannot be found at this point, it either got unexpectedly
+  // disabled, or it failed to reload (in case it was previously terminated).
+  // In either case, note taking should not be reported as available anymore.
+  if (!app) {
+    RemoveLockScreenAppDueToError();
     return false;
+  }
 
   auto action_data =
-      base::MakeUnique<extensions::api::app_runtime::ActionData>();
+      std::make_unique<extensions::api::app_runtime::ActionData>();
   action_data->action_type =
       extensions::api::app_runtime::ActionType::ACTION_TYPE_NEW_NOTE;
-  action_data->is_lock_screen_action = base::MakeUnique<bool>(true);
+  action_data->is_lock_screen_action = std::make_unique<bool>(true);
   action_data->restore_last_action_state =
-      base::MakeUnique<bool>(primary_profile_->GetPrefs()->GetBoolean(
+      std::make_unique<bool>(primary_profile_->GetPrefs()->GetBoolean(
           prefs::kRestoreLastLockScreenNote));
   apps::LaunchPlatformAppWithAction(lock_screen_profile_, app,
                                     std::move(action_data), base::FilePath());
@@ -250,8 +289,9 @@ bool AppManagerImpl::LaunchNoteTaking() {
 
 void AppManagerImpl::OnExtensionLoaded(content::BrowserContext* browser_context,
                                        const extensions::Extension* extension) {
-  if (extension->id() ==
-      primary_profile_->GetPrefs()->GetString(prefs::kNoteTakingAppId)) {
+  if (browser_context == primary_profile_ &&
+      extension->id() ==
+          primary_profile_->GetPrefs()->GetString(prefs::kNoteTakingAppId)) {
     OnNoteTakingExtensionChanged();
   }
 }
@@ -260,8 +300,26 @@ void AppManagerImpl::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
     extensions::UnloadedExtensionReason reason) {
-  if (extension->id() == lock_screen_app_id_)
+  if (extension->id() != lock_screen_app_id_)
+    return;
+
+  if (browser_context == primary_profile_) {
     OnNoteTakingExtensionChanged();
+  } else if (browser_context == lock_screen_profile_) {
+    HandleLockScreenAppUnload(reason);
+  }
+}
+
+void AppManagerImpl::OnExtensionUninstalled(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UninstallReason reason) {
+  // If the app is uninstalled from the lock screen apps profile, make sure
+  // it's not reported as available anymore.
+  if (browser_context == lock_screen_profile_ &&
+      extension->id() == lock_screen_app_id_) {
+    RemoveLockScreenAppDueToError();
+  }
 }
 
 void AppManagerImpl::OnAvailableNoteTakingAppsUpdated() {}
@@ -300,6 +358,17 @@ std::string AppManagerImpl::FindLockScreenNoteTakingApp() const {
           primary_profile_);
   ActionAvailability availability =
       GetLockScreenNoteTakingAvailability(note_taking_app.get());
+
+  // |lock_screen_profile_| is created only if a note taking app is available
+  // on the lock screen. If an app is not available, the profile is expected to
+  // be nullptr.
+  // If the app is available and the lock_screen_profile is not set, the profile
+  // might still be loading, and |FindLockScreenNoteTakingApp| will be called
+  // again when the profile is loaded - until then, report to UMA that lock
+  // screen profile was not created at this point, and otherwise ignore the
+  // available app.
+  if (!lock_screen_profile_ && availability == ActionAvailability::kAvailable)
+    availability = ActionAvailability::kLockScreenProfileNotCreated;
 
   UMA_HISTOGRAM_ENUMERATION(
       "Apps.LockScreen.NoteTakingApp.AvailabilityOnScreenLock", availability,
@@ -355,7 +424,7 @@ AppManagerImpl::State AppManagerImpl::AddAppToLockScreenProfile(
       extensions::ExtensionSystem::Get(lock_screen_profile_)
           ->extension_service();
 
-  lock_screen_service->GetFileTaskRunner()->PostTask(
+  extensions::GetExtensionFileTaskRunner()->PostTask(
       FROM_HERE,
       base::Bind(
           &InstallExtensionCopy, lock_profile_app, app->path(),
@@ -403,11 +472,18 @@ void AppManagerImpl::InstallAndEnableLockScreenAppInLockScreenProfile(
   lock_screen_service->OnExtensionInstalled(
       app, syncer::StringOrdinal(), extensions::kInstallFlagInstallImmediately);
   lock_screen_service->EnableExtension(app->id());
+
+  available_lock_screen_app_reloads_ = kMaxLockScreenAppReloadsCount;
+
+  lock_screen_profile_extensions_observer_.Add(
+      extensions::ExtensionRegistry::Get(lock_screen_profile_));
 }
 
 void AppManagerImpl::RemoveAppFromLockScreenProfile(const std::string& app_id) {
   if (app_id.empty())
     return;
+
+  lock_screen_profile_extensions_observer_.RemoveAll();
 
   extensions::ExtensionRegistry* lock_screen_registry =
       extensions::ExtensionRegistry::Get(lock_screen_profile_);
@@ -419,9 +495,106 @@ void AppManagerImpl::RemoveAppFromLockScreenProfile(const std::string& app_id) {
   base::string16 error;
   extensions::ExtensionSystem::Get(lock_screen_profile_)
       ->extension_service()
-      ->UninstallExtension(app_id,
-                           extensions::UNINSTALL_REASON_INTERNAL_MANAGEMENT,
-                           base::Bind(&base::DoNothing), &error);
+      ->UninstallExtension(
+          app_id, extensions::UNINSTALL_REASON_INTERNAL_MANAGEMENT, &error);
+}
+
+const extensions::Extension* AppManagerImpl::GetAppForLockScreenAppLaunch() {
+  const extensions::ExtensionRegistry* extension_registry =
+      extensions::ExtensionRegistry::Get(lock_screen_profile_);
+
+  // Return the app, in case it's currently loaded.
+  const extensions::Extension* app = extension_registry->GetExtensionById(
+      lock_screen_app_id_, extensions::ExtensionRegistry::ENABLED);
+  if (app) {
+    ReportAppStatusOnAppLaunch(AppStatus::kEnabled);
+    return app;
+  }
+
+  // If the app has been terminated (which can happen due to an app crash),
+  // attempt a reload - otherwise, return nullptr to signal the app is
+  // unavailable.
+  app =
+      extension_registry->terminated_extensions().GetByID(lock_screen_app_id_);
+  if (!app) {
+    ReportAppStatusOnAppLaunch(AppStatus::kNotLoadedNotTerminated);
+    return nullptr;
+  }
+
+  if (available_lock_screen_app_reloads_ <= 0) {
+    ReportAppStatusOnAppLaunch(AppStatus::kTerminatedReloadLimitExceeded);
+    return nullptr;
+  }
+
+  available_lock_screen_app_reloads_--;
+
+  std::string error;
+  scoped_refptr<extensions::Extension> lock_profile_app =
+      extensions::Extension::Create(app->path(), app->location(),
+                                    *app->manifest()->value()->CreateDeepCopy(),
+                                    app->creation_flags(), app->id(), &error);
+
+  ExtensionService* extension_service =
+      extensions::ExtensionSystem::Get(lock_screen_profile_)
+          ->extension_service();
+  extension_service->AddExtension(lock_profile_app.get());
+  extension_service->EnableExtension(lock_profile_app->id());
+
+  app = extension_registry->GetExtensionById(
+      lock_screen_app_id_, extensions::ExtensionRegistry::ENABLED);
+
+  ReportAppStatusOnAppLaunch(app ? AppStatus::kAppReloaded
+                                 : AppStatus::kAppReloadFailed);
+  return app;
+}
+
+void AppManagerImpl::ReportAppStatusOnAppLaunch(AppStatus status) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Apps.LockScreen.NoteTakingApp.AppStatusOnNoteLaunch", status,
+      AppStatus::kCount);
+}
+
+void AppManagerImpl::HandleLockScreenAppUnload(
+    extensions::UnloadedExtensionReason reason) {
+  if (state_ != State::kActive && state_ != State::kActivating)
+    return;
+
+  AppUnloadStatus status = AppUnloadStatus::kNotTerminated;
+  if (reason == extensions::UnloadedExtensionReason::TERMINATE) {
+    status = available_lock_screen_app_reloads_ > 0
+                 ? AppUnloadStatus::kTerminatedReloadable
+                 : AppUnloadStatus::kTerminatedReloadAttemptsExceeded;
+  }
+  UMA_HISTOGRAM_ENUMERATION(
+      "Apps.LockScreen.NoteTakingApp.LockScreenAppUnloaded", status,
+      AppUnloadStatus::kCount);
+
+  // If the app is terminated, it will be reloaded on the next app launch
+  // request - if the app cannot be reloaded (e.g. if it was unloaded for a
+  // different reason, or it was reloaded too many times already), change the
+  // app managet to an error state. This will inform the app manager's user
+  // that lock screen note action is not available anymore.
+  if (status != AppUnloadStatus::kTerminatedReloadable)
+    RemoveLockScreenAppDueToError();
+
+  if (status != AppUnloadStatus::kNotTerminated) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "Apps.LockScreen.NoteTakingApp.ReloadCountOnAppTermination",
+        kMaxLockScreenAppReloadsCount - available_lock_screen_app_reloads_,
+        kMaxLockScreenAppReloadsCount + 1);
+  }
+}
+
+void AppManagerImpl::RemoveLockScreenAppDueToError() {
+  if (state_ != State::kActive && state_ != State::kActivating)
+    return;
+
+  RemoveAppFromLockScreenProfile(lock_screen_app_id_);
+  lock_screen_app_id_.clear();
+  state_ = State::kInactive;
+
+  if (!note_taking_changed_callback_.is_null())
+    note_taking_changed_callback_.Run();
 }
 
 }  // namespace lock_screen_apps

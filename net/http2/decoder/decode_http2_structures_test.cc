@@ -20,9 +20,7 @@
 #include "net/http2/tools/http2_random.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using ::testing::AssertionFailure;
 using ::testing::AssertionResult;
-using ::testing::AssertionSuccess;
 
 namespace net {
 namespace test {
@@ -294,7 +292,7 @@ TEST_F(PingFieldsDecoderTest, DecodesLiteral) {
     DecodeLeadingStructure(kData);
     if (!HasFailure()) {
       EXPECT_EQ(Http2StringPiece(kData, 8),
-                ToStringPiece(structure_.opaque_data));
+                ToStringPiece(structure_.opaque_bytes));
     }
   }
   {
@@ -305,7 +303,7 @@ TEST_F(PingFieldsDecoderTest, DecodesLiteral) {
     DecodeLeadingStructure(kData);
     if (!HasFailure()) {
       EXPECT_EQ(Http2StringPiece(kData, 8),
-                ToStringPiece(structure_.opaque_data));
+                ToStringPiece(structure_.opaque_bytes));
     }
   }
   {
@@ -315,7 +313,7 @@ TEST_F(PingFieldsDecoderTest, DecodesLiteral) {
     DecodeLeadingStructure(kData);
     if (!HasFailure()) {
       EXPECT_EQ(Http2StringPiece(kData, 8),
-                ToStringPiece(structure_.opaque_data));
+                ToStringPiece(structure_.opaque_bytes));
     }
   }
 }

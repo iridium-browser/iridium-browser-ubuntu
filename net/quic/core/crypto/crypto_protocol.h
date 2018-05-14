@@ -6,9 +6,9 @@
 #define NET_QUIC_CORE_CRYPTO_CRYPTO_PROTOCOL_H_
 
 #include <cstddef>
-#include <string>
 
 #include "net/quic/core/quic_tag.h"
+#include "net/quic/platform/api/quic_string.h"
 
 // Version and Crypto tags are written to the wire with a big-endian
 // representation of the name of the tag.  For example
@@ -24,7 +24,7 @@
 
 namespace net {
 
-typedef std::string ServerConfigID;
+typedef QuicString ServerConfigID;
 
 // clang-format off
 const QuicTag kCHLO = TAG('C', 'H', 'L', 'O');   // Client hello
@@ -82,22 +82,40 @@ const QuicTag kIFWA = TAG('I', 'F', 'W', 'a');   // Set initial size
 const QuicTag kTBBR = TAG('T', 'B', 'B', 'R');   // Reduced Buffer Bloat TCP
 const QuicTag k1RTT = TAG('1', 'R', 'T', 'T');   // STARTUP in BBR for 1 RTT
 const QuicTag k2RTT = TAG('2', 'R', 'T', 'T');   // STARTUP in BBR for 2 RTTs
+const QuicTag kLRTT = TAG('L', 'R', 'T', 'T');   // Exit STARTUP in BBR on loss
+const QuicTag kBBS1 = TAG('B', 'B', 'S', '1');   // Rate-based recovery in
+                                                 // BBR STARTUP
+const QuicTag kBBS2 = TAG('B', 'B', 'S', '2');   // More aggressive packet
+                                                 // conservation in BBR STARTUP
+const QuicTag kBBS3 = TAG('B', 'B', 'S', '3');   // Slowstart packet
+                                                 // conservation in BBR STARTUP
 const QuicTag kBBRR = TAG('B', 'B', 'R', 'R');   // Rate-based recovery in BBR
+const QuicTag kBBR1 = TAG('B', 'B', 'R', '1');   // Ack aggregation v1
+const QuicTag kBBR2 = TAG('B', 'B', 'R', '2');   // Ack aggregation v2
+const QuicTag kBBR3 = TAG('B', 'B', 'R', '3');   // Fully drain the queue once
+                                                 // per cycle
+const QuicTag kBBR4 = TAG('B', 'B', 'R', '4');   // 20 RTT ack aggregation
+const QuicTag kBBR5 = TAG('B', 'B', 'R', '5');   // 40 RTT ack aggregation
+const QuicTag kBBR6 = TAG('B', 'B', 'R', '6');   // PROBE_RTT with 0.75 * BDP
+const QuicTag kBBR7 = TAG('B', 'B', 'R', '7');   // Skip PROBE_RTT if rtt has
+                                                 // not changed 12.5%
+const QuicTag kBBR8 = TAG('B', 'B', 'R', '8');   // Disable PROBE_RTT when
+                                                 // recently app-limited
+const QuicTag kBBRS = TAG('B', 'B', 'R', 'S');   // Use 1.5x pacing in startup
+                                                 // after a loss has occurred.
 const QuicTag kRENO = TAG('R', 'E', 'N', 'O');   // Reno Congestion Control
 const QuicTag kTPCC = TAG('P', 'C', 'C', '\0');  // Performance-Oriented
                                                  // Congestion Control
 const QuicTag kBYTE = TAG('B', 'Y', 'T', 'E');   // TCP cubic or reno in bytes
-const QuicTag kRATE = TAG('R', 'A', 'T', 'E');   // TCP cubic rate based sending
 const QuicTag kIW03 = TAG('I', 'W', '0', '3');   // Force ICWND to 3
 const QuicTag kIW10 = TAG('I', 'W', '1', '0');   // Force ICWND to 10
 const QuicTag kIW20 = TAG('I', 'W', '2', '0');   // Force ICWND to 20
 const QuicTag kIW50 = TAG('I', 'W', '5', '0');   // Force ICWND to 50
 const QuicTag k1CON = TAG('1', 'C', 'O', 'N');   // Emulate a single connection
 const QuicTag kNTLP = TAG('N', 'T', 'L', 'P');   // No tail loss probe
+const QuicTag k1TLP = TAG('1', 'T', 'L', 'P');   // 1 tail loss probe
 const QuicTag kNCON = TAG('N', 'C', 'O', 'N');   // N Connection Congestion Ctrl
 const QuicTag kNRTO = TAG('N', 'R', 'T', 'O');   // CWND reduction on loss
-const QuicTag kUNDO = TAG('U', 'N', 'D', 'O');   // Undo any pending retransmits
-                                                 // if they're likely spurious.
 const QuicTag kTIME = TAG('T', 'I', 'M', 'E');   // Time based loss detection
 const QuicTag kATIM = TAG('A', 'T', 'I', 'M');   // Adaptive time loss detection
 const QuicTag kMIN1 = TAG('M', 'I', 'N', '1');   // Min CWND of 1 packet
@@ -105,6 +123,12 @@ const QuicTag kMIN4 = TAG('M', 'I', 'N', '4');   // Min CWND of 4 packets,
                                                  // with a min rate of 1 BDP.
 const QuicTag kTLPR = TAG('T', 'L', 'P', 'R');   // Tail loss probe delay of
                                                  // 0.5RTT.
+const QuicTag kMAD0 = TAG('M', 'A', 'D', '0');   // Ignore ack delay
+const QuicTag kMAD1 = TAG('M', 'A', 'D', '1');   // 25ms initial max ack delay
+const QuicTag kMAD2 = TAG('M', 'A', 'D', '2');   // No min TLP
+const QuicTag kMAD3 = TAG('M', 'A', 'D', '3');   // No min RTO
+const QuicTag kMAD4 = TAG('M', 'A', 'D', '4');   // IETF style TLP
+const QuicTag kMAD5 = TAG('M', 'A', 'D', '5');   // IETF style TLP with 2x mult
 const QuicTag kACKD = TAG('A', 'C', 'K', 'D');   // Ack decimation style acking.
 const QuicTag kAKD2 = TAG('A', 'K', 'D', '2');   // Ack decimation tolerating
                                                  // out of order packets.
@@ -112,6 +136,8 @@ const QuicTag kAKD3 = TAG('A', 'K', 'D', '3');   // Ack decimation style acking
                                                  // with 1/8 RTT acks.
 const QuicTag kAKD4 = TAG('A', 'K', 'D', '4');   // Ack decimation with 1/8 RTT
                                                  // tolerating out of order.
+const QuicTag kAKDU = TAG('A', 'K', 'D', 'U');   // Unlimited number of packets
+                                                 // received before acking
 const QuicTag kSSLR = TAG('S', 'S', 'L', 'R');   // Slow Start Large Reduction.
 const QuicTag kNPRR = TAG('N', 'P', 'R', 'R');   // Pace at unity instead of PRR
 const QuicTag k5RTO = TAG('5', 'R', 'T', 'O');   // Close connection on 5 RTOs
@@ -127,10 +153,6 @@ const QuicTag kLFAK = TAG('L', 'F', 'A', 'K');   // Don't invoke FACK on the
 // MAX_HEADER_LIST_SIZE settings frame should be supported.
 const QuicTag kSMHL = TAG('S', 'M', 'H', 'L');   // Support MAX_HEADER_LIST_SIZE
                                                  // settings frame.
-const QuicTag kCCVX = TAG('C', 'C', 'V', 'X');   // Fix Cubic convex bug.
-const QuicTag kCBQT = TAG('C', 'B', 'Q', 'T');   // Fix CubicBytes quantization.
-const QuicTag kBLMX = TAG('B', 'L', 'M', 'X');   // Fix Cubic BetaLastMax bug.
-const QuicTag kCPAU = TAG('C', 'P', 'A', 'U');   // Allow Cubic per-ack-updates.
 const QuicTag kNSTP = TAG('N', 'S', 'T', 'P');   // No stop waiting frames.
 
 // Optional support of truncated Connection IDs.  If sent by a peer, the value
@@ -153,12 +175,6 @@ const QuicTag kBWS2 = TAG('B', 'W', 'S', '2');  // Server bw resumption v2.
 // Enable path MTU discovery experiment.
 const QuicTag kMTUH = TAG('M', 'T', 'U', 'H');  // High-target MTU discovery.
 const QuicTag kMTUL = TAG('M', 'T', 'U', 'L');  // Low-target MTU discovery.
-
-// Tags for async signing experiments
-const QuicTag kASYN = TAG('A', 'S', 'Y', 'N');  // Perform asynchronous signing
-const QuicTag kSYNC = TAG('S', 'Y', 'N', 'C');  // Perform synchronous signing
-
-const QuicTag kFHL2 = TAG('F', 'H', 'L', '2');   // Force head of line blocking.
 
 // Proof types (i.e. certificate types)
 // NOTE: although it would be silly to do so, specifying both kX509 and kX59R
@@ -216,6 +232,8 @@ const QuicTag kRCID = TAG('R', 'C', 'I', 'D');   // Server-designated
 const QuicTag kCADR = TAG('C', 'A', 'D', 'R');   // Client IP address and port
 const QuicTag kASAD = TAG('A', 'S', 'A', 'D');   // Alternate Server IP address
                                                  // and port.
+const QuicTag kSRST = TAG('S', 'R', 'S', 'T');   // Stateless reset token used
+                                                 // in IETF public reset packet
 
 // CETV tags
 const QuicTag kCIDK = TAG('C', 'I', 'D', 'K');   // ChannelID key

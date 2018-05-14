@@ -30,6 +30,7 @@
 #ifndef Fullscreen_h
 #define Fullscreen_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/Document.h"
@@ -37,7 +38,6 @@
 #include "platform/Supplementable.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/wtf/Deque.h"
-#include "platform/wtf/RefPtr.h"
 #include "platform/wtf/Vector.h"
 
 namespace blink {
@@ -56,8 +56,9 @@ class CORE_EXPORT Fullscreen final
   USING_GARBAGE_COLLECTED_MIXIN(Fullscreen);
 
  public:
+  static const char kSupplementName[];
+
   virtual ~Fullscreen();
-  static const char* SupplementName();
   static Fullscreen& From(Document&);
   static Fullscreen* FromIfExists(Document&);
   static Element* FullscreenElementFrom(Document&);
@@ -106,7 +107,7 @@ class CORE_EXPORT Fullscreen final
   // ContextLifecycleObserver:
   void ContextDestroyed(ExecutionContext*) override;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   static Fullscreen* FromIfExistsSlow(Document&);
@@ -136,7 +137,7 @@ class CORE_EXPORT Fullscreen final
 
   LayoutFullScreen* full_screen_layout_object_;
   LayoutRect saved_placeholder_frame_rect_;
-  RefPtr<ComputedStyle> saved_placeholder_computed_style_;
+  scoped_refptr<ComputedStyle> saved_placeholder_computed_style_;
 };
 
 inline Fullscreen* Fullscreen::FromIfExists(Document& document) {

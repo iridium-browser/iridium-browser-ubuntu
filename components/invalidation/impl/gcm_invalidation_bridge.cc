@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/gcm_driver/gcm_driver.h"
@@ -190,7 +192,7 @@ GCMInvalidationBridge::~GCMInvalidationBridge() {
 std::unique_ptr<syncer::GCMNetworkChannelDelegate>
 GCMInvalidationBridge::CreateDelegate() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return base::MakeUnique<Core>(weak_factory_.GetWeakPtr(),
+  return std::make_unique<Core>(weak_factory_.GetWeakPtr(),
                                 base::ThreadTaskRunnerHandle::Get());
 }
 
@@ -205,7 +207,7 @@ void GCMInvalidationBridge::CoreInitializationDone(
 void GCMInvalidationBridge::RequestToken(
     syncer::GCMNetworkChannelDelegate::RequestTokenCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (access_token_request_ != NULL) {
+  if (access_token_request_ != nullptr) {
     // Report previous request as cancelled.
     GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
     std::string access_token;
@@ -269,7 +271,7 @@ void GCMInvalidationBridge::Register(
     syncer::GCMNetworkChannelDelegate::RegisterCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // No-op if GCMClient is disabled.
-  if (gcm_driver_ == NULL)
+  if (gcm_driver_ == nullptr)
     return;
 
   std::vector<std::string> sender_ids;
@@ -298,23 +300,15 @@ void GCMInvalidationBridge::RegisterFinished(
 void GCMInvalidationBridge::Unregister() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // No-op if GCMClient is disabled.
-  if (gcm_driver_ == NULL)
+  if (gcm_driver_ == nullptr)
     return;
 
-  gcm_driver_->Unregister(
-      kInvalidationsAppId,
-      base::Bind(&GCMInvalidationBridge::UnregisterFinishedNoOp));
-}
-
-// static
-void GCMInvalidationBridge::UnregisterFinishedNoOp(
-    gcm::GCMClient::Result result) {
-  // No-op.
+  gcm_driver_->Unregister(kInvalidationsAppId, base::DoNothing());
 }
 
 void GCMInvalidationBridge::SubscribeForIncomingMessages() {
   // No-op if GCMClient is disabled.
-  if (gcm_driver_ == NULL)
+  if (gcm_driver_ == nullptr)
     return;
 
   DCHECK(!subscribed_for_incoming_messages_);

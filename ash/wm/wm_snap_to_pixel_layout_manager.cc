@@ -12,15 +12,15 @@
 namespace ash {
 namespace wm {
 
-WmSnapToPixelLayoutManager::WmSnapToPixelLayoutManager() {}
+WmSnapToPixelLayoutManager::WmSnapToPixelLayoutManager() = default;
 
-WmSnapToPixelLayoutManager::~WmSnapToPixelLayoutManager() {}
+WmSnapToPixelLayoutManager::~WmSnapToPixelLayoutManager() = default;
 
 // static
 void WmSnapToPixelLayoutManager::InstallOnContainers(aura::Window* window) {
   for (aura::Window* child : window->children()) {
-    if (child->id() < kShellWindowId_Min ||
-        child->id() > kShellWindowId_Max)  // not a container
+    if (child->id() < kShellWindowId_MinContainer ||
+        child->id() > kShellWindowId_MaxContainer)  // not a container
       continue;
     if (child->GetProperty(kSnapChildrenToPixelBoundary)) {
       if (!child->layout_manager())

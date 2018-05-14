@@ -3,8 +3,11 @@
 // found in the LICENSE file.
 
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
 #include "chrome/browser/extensions/chrome_app_icon_delegate.h"
 #include "chrome/browser/extensions/chrome_app_icon_loader.h"
@@ -16,14 +19,15 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "extensions/common/constants.h"
-#include "ui/app_list/app_list_item.h"
 #include "ui/gfx/image/image_unittest_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_test.h"
+#include "chrome/browser/ui/app_list/chrome_app_list_item.h"
 #include "chrome/browser/ui/app_list/extension_app_model_builder.h"
 #include "chrome/browser/ui/app_list/search/extension_app_result.h"
+#include "chrome/browser/ui/app_list/test/fake_app_list_model_updater.h"
 #include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "components/arc/test/fake_app_instance.h"
 #endif  // defined(OS_CHROMEOS)
@@ -71,8 +75,8 @@ class TestAppIcon : public ChromeAppIconDelegate {
   void OnIconUpdated(ChromeAppIcon* icon) override {
     ++icon_update_count_;
     if (icon_update_count_ == icon_update_count_expected_ &&
-        !icon_updated_callback_.is_null()) {
-      base::ResetAndReturn(&icon_updated_callback_).Run();
+        icon_updated_callback_) {
+      std::move(icon_updated_callback_).Run();
     }
   }
 
@@ -225,7 +229,7 @@ TEST_F(ChromeAppIconTest, IconLifeCycle) {
   const gfx::ImageSkia image_before_disable = reference_icon.image_skia();
   // Disable extension. This should update icon and provide grayed image inline.
   // Note update might be sent twice in CrOS.
-  service()->DisableExtension(kTestAppId, Extension::DISABLE_CORRUPTED);
+  service()->DisableExtension(kTestAppId, disable_reason::DISABLE_CORRUPTED);
   const size_t update_count_after_disable = reference_icon.icon_update_count();
   EXPECT_NE(2U, update_count_after_disable);
   EXPECT_FALSE(IsBlankImage(reference_icon.image_skia()));
@@ -263,20 +267,20 @@ class ChromeAppIconWithModelTest : public ChromeAppIconTest {
 
  protected:
   void CreateBuilder() {
-    model_.reset(new app_list::AppListModel);
-    controller_.reset(new test::TestAppListControllerDelegate);
-    builder_.reset(new ExtensionAppModelBuilder(controller_.get()));
-    builder_->InitializeWithProfile(profile(), model_.get());
+    model_updater_ = std::make_unique<FakeAppListModelUpdater>();
+    controller_ = std::make_unique<test::TestAppListControllerDelegate>();
+    builder_ = std::make_unique<ExtensionAppModelBuilder>(controller_.get());
+    builder_->Initialize(nullptr, profile(), model_updater_.get());
   }
 
   void ResetBuilder() {
     builder_.reset();
     controller_.reset();
-    model_.reset();
+    model_updater_.reset();
   }
 
-  app_list::AppListItem* FindAppListItem(const std::string& app_id) {
-    return model_->FindItem(app_id);
+  ChromeAppListItem* FindAppListItem(const std::string& app_id) {
+    return model_updater_->FindItem(app_id);
   }
 
   test::TestAppListControllerDelegate* app_list_controller() {
@@ -284,7 +288,7 @@ class ChromeAppIconWithModelTest : public ChromeAppIconTest {
   }
 
  private:
-  std::unique_ptr<app_list::AppListModel> model_;
+  std::unique_ptr<FakeAppListModelUpdater> model_updater_;
   std::unique_ptr<test::TestAppListControllerDelegate> controller_;
   std::unique_ptr<ExtensionAppModelBuilder> builder_;
 
@@ -297,9 +301,9 @@ TEST_F(ChromeAppIconWithModelTest, IconsTheSame) {
 
   // App list item is already created. Wait until all image representations are
   // updated and take image snapshot.
-  app_list::AppListItem* app_list_item = FindAppListItem(kTestAppId);
+  ChromeAppListItem* app_list_item = FindAppListItem(kTestAppId);
   ASSERT_TRUE(app_list_item);
-  WaitForIconUpdates<app_list::AppListItem>(*app_list_item);
+  WaitForIconUpdates<ChromeAppListItem>(*app_list_item);
   std::unique_ptr<gfx::ImageSkia> app_list_item_image =
       app_list_item->icon().DeepCopy();
 

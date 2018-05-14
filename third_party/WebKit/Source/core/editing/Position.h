@@ -34,7 +34,6 @@
 namespace blink {
 
 class Node;
-enum class TextAffinity;
 class TreeScope;
 
 enum class PositionAnchorType : unsigned {
@@ -58,7 +57,7 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionTemplate {
   static const TreeScope* CommonAncestorTreeScope(
       const PositionTemplate<Strategy>&,
       const PositionTemplate<Strategy>& b);
-  static PositionTemplate<Strategy> EditingPositionOf(Node* anchor_node,
+  static PositionTemplate<Strategy> EditingPositionOf(const Node* anchor_node,
                                                       int offset);
 
   // For creating before/after positions:
@@ -73,6 +72,8 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionTemplate {
   PositionTemplate(const Node* anchor_node, int offset);
 
   PositionTemplate(const PositionTemplate&);
+
+  explicit operator bool() const { return IsNotNull(); }
 
   PositionAnchorType AnchorType() const { return anchor_type_; }
   bool IsAfterAnchor() const {
@@ -152,15 +153,20 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionTemplate {
   Node* AnchorNode() const { return anchor_node_.Get(); }
 
   Document* GetDocument() const {
-    return anchor_node_ ? &anchor_node_->GetDocument() : 0;
+    return anchor_node_ ? &anchor_node_->GetDocument() : nullptr;
   }
-  bool IsConnected() const {
-    return anchor_node_ && anchor_node_->isConnected();
-  }
+
+  // For PositionInFlatTree, it requires an ancestor traversal to compute the
+  // value of IsConnected(), which can be expensive.
+  // TODO(crbug.com/761173): Rename to |ComputeIsConnected()| to indicate the
+  // cost.
+  bool IsConnected() const;
+
+  bool IsValidFor(const Document&) const;
 
   bool IsNull() const { return !anchor_node_; }
   bool IsNotNull() const { return anchor_node_; }
-  bool IsOrphan() const { return anchor_node_ && !anchor_node_->isConnected(); }
+  bool IsOrphan() const { return anchor_node_ && !IsConnected(); }
 
   // Note: Comparison of positions require both parameters are non-null. You
   // should check null-position before comparing them.
@@ -192,9 +198,9 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionTemplate {
       const Node& anchor_node);
   static PositionTemplate<Strategy> LastPositionInNode(const Node& anchor_node);
   static PositionTemplate<Strategy> FirstPositionInOrBeforeNode(
-      Node* anchor_node);
+      const Node& anchor_node);
   static PositionTemplate<Strategy> LastPositionInOrAfterNode(
-      Node* anchor_node);
+      const Node& anchor_node);
 
   String ToAnchorTypeAndOffsetString() const;
 #ifndef NDEBUG
@@ -202,7 +208,7 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionTemplate {
   void ShowTreeForThisInFlatTree() const;
 #endif
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
  private:
   bool IsAfterAnchorOrAfterChildren() const {

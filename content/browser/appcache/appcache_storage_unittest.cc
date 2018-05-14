@@ -13,10 +13,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
+namespace appcache_storage_unittest {
 
-namespace {
-const storage::StorageType kTemp = storage::kStorageTypeTemporary;
-}
+const blink::mojom::StorageType kTemp = blink::mojom::StorageType::kTemporary;
 
 class AppCacheStorageTest : public testing::Test {
  public:
@@ -98,7 +97,7 @@ TEST_F(AppCacheStorageTest, DelegateReferences) {
             service.storage()->GetDelegateReference(&delegate)->delegate);
   EXPECT_EQ(service.storage()->GetDelegateReference(&delegate),
             service.storage()->GetOrCreateDelegateReference(&delegate));
-  delegate_reference1 = NULL;
+  delegate_reference1 = nullptr;
   EXPECT_FALSE(service.storage()->GetDelegateReference(&delegate));
 
   delegate_reference1 =
@@ -123,7 +122,7 @@ TEST_F(AppCacheStorageTest, UsageMap) {
 
   MockAppCacheService service;
   scoped_refptr<MockQuotaManagerProxy> mock_proxy(
-      new MockQuotaManagerProxy(NULL, NULL));
+      new MockQuotaManagerProxy(nullptr, nullptr));
   service.set_quota_manager_proxy(mock_proxy.get());
 
   service.storage()->UpdateUsageMapAndNotify(kOrigin, 0);
@@ -132,19 +131,19 @@ TEST_F(AppCacheStorageTest, UsageMap) {
   service.storage()->UpdateUsageMapAndNotify(kOrigin, 10);
   EXPECT_EQ(1, mock_proxy->notify_storage_modified_count());
   EXPECT_EQ(10, mock_proxy->last_notified_delta());
-  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin());
+  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin().GetURL());
   EXPECT_EQ(kTemp, mock_proxy->last_notified_type());
 
   service.storage()->UpdateUsageMapAndNotify(kOrigin, 100);
   EXPECT_EQ(2, mock_proxy->notify_storage_modified_count());
   EXPECT_EQ(90, mock_proxy->last_notified_delta());
-  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin());
+  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin().GetURL());
   EXPECT_EQ(kTemp, mock_proxy->last_notified_type());
 
   service.storage()->UpdateUsageMapAndNotify(kOrigin, 0);
   EXPECT_EQ(3, mock_proxy->notify_storage_modified_count());
   EXPECT_EQ(-100, mock_proxy->last_notified_delta());
-  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin());
+  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin().GetURL());
   EXPECT_EQ(kTemp, mock_proxy->last_notified_type());
 
   service.storage()->NotifyStorageAccessed(kOrigin2);
@@ -153,7 +152,7 @@ TEST_F(AppCacheStorageTest, UsageMap) {
   service.storage()->usage_map_[kOrigin2] = 1;
   service.storage()->NotifyStorageAccessed(kOrigin2);
   EXPECT_EQ(1, mock_proxy->notify_storage_accessed_count());
-  EXPECT_EQ(kOrigin2, mock_proxy->last_notified_origin());
+  EXPECT_EQ(kOrigin2, mock_proxy->last_notified_origin().GetURL());
   EXPECT_EQ(kTemp, mock_proxy->last_notified_type());
 
   service.storage()->usage_map_.clear();
@@ -161,9 +160,10 @@ TEST_F(AppCacheStorageTest, UsageMap) {
   service.storage()->ClearUsageMapAndNotify();
   EXPECT_EQ(4, mock_proxy->notify_storage_modified_count());
   EXPECT_EQ(-5000, mock_proxy->last_notified_delta());
-  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin());
+  EXPECT_EQ(kOrigin, mock_proxy->last_notified_origin().GetURL());
   EXPECT_EQ(kTemp, mock_proxy->last_notified_type());
   EXPECT_TRUE(service.storage()->usage_map_.empty());
 }
 
+}  // namespace appcache_storage_unittest
 }  // namespace content

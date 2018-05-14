@@ -10,8 +10,10 @@
 @protocol SessionReconnectViewDelegate<NSObject>
 
 // Notifies the delegate that the user tapped the reconnect button.
-@optional
 - (void)didTapReconnect;
+
+// Notifies the delegate that the user tapped the report this button.
+- (void)didTapReport;
 
 @end
 
@@ -21,6 +23,9 @@
 
 // This delegate will handle interactions on the view.
 @property(weak, nonatomic) id<SessionReconnectViewDelegate> delegate;
+
+// This is the optional error text to be displayed above the reconnect button.
+@property(nonatomic, copy) NSString* errorText;
 
 @end
 

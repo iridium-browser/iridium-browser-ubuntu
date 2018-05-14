@@ -48,7 +48,7 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
     const PasswordForm& form,
     int max_length,
     password_manager::PasswordManager* password_manager,
-    password_manager::PasswordManagerDriver* driver,
+    const base::WeakPtr<password_manager::PasswordManagerDriver>& driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view) {
@@ -72,7 +72,7 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
     const gfx::RectF& bounds,
     const PasswordForm& form,
     int max_length,
-    password_manager::PasswordManagerDriver* driver,
+    const base::WeakPtr<password_manager::PasswordManagerDriver>& driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view)
@@ -201,8 +201,10 @@ void PasswordGenerationPopupControllerImpl::HideAndDestroy() {
 }
 
 void PasswordGenerationPopupControllerImpl::Hide() {
-  static_cast<ContentAutofillDriver*>(driver_->GetAutofillDriver())
-      ->RemoveKeyPressHandler();
+  if (driver_) {
+    static_cast<ContentAutofillDriver*>(driver_->GetAutofillDriver())
+        ->RemoveKeyPressHandler();
+  }
 
   if (view_)
     view_->Hide();
@@ -223,12 +225,12 @@ void PasswordGenerationPopupControllerImpl::OnSavedPasswordsLinkClicked() {
 #if defined(OS_ANDROID)
   chrome::android::PreferencesLauncher::ShowPasswordSettings();
 #else
-  chrome::NavigateParams params(
+  NavigateParams params(
       chrome::FindBrowserWithWebContents(web_contents_),
       GURL(password_manager::kPasswordManagerAccountDashboardURL),
       ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
-  chrome::Navigate(&params);
+  Navigate(&params);
 #endif
 }
 
@@ -272,6 +274,9 @@ PasswordGenerationPopupControllerImpl::GetSuggestions() {
 }
 
 #if !defined(OS_ANDROID)
+void PasswordGenerationPopupControllerImpl::SetTypesetter(
+    gfx::Typesetter typesetter) {}
+
 int PasswordGenerationPopupControllerImpl::GetElidedValueWidthForRow(int row) {
   return 0;
 }

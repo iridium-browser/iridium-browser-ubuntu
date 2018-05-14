@@ -249,7 +249,7 @@ struct AllTheThings {
   SampleInterface&? nullable_sample_interface_request;
   associated SampleInterface associated_interface_client;
   associated SampleInterface& associated_interface_request;
-  assocaited SampleInterface&? maybe_another_associated_request;
+  associated SampleInterface&? maybe_another_associated_request;
 };
 ```
 
@@ -394,6 +394,14 @@ interesting attributes supported today.
 :   The `MinVersion` attribute is used to specify the version at which a given
     field, enum value, interface method, or method parameter was introduced.
     See [Versioning](#Versioning) for more details.
+
+**`[EnableIf=value]`**
+:   The `EnableIf` attribute is used to conditionally enable definitions when
+    the mojom is parsed. If the `mojom` target in the GN file does not include
+    the matching `value` in the list of `enabled_features`, the definition
+    will be disabled. This is useful for mojom definitions that only make
+    sense on one platform. Note that the `EnableIf` attribute can only be set
+    once per definition.
 
 ## Generated Code For Target Languages
 

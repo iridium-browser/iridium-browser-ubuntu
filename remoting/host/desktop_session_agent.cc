@@ -62,7 +62,7 @@ DesktopSessionClipboardStub::DesktopSessionClipboardStub(
     scoped_refptr<DesktopSessionAgent> desktop_session_agent)
     : desktop_session_agent_(desktop_session_agent) {}
 
-DesktopSessionClipboardStub::~DesktopSessionClipboardStub() {}
+DesktopSessionClipboardStub::~DesktopSessionClipboardStub() = default;
 
 void DesktopSessionClipboardStub::InjectClipboardEvent(
     const protocol::ClipboardEvent& event) {
@@ -122,7 +122,7 @@ class SharedMemoryFactoryImpl : public webrtc::SharedMemoryFactory {
     base::Closure release_buffer_callback = base::Bind(
         send_message_callback_,
         base::Passed(
-            base::MakeUnique<ChromotingDesktopNetworkMsg_ReleaseSharedBuffer>(
+            std::make_unique<ChromotingDesktopNetworkMsg_ReleaseSharedBuffer>(
                 next_shared_buffer_id_)));
     std::unique_ptr<SharedMemoryImpl> buffer = SharedMemoryImpl::Create(
         size, next_shared_buffer_id_, release_buffer_callback);
@@ -138,7 +138,7 @@ class SharedMemoryFactoryImpl : public webrtc::SharedMemoryFactory {
       next_shared_buffer_id_ += 2;
 
       send_message_callback_.Run(
-          base::MakeUnique<ChromotingDesktopNetworkMsg_CreateSharedBuffer>(
+          std::make_unique<ChromotingDesktopNetworkMsg_CreateSharedBuffer>(
               buffer->id(), buffer->shared_memory()->handle(), buffer->size()));
     }
 
@@ -154,7 +154,7 @@ class SharedMemoryFactoryImpl : public webrtc::SharedMemoryFactory {
 
 }  // namespace
 
-DesktopSessionAgent::Delegate::~Delegate() {}
+DesktopSessionAgent::Delegate::~Delegate() = default;
 
 DesktopSessionAgent::DesktopSessionAgent(
     scoped_refptr<AutoThreadTaskRunner> audio_capture_task_runner,
@@ -240,7 +240,7 @@ const std::string& DesktopSessionAgent::client_jid() const {
 
 void DesktopSessionAgent::DisconnectSession(protocol::ErrorCode error) {
   SendToNetwork(
-      base::MakeUnique<ChromotingDesktopNetworkMsg_DisconnectSession>(error));
+      std::make_unique<ChromotingDesktopNetworkMsg_DisconnectSession>(error));
 }
 
 void DesktopSessionAgent::OnLocalMouseMoved(
@@ -260,7 +260,7 @@ void DesktopSessionAgent::SetDisableInputs(bool disable_inputs) {
 void DesktopSessionAgent::OnProcessStats(
     const protocol::AggregatedProcessResourceUsage& usage) {
   SendToNetwork(
-      base::MakeUnique<ChromotingAnyToNetworkMsg_ReportProcessStats>(usage));
+      std::make_unique<ChromotingAnyToNetworkMsg_ReportProcessStats>(usage));
 }
 
 void DesktopSessionAgent::OnStartSessionAgent(
@@ -343,7 +343,7 @@ void DesktopSessionAgent::OnCaptureResult(
 
   last_frame_ = std::move(frame);
 
-  SendToNetwork(base::MakeUnique<ChromotingDesktopNetworkMsg_CaptureResult>(
+  SendToNetwork(std::make_unique<ChromotingDesktopNetworkMsg_CaptureResult>(
       result, serialized_frame));
 }
 
@@ -353,7 +353,7 @@ void DesktopSessionAgent::OnMouseCursor(webrtc::MouseCursor* cursor) {
   std::unique_ptr<webrtc::MouseCursor> owned_cursor(cursor);
 
   SendToNetwork(
-      base::MakeUnique<ChromotingDesktopNetworkMsg_MouseCursor>(*owned_cursor));
+      std::make_unique<ChromotingDesktopNetworkMsg_MouseCursor>(*owned_cursor));
 }
 
 void DesktopSessionAgent::OnMouseCursorPosition(
@@ -374,7 +374,7 @@ void DesktopSessionAgent::InjectClipboardEvent(
   }
 
   SendToNetwork(
-      base::MakeUnique<ChromotingDesktopNetworkMsg_InjectClipboardEvent>(
+      std::make_unique<ChromotingDesktopNetworkMsg_InjectClipboardEvent>(
           serialized_event));
 }
 
@@ -388,7 +388,7 @@ void DesktopSessionAgent::ProcessAudioPacket(
     return;
   }
 
-  SendToNetwork(base::MakeUnique<ChromotingDesktopNetworkMsg_AudioPacket>(
+  SendToNetwork(std::make_unique<ChromotingDesktopNetworkMsg_AudioPacket>(
       serialized_packet));
 }
 
@@ -402,7 +402,8 @@ mojo::ScopedMessagePipeHandle DesktopSessionAgent::Start(
 
   mojo::MessagePipe pipe;
   network_channel_ = IPC::ChannelProxy::Create(
-      pipe.handle0.release(), IPC::Channel::MODE_SERVER, this, io_task_runner_);
+      pipe.handle0.release(), IPC::Channel::MODE_SERVER, this, io_task_runner_,
+      base::ThreadTaskRunnerHandle::Get());
   return std::move(pipe.handle1);
 }
 

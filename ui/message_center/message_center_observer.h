@@ -14,6 +14,8 @@ namespace message_center {
 class NotificationBlocker;
 
 // An observer class for the change of notifications in the MessageCenter.
+// WARNING: It is not safe to modify the message center from within these
+// callbacks.
 class MESSAGE_CENTER_EXPORT MessageCenterObserver {
  public:
   virtual ~MessageCenterObserver() {}
@@ -40,6 +42,13 @@ class MESSAGE_CENTER_EXPORT MessageCenterObserver {
   virtual void OnNotificationButtonClicked(const std::string& notification_id,
                                            int button_index) {}
 
+  // Called when a click event happens on a button with an input indexed by
+  // |button_index| of the notification associated with |notification_id|.
+  virtual void OnNotificationButtonClickedWithReply(
+      const std::string& notification_id,
+      int button_index,
+      const base::string16& reply) {}
+
   // Called when notification settings button is clicked. The |handled| argument
   // indicates whether the notification delegate already handled the operation.
   virtual void OnNotificationSettingsClicked(bool handled) {}
@@ -56,9 +65,6 @@ class MESSAGE_CENTER_EXPORT MessageCenterObserver {
   // Called whenever the quiet mode changes as a result of user action or when
   // quiet mode expires.
   virtual void OnQuietModeChanged(bool in_quiet_mode) {}
-
-  // Called when the user locks (or unlocks) the screen.
-  virtual void OnLockedStateChanged(bool locked) {}
 
   // Called when the blocking state of |blocker| is changed.
   virtual void OnBlockingStateChanged(NotificationBlocker* blocker) {}

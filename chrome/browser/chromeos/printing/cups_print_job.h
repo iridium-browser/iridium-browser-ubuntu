@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "chromeos/printing/printer_configuration.h"
 
 namespace chromeos {
@@ -31,6 +32,7 @@ class CupsPrintJob {
     PAPER_JAM,
     OUT_OF_INK,
     PRINTER_UNREACHABLE,
+    FILTER_FAILED,
     UNKNOWN_ERROR,
   };
 
@@ -45,6 +47,9 @@ class CupsPrintJob {
 
   // Returns a unique id for the print job.
   std::string GetUniqueId() const;
+
+  // Returns weak pointer to |this| CupsPrintJob
+  base::WeakPtr<CupsPrintJob> GetWeakPtr();
 
   // Getters.
   const Printer& printer() const { return printer_; }
@@ -67,6 +72,9 @@ class CupsPrintJob {
   // Returns true if |state_| represents a terminal state.
   bool IsJobFinished();
 
+  // Returns true if cups pipeline failed.
+  bool PipelineDead();
+
  private:
   Printer printer_;
   int job_id_;
@@ -80,6 +88,8 @@ class CupsPrintJob {
 
   State state_ = State::STATE_NONE;
   ErrorCode error_code_ = ErrorCode::NO_ERROR;
+
+  base::WeakPtrFactory<CupsPrintJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CupsPrintJob);
 };

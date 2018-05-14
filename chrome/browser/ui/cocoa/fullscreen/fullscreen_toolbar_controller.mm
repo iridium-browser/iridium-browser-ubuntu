@@ -5,6 +5,8 @@
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_menubar_tracker.h"
@@ -12,6 +14,7 @@
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_mouse_tracker.h"
 #import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_visibility_lock_controller.h"
 #import "chrome/browser/ui/cocoa/fullscreen/immersive_fullscreen_controller.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 
@@ -21,7 +24,17 @@ namespace {
 const CGFloat kHideFraction = 0.0;
 const CGFloat kShowFraction = 1.0;
 
-}  // end namespace
+void RecordToolbarStyle(FullscreenToolbarStyle style) {
+  UMA_HISTOGRAM_ENUMERATION("OSX.Fullscreen.ToolbarStyle", style,
+                            kFullscreenToolbarStyleCount);
+}
+
+}  // namespace
+
+@interface FullscreenToolbarController ()
+// Updates |toolbarStyle_|.
+- (void)updateToolbarStyle:(BOOL)isExitingTabFullscreen;
+@end
 
 @implementation FullscreenToolbarController
 
@@ -47,7 +60,8 @@ const CGFloat kShowFraction = 1.0;
   DCHECK(!inFullscreenMode_);
   inFullscreenMode_ = YES;
 
-  [self updateToolbarStyleExitingTabFullscreen:NO];
+  [self updateToolbarStyle:NO];
+  RecordToolbarStyle(toolbarStyle_);
 
   if ([browserController_ isInImmersiveFullscreen]) {
     immersiveFullscreenController_.reset([[ImmersiveFullscreenController alloc]
@@ -57,8 +71,7 @@ const CGFloat kShowFraction = 1.0;
     menubarTracker_.reset([[FullscreenMenubarTracker alloc]
         initWithFullscreenToolbarController:self]);
     mouseTracker_.reset([[FullscreenToolbarMouseTracker alloc]
-        initWithFullscreenToolbarController:self
-                        animationController:animationController_.get()]);
+        initWithFullscreenToolbarController:self]);
   }
 }
 
@@ -84,10 +97,8 @@ const CGFloat kShowFraction = 1.0;
 
 - (void)revealToolbarForWebContents:(content::WebContents*)contents
                        inForeground:(BOOL)inForeground {
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableFullscreenToolbarReveal)) {
+  if (!base::FeatureList::IsEnabled(features::kFullscreenToolbarReveal))
     return;
-  }
 
   animationController_->AnimateToolbarForTabstripChanges(contents,
                                                          inForeground);
@@ -111,6 +122,10 @@ const CGFloat kShowFraction = 1.0;
 
       return [menubarTracker_ menubarFraction];
   }
+}
+
+- (FullscreenToolbarStyle)toolbarStyle {
+  return toolbarStyle_;
 }
 
 - (FullscreenToolbarLayout)computeLayout {
@@ -142,7 +157,6 @@ const CGFloat kShowFraction = 1.0;
 
   FullscreenMenubarState menubarState = [menubarTracker_ state];
   return menubarState == FullscreenMenubarState::SHOWN ||
-         [mouseTracker_ mouseInsideTrackingArea] ||
          [visibilityLockController_ isToolbarVisibilityLocked];
 }
 
@@ -151,9 +165,7 @@ const CGFloat kShowFraction = 1.0;
     [mouseTracker_ updateToolbarFrame:frame];
 }
 
-- (void)updateToolbarStyleExitingTabFullscreen:(BOOL)isExitingTabFullscreen {
-  FullscreenToolbarStyle oldStyle = toolbarStyle_;
-
+- (void)updateToolbarStyle:(BOOL)isExitingTabFullscreen {
   if ([browserController_ isFullscreenForTabContentOrExtension] &&
       !isExitingTabFullscreen) {
     toolbarStyle_ = FullscreenToolbarStyle::TOOLBAR_NONE;
@@ -163,12 +175,19 @@ const CGFloat kShowFraction = 1.0;
                         ? FullscreenToolbarStyle::TOOLBAR_PRESENT
                         : FullscreenToolbarStyle::TOOLBAR_HIDDEN;
   }
-
-  if (oldStyle != toolbarStyle_)
-    [self updateToolbarLayout];
 }
 
-- (void)updateToolbarLayout {
+- (void)layoutToolbarStyleIsExitingTabFullscreen:(BOOL)isExitingTabFullscreen {
+  FullscreenToolbarStyle oldStyle = toolbarStyle_;
+  [self updateToolbarStyle:isExitingTabFullscreen];
+
+  if (oldStyle != toolbarStyle_) {
+    [self layoutToolbar];
+    RecordToolbarStyle(toolbarStyle_);
+  }
+}
+
+- (void)layoutToolbar {
   [browserController_ layoutSubviews];
   animationController_->ToolbarDidUpdate();
   [mouseTracker_ updateTrackingArea];

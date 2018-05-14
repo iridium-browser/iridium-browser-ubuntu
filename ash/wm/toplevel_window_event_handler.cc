@@ -25,7 +25,7 @@ namespace ash {
 ToplevelWindowEventHandler::ToplevelWindowEventHandler()
     : weak_factory_(this) {}
 
-ToplevelWindowEventHandler::~ToplevelWindowEventHandler() {}
+ToplevelWindowEventHandler::~ToplevelWindowEventHandler() = default;
 
 void ToplevelWindowEventHandler::OnKeyEvent(ui::KeyEvent* event) {
   wm_toplevel_window_event_handler_.OnKeyEvent(event);
@@ -39,6 +39,25 @@ void ToplevelWindowEventHandler::OnMouseEvent(ui::MouseEvent* event) {
 void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   aura::Window* target = static_cast<aura::Window*>(event->target());
   wm_toplevel_window_event_handler_.OnGestureEvent(event, target);
+}
+
+bool ToplevelWindowEventHandler::AttemptToStartDrag(
+    aura::Window* window,
+    const gfx::Point& point_in_parent,
+    int window_component,
+    const wm::WmToplevelWindowEventHandler::EndClosure& end_closure) {
+  aura::Window* gesture_target =
+      wm_toplevel_window_event_handler_.gesture_target();
+  ::wm::WindowMoveSource source = gesture_target
+                                      ? ::wm::WINDOW_MOVE_SOURCE_TOUCH
+                                      : ::wm::WINDOW_MOVE_SOURCE_MOUSE;
+  if (gesture_target) {
+    ui::GestureRecognizer::Get()->TransferEventsTo(
+        gesture_target, window,
+        ui::GestureRecognizer::ShouldCancelTouches::DontCancel);
+  }
+  return wm_toplevel_window_event_handler_.AttemptToStartDrag(
+      window, point_in_parent, window_component, source, end_closure);
 }
 
 ::wm::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
@@ -89,8 +108,8 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
   // Disable window position auto management while dragging and restore it
   // aftrewards.
   wm::WindowState* window_state = wm::GetWindowState(source);
-  const bool window_position_managed = window_state->window_position_managed();
-  window_state->set_window_position_managed(false);
+  const bool window_position_managed = window_state->GetWindowPositionManaged();
+  window_state->SetWindowPositionManaged(false);
   aura::WindowTracker tracker({source});
 
   run_loop.Run();
@@ -100,7 +119,7 @@ void ToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event) {
 
   // Make sure the window hasn't been deleted.
   if (tracker.Contains(source))
-    window_state->set_window_position_managed(window_position_managed);
+    window_state->SetWindowPositionManaged(window_position_managed);
 
   in_move_loop_ = false;
   return result == wm::WmToplevelWindowEventHandler::DragResult::SUCCESS

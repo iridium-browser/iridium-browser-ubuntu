@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <set>
 #include <vector>
 
 #include "base/macros.h"
@@ -269,6 +270,23 @@ bool IsWebElementEmpty(const blink::WebElement& element);
 void PreviewSuggestion(const base::string16& suggestion,
                        const base::string16& user_input,
                        blink::WebFormControlElement* input_element);
+
+// Returns the aggregated values of the descendants of |element| that are
+// non-empty text nodes.  This is a faster alternative to |innerText()| for
+// performance critical operations.  It does a full depth-first search so can be
+// used when the structure is not directly known.  However, unlike with
+// |innerText()|, the search depth and breadth are limited to a fixed threshold.
+// Whitespace is trimmed from text accumulated at descendant nodes.
+base::string16 FindChildText(const blink::WebNode& node);
+
+// Exposed for testing purpose
+base::string16 FindChildTextWithIgnoreListForTesting(
+    const blink::WebNode& node,
+    const std::set<blink::WebNode>& divs_to_skip);
+bool InferLabelForElementForTesting(const blink::WebFormControlElement& element,
+                                    const std::vector<base::char16>& stop_words,
+                                    base::string16* label,
+                                    FormFieldData::LabelSource* label_source);
 
 }  // namespace form_util
 }  // namespace autofill

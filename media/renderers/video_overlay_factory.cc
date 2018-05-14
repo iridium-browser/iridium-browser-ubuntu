@@ -10,7 +10,7 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "media/base/video_frame.h"
-#include "media/renderers/gpu_video_accelerator_factories.h"
+#include "media/video/gpu_video_accelerator_factories.h"
 
 namespace media {
 
@@ -38,12 +38,9 @@ class VideoOverlayFactory::Texture {
         gl->BindTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id_);
 
         gl->GenMailboxCHROMIUM(mailbox_.name);
-        gl->ProduceTextureDirectCHROMIUM(texture_id_, GL_TEXTURE_2D,
-                                         mailbox_.name);
+        gl->ProduceTextureDirectCHROMIUM(texture_id_, mailbox_.name);
 
-        const GLuint64 fence_sync = gl->InsertFenceSyncCHROMIUM();
-        gl->ShallowFlushCHROMIUM();
-        gl->GenSyncTokenCHROMIUM(fence_sync, sync_token_.GetData());
+        gl->GenSyncTokenCHROMIUM(sync_token_.GetData());
       }
     }
   }
@@ -81,13 +78,13 @@ VideoOverlayFactory::VideoOverlayFactory(
     GpuVideoAcceleratorFactories* gpu_factories)
     : gpu_factories_(gpu_factories) {}
 
-VideoOverlayFactory::~VideoOverlayFactory() {}
+VideoOverlayFactory::~VideoOverlayFactory() = default;
 
 scoped_refptr<VideoFrame> VideoOverlayFactory::CreateFrame(
     const gfx::Size& size) {
   // Frame size empty => video has one dimension = 0.
-  // Dimension 0 case triggers a DCHECK later on in TextureMailbox if we push
-  // through the overlay path.
+  // Dimension 0 case triggers a DCHECK later on if we push through the overlay
+  // path.
   Texture* texture = size.IsEmpty() ? nullptr : GetTexture();
   if (!texture) {
     DVLOG(1) << "Create black frame " << size.width() << "x" << size.height();

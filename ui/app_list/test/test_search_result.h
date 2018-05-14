@@ -5,8 +5,11 @@
 #ifndef UI_APP_LIST_TEST_TEST_SEARCH_RESULT_H_
 #define UI_APP_LIST_TEST_TEST_SEARCH_RESULT_H_
 
+#include <memory>
+#include <string>
+
+#include "ash/app_list/model/search/search_result.h"
 #include "base/macros.h"
-#include "ui/app_list/search_result.h"
 
 namespace app_list {
 
@@ -15,6 +18,8 @@ class TestSearchResult : public SearchResult {
  public:
   TestSearchResult();
   ~TestSearchResult() override;
+
+  void set_result_id(const std::string& id);
 
   // SearchResult:
   std::unique_ptr<SearchResult> Duplicate() const override;

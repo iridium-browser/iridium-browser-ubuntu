@@ -5,6 +5,8 @@
 #ifndef RTCRtpSender_h
 #define RTCRtpSender_h
 
+#include "bindings/core/v8/ScriptPromise.h"
+#include "modules/mediastream/MediaStream.h"
 #include "platform/bindings/ScriptWrappable.h"
 #include "platform/heap/GarbageCollected.h"
 #include "platform/heap/Member.h"
@@ -15,27 +17,42 @@
 namespace blink {
 
 class MediaStreamTrack;
+class RTCDTMFSender;
+class RTCPeerConnection;
 
 // https://w3c.github.io/webrtc-pc/#rtcrtpsender-interface
-class RTCRtpSender final : public GarbageCollectedFinalized<RTCRtpSender>,
-                           public ScriptWrappable {
+class RTCRtpSender final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  RTCRtpSender(std::unique_ptr<WebRTCRtpSender>, MediaStreamTrack*);
+  // TODO(hbos): Get rid of sender's reference to RTCPeerConnection?
+  // https://github.com/w3c/webrtc-pc/issues/1712
+  RTCRtpSender(RTCPeerConnection*,
+               std::unique_ptr<WebRTCRtpSender>,
+               MediaStreamTrack*,
+               MediaStreamVector streams);
 
   MediaStreamTrack* track();
+  ScriptPromise replaceTrack(ScriptState*, MediaStreamTrack*);
+  RTCDTMFSender* dtmf();
 
-  WebRTCRtpSender* web_rtp_sender();
+  WebRTCRtpSender* web_sender();
   // Sets the track. This must be called when the |WebRTCRtpSender| has its
   // track updated, and the |track| must match the |WebRTCRtpSender::Track|.
   void SetTrack(MediaStreamTrack*);
+  MediaStreamVector streams() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
+  Member<RTCPeerConnection> pc_;
   std::unique_ptr<WebRTCRtpSender> sender_;
   Member<MediaStreamTrack> track_;
+  // The spec says that "kind" should be looked up in transceiver, but
+  // keeping it in sender at least until transceiver is implemented.
+  String kind_;
+  Member<RTCDTMFSender> dtmf_;
+  MediaStreamVector streams_;
 };
 
 }  // namespace blink

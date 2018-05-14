@@ -73,10 +73,10 @@ class MediaStreamObserver
   // webrtc::ObserverInterface implementation.
   void OnChanged() override {
     DCHECK(signaling_thread_.CalledOnValidThread());
-    main_thread_->PostTask(FROM_HERE,
-        base::Bind(&MediaStreamObserver::OnChangedOnMainThread, this,
-                   GetTrackIds(stream_->GetAudioTracks()),
-                   GetTrackIds(stream_->GetVideoTracks())));
+    main_thread_->PostTask(
+        FROM_HERE, base::BindOnce(&MediaStreamObserver::OnChangedOnMainThread,
+                                  this, GetTrackIds(stream_->GetAudioTracks()),
+                                  GetTrackIds(stream_->GetVideoTracks())));
   }
 
   void OnChangedOnMainThread(const IdSet& audio_track_ids,
@@ -279,7 +279,7 @@ void MediaStreamTrackMetrics::AddStream(StreamType type,
                                         MediaStreamInterface* stream) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   observers_.push_back(
-      base::MakeUnique<MediaStreamTrackMetricsObserver>(type, stream, this));
+      std::make_unique<MediaStreamTrackMetricsObserver>(type, stream, this));
   SendLifeTimeMessageDependingOnIceState(observers_.back().get());
 }
 

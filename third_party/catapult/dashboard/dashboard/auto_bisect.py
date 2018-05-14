@@ -7,12 +7,40 @@
 import logging
 
 from dashboard import can_bisect
+from dashboard import pinpoint_request
 from dashboard import start_try_job
 from dashboard.common import request_handler
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
 from dashboard.models import try_job
+from dashboard.services import pinpoint_service
+
+_PINPOINT_BOTS = [
+    'chromium-rel-mac-retina',
+    'chromium-rel-mac11',
+    'chromium-rel-mac11-air',
+    'chromium-rel-mac11-pro',
+    'chromium-rel-mac12',
+    'chromium-rel-mac12-mini-8gb',
+    'linux-release',
+    'chromium-rel-win7-dual',
+    'chromium-rel-win8-dual',
+    'chromium-rel-win7-x64-dual',
+    'chromium-rel-win10',
+    'chromium-rel-win7-gpu-ati',
+    'chromium-rel-win7-gpu-intel',
+    'chromium-rel-win7-gpu-nvidia',
+    'win-high-dpi',
+    'win-zenbook',
+    'android-nexus5X',
+    'android-nexus5',
+    'android-nexus6',
+    'android-nexus7v2',
+    'android-one',
+    'android-webview-nexus5X',
+    'android-webview-nexus6',
+]
 
 
 class NotBisectableError(Exception):
@@ -32,33 +60,13 @@ def StartNewBisectForBug(bug_id):
     of the reason why a job wasn't started.
   """
   try:
-    bisect_job = _MakeBisectTryJob(bug_id)
+    return _StartBisectForBug(bug_id)
   except NotBisectableError as e:
     logging.info('New bisect errored out with message: ' + e.message)
     return {'error': e.message}
-  bisect_job_key = bisect_job.put()
-
-  try:
-    bisect_result = start_try_job.PerformBisect(bisect_job)
-  except request_handler.InvalidInputError as e:
-    bisect_result = {'error': e.message}
-  if 'error' in bisect_result:
-    bisect_job_key.delete()
-  return bisect_result
 
 
-def _MakeBisectTryJob(bug_id):
-  """Tries to automatically select parameters for a bisect job.
-
-  Args:
-    bug_id: A bug ID which some alerts are associated with.
-
-  Returns:
-    A TryJob entity, which has not yet been put in the datastore.
-
-  Raises:
-    NotBisectableError: A valid bisect config could not be created.
-  """
+def _StartBisectForBug(bug_id):
   anomalies = anomaly.Anomaly.query(anomaly.Anomaly.bug_id == bug_id).fetch()
   if not anomalies:
     raise NotBisectableError('No Anomaly alerts found for this bug.')
@@ -70,8 +78,78 @@ def _MakeBisectTryJob(bug_id):
   if not test or not can_bisect.IsValidTestForBisect(test.test_path):
     raise NotBisectableError('Could not select a test.')
 
-  good_revision = _GetRevisionForBisect(test_anomaly.start_revision - 1, test)
-  bad_revision = _GetRevisionForBisect(test_anomaly.end_revision, test)
+  if test.bot_name in _PINPOINT_BOTS:
+    return _StartPinpointBisect(bug_id, test_anomaly, test)
+
+  return _StartRecipeBisect(bug_id, test_anomaly, test)
+
+
+def _StartPinpointBisect(bug_id, test_anomaly, test):
+  # Convert params to Pinpoint compatible
+  master_to_depot = {
+      'ChromiumPerf': 'chromium'
+  }
+  if not test.master_name in master_to_depot:
+    raise NotBisectableError('Unsupported master: %s' % test.master_name)
+
+  repository = master_to_depot[test.master_name]
+
+  params = {
+      'test_path': test.test_path,
+      'start_commit': test_anomaly.start_revision - 1,
+      'end_commit': test_anomaly.end_revision,
+      'start_repository': repository,
+      'end_repository': repository,
+      'bug_id': bug_id,
+      'bisect_mode': 'performance',
+      'story_filter': start_try_job.GuessStoryFilter(test.test_path),
+  }
+
+  try:
+    results = pinpoint_service.NewJob(
+        pinpoint_request.PinpointParamsFromBisectParams(params))
+  except pinpoint_request.InvalidParamsError as e:
+    raise NotBisectableError(e.message)
+
+  # For compatibility with existing bisect, switch these to issueId/url
+  if 'jobId' in results:
+    results['issue_id'] = results['jobId']
+    del results['jobId']
+
+  if 'jobUrl' in results:
+    results['issue_url'] = results['jobUrl']
+    del results['jobUrl']
+
+  return results
+
+
+def _StartRecipeBisect(bug_id, test_anomaly, test):
+  bisect_job = _MakeBisectTryJob(bug_id, test_anomaly, test)
+  bisect_job_key = bisect_job.put()
+
+  try:
+    bisect_result = start_try_job.PerformBisect(bisect_job)
+  except request_handler.InvalidInputError as e:
+    bisect_result = {'error': e.message}
+  if 'error' in bisect_result:
+    bisect_job_key.delete()
+  return bisect_result
+
+
+def _MakeBisectTryJob(bug_id, test_anomaly, test):
+  """Tries to automatically select parameters for a bisect job.
+
+  Args:
+    bug_id: A bug ID which some alerts are associated with.
+
+  Returns:
+    A TryJob entity, which has not yet been put in the datastore.
+
+  Raises:
+    NotBisectableError: A valid bisect config could not be created.
+  """
+  good_revision = GetRevisionForBisect(test_anomaly.start_revision - 1, test)
+  bad_revision = GetRevisionForBisect(test_anomaly.end_revision, test)
   if not can_bisect.IsValidRevisionForBisect(good_revision):
     raise NotBisectableError('Invalid "good" revision: %s.' % good_revision)
   if not can_bisect.IsValidRevisionForBisect(bad_revision):
@@ -153,17 +231,12 @@ def _CompareAnomalyBisectability(a1, a2):
   """Compares two Anomalies to decide which Anomaly's TestMetadata is better to
      use.
 
-  TODO(qyearsley): Take other factors into account:
-   - Consider bisect bot queue length. Note: If there's a simple API to fetch
-     this from build.chromium.org, that would be best; even if there is not,
-     it would be possible to fetch the HTML page for the builder and check the
-     pending list from that.
-   - Prefer some platforms over others. For example, bisects on Linux may run
-     faster; also, if we fetch info from build.chromium.org, we can check recent
-     failures.
-   - Consider test run time. This may not be feasible without using a list
-     of approximate test run times for different test suites.
-   - Consider stddev of test; less noise -> more reliable bisect.
+  Note: Potentially, this could be made more sophisticated by using
+  more signals:
+   - Bisect bot queue length
+   - Platform
+   - Test run time
+   - Stddev of test
 
   Args:
     a1: The first Anomaly entity.
@@ -180,7 +253,7 @@ def _CompareAnomalyBisectability(a1, a2):
   return 0
 
 
-def _GetRevisionForBisect(revision, test_key):
+def GetRevisionForBisect(revision, test_key):
   """Gets a start or end revision value which can be used when bisecting.
 
   Note: This logic is parallel to that in elements/chart-container.html

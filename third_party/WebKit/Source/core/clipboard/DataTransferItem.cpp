@@ -30,16 +30,15 @@
 
 #include "core/clipboard/DataTransferItem.h"
 
-#include "bindings/core/v8/FunctionStringCallback.h"
+#include "base/location.h"
 #include "bindings/core/v8/V8BindingForCore.h"
 #include "core/clipboard/DataObjectItem.h"
 #include "core/clipboard/DataTransfer.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/dom/TaskRunnerHelper.h"
 #include "core/probe/CoreProbes.h"
 #include "platform/wtf/StdLibExtras.h"
 #include "platform/wtf/text/WTFString.h"
-#include "public/platform/WebTraceLocation.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
@@ -70,20 +69,22 @@ String DataTransferItem::type() const {
 }
 
 void DataTransferItem::getAsString(ScriptState* script_state,
-                                   FunctionStringCallback* callback) {
+                                   V8FunctionStringCallback* callback) {
   if (!data_transfer_->CanReadData())
     return;
   if (!callback || item_->Kind() != DataObjectItem::kStringKind)
     return;
 
-  callbacks_.emplace_back(this, callback);
+  auto* v8persistent_callback = ToV8PersistentCallbackFunction(callback);
   ExecutionContext* context = ExecutionContext::From(script_state);
-  probe::AsyncTaskScheduled(context, "DataTransferItem.getAsString", callback);
-  TaskRunnerHelper::Get(TaskType::kUserInteraction, script_state)
-      ->PostTask(BLINK_FROM_HERE,
+  probe::AsyncTaskScheduled(context, "DataTransferItem.getAsString",
+                            v8persistent_callback);
+  context->GetTaskRunner(TaskType::kUserInteraction)
+      ->PostTask(FROM_HERE,
                  WTF::Bind(&DataTransferItem::RunGetAsStringTask,
                            WrapPersistent(this), WrapPersistent(context),
-                           WrapPersistent(callback), item_->GetAsString()));
+                           WrapPersistent(v8persistent_callback),
+                           item_->GetAsString()));
 }
 
 File* DataTransferItem::getAsFile() const {
@@ -97,27 +98,20 @@ DataTransferItem::DataTransferItem(DataTransfer* data_transfer,
                                    DataObjectItem* item)
     : data_transfer_(data_transfer), item_(item) {}
 
-void DataTransferItem::RunGetAsStringTask(ExecutionContext* context,
-                                          FunctionStringCallback* callback,
-                                          const String& data) {
+void DataTransferItem::RunGetAsStringTask(
+    ExecutionContext* context,
+    V8PersistentCallbackFunction<V8FunctionStringCallback>* callback,
+    const String& data) {
   DCHECK(callback);
   probe::AsyncTask async_task(context, callback);
   if (context)
-    callback->call(nullptr, data);
-  size_t index = callbacks_.Find(callback);
-  DCHECK(index != kNotFound);
-  callbacks_.erase(index);
+    callback->InvokeAndReportException(nullptr, data);
 }
 
-DEFINE_TRACE(DataTransferItem) {
+void DataTransferItem::Trace(blink::Visitor* visitor) {
   visitor->Trace(data_transfer_);
   visitor->Trace(item_);
-  visitor->Trace(callbacks_);
-}
-
-DEFINE_TRACE_WRAPPERS(DataTransferItem) {
-  for (auto callback : callbacks_)
-    visitor->TraceWrappers(callback);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

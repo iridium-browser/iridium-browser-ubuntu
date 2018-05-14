@@ -15,11 +15,13 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.omaha.MockRequestGenerator;
 import org.chromium.chrome.test.omaha.MockRequestGenerator.DeviceType;
+import org.chromium.chrome.test.omaha.MockRequestGenerator.SignedInStatus;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -82,8 +84,8 @@ public class OmahaBaseTest {
 
         @Override
         protected RequestGenerator createRequestGenerator(Context context) {
-            mMockGenerator = new MockRequestGenerator(
-                    context, mIsOnTablet ? DeviceType.TABLET : DeviceType.HANDSET);
+            mMockGenerator = new MockRequestGenerator(context,
+                    mIsOnTablet ? DeviceType.TABLET : DeviceType.HANDSET, SignedInStatus.FALSE);
             return mMockGenerator;
         }
 
@@ -164,7 +166,7 @@ public class OmahaBaseTest {
 
     @Before
     public void setUp() throws Exception {
-        Context targetContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        Context targetContext = InstrumentationRegistry.getTargetContext();
         OmahaBase.setIsDisabledForTesting(false);
         mContext = new AdvancedMockContext(targetContext);
     }
@@ -581,7 +583,8 @@ public class OmahaBaseTest {
 
             String mockResponse = buildServerResponseString(usingTablet, sendInstallEvent);
             mOutputStream = new ByteArrayOutputStream();
-            mServerResponse = new ByteArrayInputStream(mockResponse.getBytes());
+            mServerResponse =
+                    new ByteArrayInputStream(ApiCompatibilityUtils.getBytesUtf8(mockResponse));
             mConnectionTimesOut = connectionTimesOut;
 
             if (sendValidResponse) {

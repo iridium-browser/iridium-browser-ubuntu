@@ -53,10 +53,13 @@ def is_origin_trial_enabled(method):
     return bool(method['origin_trial_feature_name'])
 
 
+def is_secure_context(method):
+    return bool(method['overloads']['secure_context_test_all'] if 'overloads' in method else method['secure_context_test'])
+
+
 def is_conditionally_enabled(method):
     exposed = method['overloads']['exposed_test_all'] if 'overloads' in method else method['exposed_test']
-    secure_context = method['overloads']['secure_context_test_all'] if 'overloads' in method else method['secure_context_test']
-    return exposed or secure_context
+    return exposed or is_secure_context(method)
 
 
 def filter_conditionally_enabled(methods, interface_is_partial):
@@ -104,6 +107,17 @@ def use_local_result(method):
             'RaisesException' in extended_attributes or
             idl_type.is_union_type or
             idl_type.is_explicit_nullable)
+
+
+def runtime_call_stats_context(interface, method):
+    includes.add('platform/bindings/RuntimeCallStats.h')
+    generic_counter_name = 'Blink_' + v8_utilities.cpp_name(interface) + '_' + method.name
+    (method_counter, extended_attribute_defined) = v8_utilities.rcs_counter_name(method, generic_counter_name)
+    return {
+        'extended_attribute_defined': extended_attribute_defined,
+        'method_counter': method_counter,
+        'origin_safe_method_getter_counter': generic_counter_name + '_OriginSafeMethodGetter'
+    }
 
 
 def method_context(interface, method, is_visible=True):
@@ -157,12 +171,6 @@ def method_context(interface, method, is_visible=True):
     if 'LenientThis' in extended_attributes:
         raise Exception('[LenientThis] is not supported for operations.')
 
-    if 'RuntimeCallStatsCounter' in extended_attributes:
-        rcs_counter = 'k' + extended_attributes['RuntimeCallStatsCounter']
-        includes.add('platform/bindings/RuntimeCallStats.h')
-    else:
-        rcs_counter = ''
-
     argument_contexts = [
         argument_context(interface, method, argument, index, is_visible=is_visible)
         for index, argument in enumerate(arguments)]
@@ -170,7 +178,7 @@ def method_context(interface, method, is_visible=True):
     return {
         'activity_logging_world_list': v8_utilities.activity_logging_world_list(method),  # [ActivityLogging]
         'arguments': argument_contexts,
-        'cpp_type': (v8_types.cpp_template_type('Nullable', idl_type.cpp_type)
+        'cpp_type': (v8_types.cpp_template_type('Optional', idl_type.cpp_type)
                      if idl_type.is_explicit_nullable else idl_type.cpp_type),
         'cpp_value': this_cpp_value,
         'cpp_type_initializer': idl_type.cpp_type_initializer,
@@ -222,11 +230,10 @@ def method_context(interface, method, is_visible=True):
         'on_instance': v8_utilities.on_instance(interface, method),
         'on_interface': v8_utilities.on_interface(interface, method),
         'on_prototype': v8_utilities.on_prototype(interface, method),
-        'origin_trial_enabled_function': v8_utilities.origin_trial_enabled_function_name(method),  # [OriginTrialEnabled]
         'origin_trial_feature_name': v8_utilities.origin_trial_feature_name(method),  # [OriginTrialEnabled]
         'property_attributes': property_attributes(interface, method),
         'returns_promise': method.returns_promise,
-        'rcs_counter': rcs_counter,
+        'runtime_call_stats': runtime_call_stats_context(interface, method),
         'runtime_enabled_feature_name': v8_utilities.runtime_enabled_feature_name(method),  # [RuntimeEnabled]
         'secure_context_test': v8_utilities.secure_context(method, interface),  # [SecureContext]
         'use_output_parameter_for_result': idl_type.use_output_parameter_for_result,
@@ -257,7 +264,7 @@ def argument_context(interface, method, argument, index, is_visible=True):
                                            used_as_variadic_argument=argument.is_variadic)
     context = {
         'cpp_type': (
-            v8_types.cpp_template_type('Nullable', this_cpp_type)
+            v8_types.cpp_template_type('Optional', this_cpp_type)
             if idl_type.is_explicit_nullable and not argument.is_variadic
             else this_cpp_type),
         'cpp_value': this_cpp_value,
@@ -320,7 +327,11 @@ def cpp_value(interface, method, number_of_arguments):
     if ('PartialInterfaceImplementedAs' in method.extended_attributes and
             not method.is_static):
         cpp_arguments.append('*impl')
-    cpp_arguments.extend(argument.name for argument in arguments)
+    for argument in arguments:
+        if argument.idl_type.base_type == 'SerializedScriptValue':
+            cpp_arguments.append('std::move(%s)' % argument.name)
+        else:
+            cpp_arguments.append(argument.name)
 
     if ('RaisesException' in method.extended_attributes or
           (method.is_constructor and
@@ -354,8 +365,8 @@ def v8_set_return_value(interface_name, method, cpp_value, for_main_world=False)
     # [CallWith=ScriptState], [RaisesException]
     if use_local_result(method):
         if idl_type.is_explicit_nullable:
-            # result is of type Nullable<T>
-            cpp_value = 'result.Get()'
+            # result is of type WTF::Optional<T>
+            cpp_value = 'result.value()'
         else:
             cpp_value = 'result'
 
@@ -363,20 +374,14 @@ def v8_set_return_value(interface_name, method, cpp_value, for_main_world=False)
     return idl_type.v8_set_return_value(cpp_value, extended_attributes, script_wrappable=script_wrappable, for_main_world=for_main_world, is_static=method.is_static)
 
 
-def v8_value_to_local_cpp_variadic_value(method, argument, index, return_promise):
+def v8_value_to_local_cpp_variadic_value(argument, index):
     assert argument.is_variadic
-    idl_type = argument.idl_type
-    this_cpp_type = idl_type.cpp_type
-
-    if idl_type.is_dictionary or idl_type.is_union_type:
-        vector_type = 'HeapVector'
-    else:
-        vector_type = 'Vector'
+    idl_type = v8_types.native_value_traits_type_name(argument.idl_type,
+                                                      argument.extended_attributes, True)
 
     return {
-        'assign_expression': 'ToImplArguments<%s<%s>>(info, %s, exceptionState)' % (vector_type, this_cpp_type, index),
+        'assign_expression': 'ToImplArguments<%s>(info, %s, exceptionState)' % (idl_type, index),
         'check_expression': 'exceptionState.HadException()',
-        'cpp_type': this_cpp_type,
         'cpp_name': argument.name,
         'declare_variable': False,
     }
@@ -407,11 +412,11 @@ def v8_value_to_local_cpp_ssv_value(extended_attributes, idl_type, v8_value, var
     }
 
 
-def v8_value_to_local_cpp_value(interface_name, method, argument, index, return_promise=False):
+def v8_value_to_local_cpp_value(interface_name, method, argument, index):
     extended_attributes = argument.extended_attributes
     idl_type = argument.idl_type
     name = argument.name
-    v8_value = 'info[%s]' % index
+    v8_value = 'info[{index}]'.format(index=index)
 
     # History.pushState and History.replaceState are explicitly specified as
     # serializing the value for storage. The default is to not serialize for
@@ -424,7 +429,7 @@ def v8_value_to_local_cpp_value(interface_name, method, argument, index, return_
                                                for_storage=for_storage)
 
     if argument.is_variadic:
-        return v8_value_to_local_cpp_variadic_value(method, argument, index, return_promise)
+        return v8_value_to_local_cpp_variadic_value(argument, index)
     return idl_type.v8_value_to_local_cpp_value(extended_attributes, v8_value,
                                                 name, declare_variable=False,
                                                 use_exception_state=method.returns_promise)
@@ -483,7 +488,7 @@ def argument_set_default_value(argument):
         member_type_name = (member_type.inner_type.name
                             if member_type.is_nullable else
                             member_type.name)
-        return '%s.set%s(%s)' % (argument.name, member_type_name,
+        return '%s.Set%s(%s)' % (argument.name, member_type_name,
                                  member_type.literal_cpp_value(default_value))
     return '%s = %s' % (argument.name,
                         idl_type.literal_cpp_value(default_value))

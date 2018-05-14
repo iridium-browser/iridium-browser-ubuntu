@@ -11,7 +11,6 @@
 
 #include "base/feature_list.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -54,12 +53,20 @@ int64_t StringAtIndexToInt64(const base::ListValue* list, int index) {
   return 0;
 }
 
+// Returns whether the there is any value at the given |index|.
+bool HasSomethingAtIndex(const base::ListValue* list, int index) {
+  std::string str;
+  if (list->GetString(index, &str)) {
+    return !str.empty();
+  }
+  return false;
+}
+
 }  //  namespace
 
 SyncInternalsMessageHandler::SyncInternalsMessageHandler()
-    : SyncInternalsMessageHandler(
-          base::BindRepeating(
-              &syncer::sync_ui_util::ConstructAboutInformation)) {}
+    : SyncInternalsMessageHandler(base::BindRepeating(
+          &syncer::sync_ui_util::ConstructAboutInformation_DEPRECATED)) {}
 
 SyncInternalsMessageHandler::SyncInternalsMessageHandler(
     AboutSyncDataDelegate about_sync_data_delegate)
@@ -174,7 +181,7 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
   AllowJavascript();
 
   DictionaryValue event_details;
-  auto type_list = base::MakeUnique<ListValue>();
+  auto type_list = std::make_unique<ListValue>();
   ModelTypeSet protocol_types = syncer::ProtocolTypes();
   for (ModelTypeSet::Iterator it = protocol_types.First(); it.Good();
        it.Inc()) {
@@ -230,8 +237,18 @@ void SyncInternalsMessageHandler::HandleWriteUserEvent(
       browser_sync::UserEventServiceFactory::GetForProfile(profile);
 
   sync_pb::UserEventSpecifics event_specifics;
+  // Even though there's nothing to set inside the test event object, it needs
+  // to be created so that later logic can discern our event type.
+  event_specifics.mutable_test_event();
+
+  // |event_time_usec| is required.
   event_specifics.set_event_time_usec(StringAtIndexToInt64(args, 0));
-  event_specifics.set_navigation_id(StringAtIndexToInt64(args, 1));
+
+  // |navigation_id| is optional, treat empty string and 0 differently.
+  if (HasSomethingAtIndex(args, 1)) {
+    event_specifics.set_navigation_id(StringAtIndexToInt64(args, 1));
+  }
+
   user_event_service->RecordUserEvent(event_specifics);
 }
 
@@ -275,7 +292,7 @@ void SyncInternalsMessageHandler::EmitCounterUpdate(
     syncer::ModelType type,
     const std::string& counter_type,
     std::unique_ptr<DictionaryValue> value) {
-  auto details = base::MakeUnique<DictionaryValue>();
+  auto details = std::make_unique<DictionaryValue>();
   details->SetString(syncer::sync_ui_util::kModelType, ModelTypeToString(type));
   details->SetString(syncer::sync_ui_util::kCounterType, counter_type);
   details->Set(syncer::sync_ui_util::kCounters, std::move(value));

@@ -4,9 +4,12 @@
 
 #include "headless/lib/browser/headless_network_delegate.h"
 
+#include "content/public/browser/resource_request_info.h"
 #include "headless/lib/browser/headless_browser_context_impl.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "net/url_request/url_request_context.h"
+#include "url/url_constants.h"
 
 #include "net/url_request/url_request.h"
 
@@ -21,15 +24,28 @@ const char kDevToolsEmulateNetworkConditionsClientId[] =
 
 HeadlessNetworkDelegate::HeadlessNetworkDelegate(
     HeadlessBrowserContextImpl* headless_browser_context)
-    : headless_browser_context_(headless_browser_context) {}
+    : headless_browser_context_(headless_browser_context) {
+  base::AutoLock lock(lock_);
+  if (headless_browser_context_)
+    headless_browser_context_->AddObserver(this);
+}
 
-HeadlessNetworkDelegate::~HeadlessNetworkDelegate() {}
+HeadlessNetworkDelegate::~HeadlessNetworkDelegate() {
+  base::AutoLock lock(lock_);
+  if (headless_browser_context_)
+    headless_browser_context_->RemoveObserver(this);
+}
 
 int HeadlessNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
-  request->RemoveRequestHeaderByName(kDevToolsEmulateNetworkConditionsClientId);
+  base::AutoLock lock(lock_);
+  if (headless_browser_context_ &&
+      headless_browser_context_->ShouldRemoveHeaders()) {
+    request->RemoveRequestHeaderByName(
+        kDevToolsEmulateNetworkConditionsClientId);
+  }
   return net::OK;
 }
 
@@ -62,8 +78,20 @@ void HeadlessNetworkDelegate::OnResponseStarted(net::URLRequest* request,
 void HeadlessNetworkDelegate::OnCompleted(net::URLRequest* request,
                                           bool started,
                                           int net_error) {
-  if (net_error != net::OK)
-    headless_browser_context_->NotifyUrlRequestFailed(request, net_error);
+  base::AutoLock lock(lock_);
+  if (!headless_browser_context_)
+    return;
+
+  const content::ResourceRequestInfo* resource_request_info =
+      content::ResourceRequestInfo::ForRequest(request);
+  if (!resource_request_info)
+    return;
+
+  bool canceled_by_devtools = resource_request_info->CanceledByDevTools();
+  if (canceled_by_devtools || net_error != net::OK) {
+    headless_browser_context_->NotifyUrlRequestFailed(request, net_error,
+                                                      canceled_by_devtools);
+  }
 }
 
 void HeadlessNetworkDelegate::OnURLRequestDestroyed(net::URLRequest* request) {}
@@ -86,7 +114,7 @@ bool HeadlessNetworkDelegate::OnCanGetCookies(
 }
 
 bool HeadlessNetworkDelegate::OnCanSetCookie(const net::URLRequest& request,
-                                             const std::string& cookie_line,
+                                             const net::CanonicalCookie& cookie,
                                              net::CookieOptions* options) {
   return true;
 }
@@ -96,6 +124,11 @@ bool HeadlessNetworkDelegate::OnCanAccessFile(
     const base::FilePath& original_path,
     const base::FilePath& absolute_path) const {
   return true;
+}
+
+void HeadlessNetworkDelegate::OnHeadlessBrowserContextDestruct() {
+  base::AutoLock lock(lock_);
+  headless_browser_context_ = nullptr;
 }
 
 }  // namespace headless

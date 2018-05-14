@@ -12,7 +12,6 @@ from telemetry.core import profiling_controller
 from telemetry import decorators
 from telemetry.internal import app
 from telemetry.internal.backends import browser_backend
-from telemetry.internal.browser import browser_credentials
 from telemetry.internal.browser import extension_dict
 from telemetry.internal.browser import tab_list
 from telemetry.internal.browser import web_contents
@@ -22,52 +21,43 @@ from telemetry.internal.util import exception_formatter
 class Browser(app.App):
   """A running browser instance that can be controlled in a limited way.
 
-  To create a browser instance, use browser_finder.FindBrowser.
+  To create a browser instance, use browser_finder.FindBrowser, e.g:
 
-  Be sure to clean up after yourself by calling Close() when you are done with
-  the browser. Or better yet:
-    browser_to_create = FindBrowser(options)
-    with browser_to_create.Create(options) as browser:
-      ... do all your operations on browser here
+    possible_browser = browser_finder.FindBrowser(finder_options)
+    with possible_browser.BrowserSession(
+        finder_options.browser_options) as browser:
+      # Do all your operations on browser here.
+
+  See telemetry.internal.browser.possible_browser for more details and use
+  cases.
   """
-  def __init__(self, backend, platform_backend, credentials_path):
+  def __init__(self, backend, platform_backend, startup_args,
+               find_existing=False):
     super(Browser, self).__init__(app_backend=backend,
                                   platform_backend=platform_backend)
     try:
       self._browser_backend = backend
       self._platform_backend = platform_backend
       self._tabs = tab_list.TabList(backend.tab_list_backend)
-      self.credentials = browser_credentials.BrowserCredentials()
-      self.credentials.credentials_path = credentials_path
-      self._platform_backend.DidCreateBrowser(self, self._browser_backend)
-      browser_options = self._browser_backend.browser_options
-      self.platform.FlushDnsCache()
-      if browser_options.clear_sytem_cache_for_browser_and_profile_on_start:
-        if self.platform.CanFlushIndividualFilesFromSystemCache():
-          self.platform.FlushSystemCacheForDirectory(
-              self._browser_backend.profile_directory)
-          self.platform.FlushSystemCacheForDirectory(
-              self._browser_backend.browser_directory)
-        elif self.platform.SupportFlushEntireSystemCache():
-          self.platform.FlushEntireSystemCache()
-        else:
-          logging.warning('Flush system cache is not supported. ' +
-              'Did not flush system cache.')
-
       self._browser_backend.SetBrowser(self)
-      self._browser_backend.Start()
+      if find_existing:
+        self._browser_backend.BindDevToolsClient()
+      else:
+        # TODO(crbug.com/787834): Move url computation out of the browser
+        # backend and into the callers of this constructor.
+        startup_url = self._browser_backend.GetBrowserStartupUrl()
+        self._browser_backend.Start(startup_args, startup_url=startup_url)
       self._LogBrowserInfo()
-      self._platform_backend.DidStartBrowser(self, self._browser_backend)
       self._profiling_controller = profiling_controller.ProfilingController(
           self._browser_backend.profiling_controller_backend)
     except Exception:
       exc_info = sys.exc_info()
       logging.error(
-        'Failed with %s while starting the browser backend.',
-        exc_info[0].__name__)  # Show the exception name only.
+          'Failed with %s while starting the browser backend.',
+          exc_info[0].__name__)  # Show the exception name only.
       try:
-        self._platform_backend.WillCloseBrowser(self, self._browser_backend)
-      except Exception:
+        self.Close()
+      except Exception: # pylint: disable=broad-except
         exception_formatter.PrintFormattedException(
             msg='Exception raised while closing platform backend')
       raise exc_info[0], exc_info[1], exc_info[2]
@@ -102,7 +92,7 @@ class Browser(app.App):
       # tab is always tab 0, which will be the first one that isn't hidden
       if self._tabs[i].EvaluateJavaScript('!document.hidden'):
         return self._tabs[i]
-    raise Exception("No foreground tab found")
+    raise exceptions.TabMissingError("No foreground tab found")
 
   @property
   @decorators.Cache
@@ -113,6 +103,7 @@ class Browser(app.App):
     return extension_dict.ExtensionDict(self._browser_backend.extension_backend)
 
   def _LogBrowserInfo(self):
+    logging.info('Browser started (pid=%s).', self._browser_backend.pid)
     logging.info('OS: %s %s',
                  self._platform_backend.platform.GetOSName(),
                  self._platform_backend.platform.GetOSVersionName())
@@ -187,49 +178,6 @@ class Browser(app.App):
     return result
 
   @property
-  def memory_stats(self):
-    """Returns a dict of memory statistics for the browser:
-    { 'Browser': {
-        'VM': R,
-        'VMPeak': S,
-        'WorkingSetSize': T,
-        'WorkingSetSizePeak': U,
-        'ProportionalSetSize': V,
-        'PrivateDirty': W
-      },
-      'Gpu': {
-        'VM': R,
-        'VMPeak': S,
-        'WorkingSetSize': T,
-        'WorkingSetSizePeak': U,
-        'ProportionalSetSize': V,
-        'PrivateDirty': W
-      },
-      'Renderer': {
-        'VM': R,
-        'VMPeak': S,
-        'WorkingSetSize': T,
-        'WorkingSetSizePeak': U,
-        'ProportionalSetSize': V,
-        'PrivateDirty': W
-      },
-      'SystemCommitCharge': X,
-      'SystemTotalPhysicalMemory': Y,
-      'ProcessCount': Z,
-    }
-    Any of the above keys may be missing on a per-platform basis.
-    """
-    self._platform_backend.PurgeUnpinnedMemory()
-    result = self._GetStatsCommon(self._platform_backend.GetMemoryStats)
-    commit_charge = self._platform_backend.GetSystemCommitCharge()
-    if commit_charge:
-      result['SystemCommitCharge'] = commit_charge
-    total = self._platform_backend.GetSystemTotalPhysicalMemory()
-    if total:
-      result['SystemTotalPhysicalMemory'] = total
-    return result
-
-  @property
   def cpu_stats(self):
     """Returns a dict of cpu statistics for the system.
     { 'Browser': {
@@ -263,7 +211,7 @@ class Browser(app.App):
     """Closes this browser."""
     try:
       if self._browser_backend.IsBrowserRunning():
-        self._platform_backend.WillCloseBrowser(self, self._browser_backend)
+        logging.info('Closing browser (pid=%s) ...', self._browser_backend.pid)
 
       self._browser_backend.profiling_controller_backend.WillCloseBrowser()
       if self._browser_backend.supports_uploading_logs:
@@ -273,7 +221,11 @@ class Browser(app.App):
           logging.error('Cannot upload browser log: %s' % str(e))
     finally:
       self._browser_backend.Close()
-      self.credentials = None
+      if self._browser_backend.IsBrowserRunning():
+        logging.error(
+            'Browser is still running (pid=%s).', self._browser_backend.pid)
+      else:
+        logging.info('Browser is closed.')
 
   def Foreground(self):
     """Ensure the browser application is moved to the foreground."""
@@ -342,7 +294,8 @@ class Browser(app.App):
     return self._browser_backend.DumpMemory(timeout=timeout)
 
   @property
-  def supports_java_heap_garbage_collection(self):
+  def supports_java_heap_garbage_collection( # pylint: disable=invalid-name
+      self):
     return hasattr(self._browser_backend, 'ForceJavaHeapGarbageCollection')
 
   def ForceJavaHeapGarbageCollection(self):
@@ -350,7 +303,9 @@ class Browser(app.App):
     return self._browser_backend.ForceJavaHeapGarbageCollection()
 
   @property
+  # pylint: disable=invalid-name
   def supports_overriding_memory_pressure_notifications(self):
+    # pylint: enable=invalid-name
     return (
         self._browser_backend.supports_overriding_memory_pressure_notifications)
 
@@ -363,6 +318,18 @@ class Browser(app.App):
       self, pressure_level, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
     self._browser_backend.SimulateMemoryPressureNotification(
         pressure_level, timeout)
+
+  @property
+  def supports_overview_mode(self): # pylint: disable=invalid-name
+    return self._browser_backend.supports_overview_mode
+
+  def EnterOverviewMode(
+      self, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
+    self._browser_backend.EnterOverviewMode(timeout)
+
+  def ExitOverviewMode(
+      self, timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
+    self._browser_backend.ExitOverviewMode(timeout)
 
   @property
   def supports_cpu_metrics(self):
@@ -378,15 +345,15 @@ class Browser(app.App):
 
   def DumpStateUponFailure(self):
     logging.info('*************** BROWSER STANDARD OUTPUT ***************')
-    try:  # pylint: disable=broad-except
+    try:
       logging.info(self.GetStandardOutput())
-    except Exception:
+    except Exception: # pylint: disable=broad-except
       logging.exception('Failed to get browser standard output:')
     logging.info('*********** END OF BROWSER STANDARD OUTPUT ************')
 
     logging.info('********************* BROWSER LOG *********************')
-    try:  # pylint: disable=broad-except
+    try:
       logging.info(self.GetLogFileContents())
-    except Exception:
+    except Exception: # pylint: disable=broad-except
       logging.exception('Failed to get browser log:')
     logging.info('***************** END OF BROWSER LOG ******************')

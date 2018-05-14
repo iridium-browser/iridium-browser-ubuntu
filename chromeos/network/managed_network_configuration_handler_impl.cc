@@ -72,7 +72,7 @@ void InvokeErrorCallback(const std::string& service_path,
       error_callback, service_path, error_name, error_msg);
 }
 
-void LogErrorWithDict(const tracked_objects::Location& from_where,
+void LogErrorWithDict(const base::Location& from_where,
                       const std::string& error_name,
                       std::unique_ptr<base::DictionaryValue> error_data) {
   device_event_log::AddEntry(from_where.file_name(), from_where.line_number(),
@@ -88,11 +88,47 @@ const base::DictionaryValue* GetByGUID(const GuidToPolicyMap& policies,
   return it->second.get();
 }
 
-bool IsTetherShillDictionary(const base::DictionaryValue& dict) {
-  std::string network_type;
-  return dict.GetStringWithoutPathExpansion(shill::kTypeProperty,
-                                            &network_type) &&
-         network_type == kTypeTether;
+std::string GetStringFromDictionary(const base::Value& dict, const char* key) {
+  const base::Value* v = dict.FindKey(key);
+  return v ? v->GetString() : std::string();
+}
+
+bool MatchesExistingNetworkState(const base::DictionaryValue& properties,
+                                 const NetworkState* network_state) {
+  std::string type =
+      GetStringFromDictionary(properties, ::onc::network_config::kType);
+  if (network_util::TranslateONCTypeToShill(type) != network_state->type()) {
+    NET_LOG(ERROR) << "Network type mismatch for: " << network_state->guid()
+                   << " type: " << type
+                   << " does not match: " << network_state->type();
+    return false;
+  }
+  if (type != ::onc::network_type::kWiFi)
+    return true;
+
+  const base::Value* wifi = properties.FindKey(::onc::network_config::kWiFi);
+  if (!wifi) {
+    NET_LOG(ERROR) << "WiFi network configuration missing is WiFi properties: "
+                   << network_state->guid();
+    return false;
+  }
+  // For WiFi networks ensure that Security and SSID match.
+  std::string security = GetStringFromDictionary(*wifi, ::onc::wifi::kSecurity);
+  if (network_util::TranslateONCSecurityToShill(security) !=
+      network_state->security_class()) {
+    NET_LOG(ERROR) << "Network security mismatch for: " << network_state->guid()
+                   << " security: " << security
+                   << " does not match: " << network_state->security_class();
+    return false;
+  }
+  std::string hex_ssid = GetStringFromDictionary(*wifi, ::onc::wifi::kHexSSID);
+  if (hex_ssid != network_state->GetHexSsid()) {
+    NET_LOG(ERROR) << "Network HexSSID mismatch for: " << network_state->guid()
+                   << " hex_ssid: " << hex_ssid
+                   << " does not match: " << network_state->GetHexSsid();
+    return false;
+  }
+  return true;
 }
 
 }  // namespace
@@ -104,7 +140,7 @@ struct ManagedNetworkConfigurationHandlerImpl::Policies {
   base::DictionaryValue global_network_config;
 };
 
-ManagedNetworkConfigurationHandlerImpl::Policies::~Policies() {}
+ManagedNetworkConfigurationHandlerImpl::Policies::~Policies() = default;
 
 void ManagedNetworkConfigurationHandlerImpl::AddObserver(
     NetworkPolicyObserver* observer) {
@@ -149,13 +185,13 @@ void ManagedNetworkConfigurationHandlerImpl::SendManagedProperties(
   std::string profile_path;
   shill_properties->GetStringWithoutPathExpansion(shill::kProfileProperty,
                                                   &profile_path);
+  const NetworkState* network_state =
+      network_state_handler_->GetNetworkState(service_path);
   const NetworkProfile* profile =
       network_profile_handler_->GetProfileForPath(profile_path);
-  if (!profile && !IsTetherShillDictionary(*shill_properties)) {
-    // Tether networks are not expected to have an associated profile; only
-    // log an error if the provided properties do not correspond to a
-    // Tether network.
-    NET_LOG_ERROR("No profile for service: " + profile_path, service_path);
+  if (!profile && !(network_state && network_state->IsNonProfileType())) {
+    // Visible but unsaved (not known) networks will not have a profile.
+    NET_LOG_DEBUG("No profile for service: " + profile_path, service_path);
   }
 
   std::unique_ptr<NetworkUIData> ui_data =
@@ -177,8 +213,6 @@ void ManagedNetworkConfigurationHandlerImpl::SendManagedProperties(
 
   ::onc::ONCSource onc_source;
   FindPolicyByGUID(userhash, guid, &onc_source);
-  const NetworkState* network_state =
-      network_state_handler_->GetNetworkState(service_path);
   std::unique_ptr<base::DictionaryValue> active_settings(
       onc::TranslateShillServiceToONCPart(*shill_properties, onc_source,
                                           &onc::kNetworkWithStateSignature,
@@ -275,8 +309,8 @@ void ManagedNetworkConfigurationHandlerImpl::SetProperties(
     return;
   }
 
-  VLOG(2) << "SetProperties: Found GUID " << guid << " and profile "
-          << profile->ToDebugString();
+  NET_LOG(DEBUG) << "Set Managed Properties for GUID: " << guid
+                 << ". Profile: " << profile->ToDebugString();
 
   const Policies* policies = GetPoliciesForProfile(*profile);
   if (!policies) {
@@ -288,9 +322,9 @@ void ManagedNetworkConfigurationHandlerImpl::SetProperties(
   // included for ONC validation and translation to Shill properties.
   std::unique_ptr<base::DictionaryValue> user_settings_copy(
       user_settings.DeepCopy());
-  user_settings_copy->SetStringWithoutPathExpansion(
+  user_settings_copy->SetKey(
       ::onc::network_config::kType,
-      network_util::TranslateShillTypeToONC(state->type()));
+      base::Value(network_util::TranslateShillTypeToONC(state->type())));
   user_settings_copy->MergeDictionary(&user_settings);
 
   // Validate the ONC dictionary. We are liberal and ignore unknown field
@@ -310,18 +344,16 @@ void ManagedNetworkConfigurationHandlerImpl::SetProperties(
     return;
   }
   if (validation_result == onc::Validator::VALID_WITH_WARNINGS)
-    LOG(WARNING) << "Validation of ONC user settings produced warnings.";
+    NET_LOG(ERROR) << "Validation of ONC user settings produced warnings.";
 
   // Fill in HexSSID field from contents of SSID field if not set already.
-  if (user_settings_copy) {
-    onc::FillInHexSSIDFieldsInOncObject(onc::kNetworkConfigurationSignature,
-                                        validated_user_settings.get());
-  }
+  onc::FillInHexSSIDFieldsInOncObject(onc::kNetworkConfigurationSignature,
+                                      validated_user_settings.get());
 
   const base::DictionaryValue* network_policy =
       GetByGUID(policies->per_network_config, guid);
-  VLOG(2) << "This configuration is " << (network_policy ? "" : "not ")
-          << "managed.";
+  if (network_policy)
+    NET_LOG(DEBUG) << "Configuration is managed. GUID: " << guid;
 
   std::unique_ptr<base::DictionaryValue> shill_dictionary(
       policy_util::CreateShillConfiguration(
@@ -366,6 +398,10 @@ void ManagedNetworkConfigurationHandlerImpl::CreateConfiguration(
     const base::DictionaryValue& properties,
     const network_handler::ServiceResultCallback& callback,
     const network_handler::ErrorCallback& error_callback) const {
+  std::string guid =
+      GetStringFromDictionary(properties, ::onc::network_config::kGUID);
+  NET_LOG(USER) << "CreateConfiguration: " << guid;
+
   // Validate the ONC dictionary. We are liberal and ignore unknown field
   // names. User settings are only partial ONC, thus we ignore missing fields.
   onc::Validator validator(false,   // Ignore unknown fields.
@@ -388,10 +424,8 @@ void ManagedNetworkConfigurationHandlerImpl::CreateConfiguration(
 
   // Fill in HexSSID field from contents of SSID field if not set already - this
   // is required to properly match the configuration against existing policies.
-  if (validated_properties) {
-    onc::FillInHexSSIDFieldsInOncObject(onc::kNetworkConfigurationSignature,
-                                        validated_properties.get());
-  }
+  onc::FillInHexSSIDFieldsInOncObject(onc::kNetworkConfigurationSignature,
+                                      validated_properties.get());
 
   // Make sure the network is not configured through a user policy.
   const Policies* policies = nullptr;
@@ -429,17 +463,35 @@ void ManagedNetworkConfigurationHandlerImpl::CreateConfiguration(
     return;
   }
 
-  // TODO(pneubeck): In case of WiFi, check that no other configuration for the
-  // same {SSID, mode, security} exists. We don't support such multiple
-  // configurations, yet.
+  // If a GUID was provided, verify that the new configuraiton matches an
+  // existing NetworkState for an unconfigured (i.e. visible) network.
+  // Requires HexSSID to be set first for comparing SSIDs.
+  if (!guid.empty()) {
+    const NetworkState* network_state =
+        network_state_handler_->GetNetworkStateFromGuid(guid);
+    // |network_state| can by null if a network went out of range or was
+    // forgotten while the UI is open. Configuration should succeed and the GUID
+    // can be reused.
+    if (network_state) {
+      if (!MatchesExistingNetworkState(*validated_properties, network_state)) {
+        InvokeErrorCallback(network_state->path(), error_callback,
+                            kNetworkAlreadyConfigured);
+        return;
+      } else if (!network_state->profile_path().empty()) {
+        // Can occur after an invalid password or with multiple config UIs open.
+        // Configuration should succeed, so just log an event.
+        NET_LOG(EVENT) << "Reconfiguring network: " << guid
+                       << " Profile: " << network_state->profile_path();
+      }
+    }
+  } else {
+    guid = base::GenerateGUID();
+  }
 
-  // Generate a new GUID for this configuration. Ignore the maybe provided GUID
-  // in |properties| as it is not our own and from an untrusted source.
-  std::string guid = base::GenerateGUID();
   std::unique_ptr<base::DictionaryValue> shill_dictionary(
       policy_util::CreateShillConfiguration(*profile, guid,
-                                            NULL,  // no global policy
-                                            NULL,  // no network policy
+                                            nullptr,  // no global policy
+                                            nullptr,  // no network policy
                                             validated_properties.get()));
 
   network_configuration_handler_->CreateShillConfiguration(
@@ -632,8 +684,7 @@ void ManagedNetworkConfigurationHandlerImpl::
                       existing_properties));
     return;
   }
-  shill_properties.SetStringWithoutPathExpansion(shill::kProfileProperty,
-                                                 profile);
+  shill_properties.SetKey(shill::kProfileProperty, base::Value(profile));
 
   if (!shill_property_util::CopyIdentifyingProperties(
           existing_properties,
@@ -812,36 +863,49 @@ void ManagedNetworkConfigurationHandlerImpl::OnPolicyAppliedToNetwork(
 void ManagedNetworkConfigurationHandlerImpl::GetDeviceStateProperties(
     const std::string& service_path,
     base::DictionaryValue* properties) {
-  std::string connection_state;
-  properties->GetStringWithoutPathExpansion(
-      shill::kStateProperty, &connection_state);
-  if (!NetworkState::StateIsConnected(connection_state))
+  const NetworkState* network =
+      network_state_handler_->GetNetworkState(service_path);
+  if (!network) {
+    NET_LOG(ERROR) << "GetDeviceStateProperties: no network for: "
+                   << service_path;
     return;
+  }
+  if (!network->IsConnectedState())
+    return;  // No (non saved) IP Configs for non connected networks.
 
   // Get the IPConfig properties from the device and store them in "IPConfigs"
   // (plural) in the properties dictionary. (Note: Shill only provides a single
   // "IPConfig" property for a network service, but a consumer of this API may
   // want information about all ipv4 and ipv6 IPConfig properties.
-  std::string device;
-  properties->GetStringWithoutPathExpansion(shill::kDeviceProperty, &device);
   const DeviceState* device_state =
-      network_state_handler_->GetDeviceState(device);
+      network_state_handler_->GetDeviceState(network->device_path());
   if (!device_state) {
-    NET_LOG_ERROR("GetDeviceProperties: no device: " + device, service_path);
+    NET_LOG(ERROR) << "GetDeviceStateProperties: no device: "
+                   << network->device_path() << " For: " << service_path;
     return;
   }
 
   // Get the hardware MAC address from the DeviceState.
   if (!device_state->mac_address().empty()) {
-    properties->SetStringWithoutPathExpansion(
-        shill::kAddressProperty, device_state->mac_address());
+    properties->SetKey(shill::kAddressProperty,
+                       base::Value(device_state->mac_address()));
   }
 
-  // Convert IPConfig dictionary to a ListValue.
-  auto ip_configs = base::MakeUnique<base::ListValue>();
-  for (base::DictionaryValue::Iterator iter(device_state->ip_configs());
-       !iter.IsAtEnd(); iter.Advance()) {
-    ip_configs->Append(iter.value().CreateDeepCopy());
+  // Build a list of IPConfigs.
+  auto ip_configs = std::make_unique<base::ListValue>();
+
+  if (device_state->ip_configs().empty()) {
+    // Shill may not provide IPConfigs for external Cellular devices
+    // (dongles), so build a dictionary of ipv4 properties from cached
+    // NetworkState properties (crbug.com/739314).
+    NET_LOG(DEBUG)
+        << "GetDeviceStateProperties: Setting IPv4 properties from network: "
+        << service_path;
+    ip_configs->GetList().push_back(network->ipv4_config().Clone());
+  } else {
+    // Convert the DeviceState IPConfigs dictionary to a ListValue.
+    for (const auto iter : device_state->ip_configs().DictItems())
+      ip_configs->GetList().push_back(iter.second.Clone());
   }
   properties->SetWithoutPathExpansion(shill::kIPConfigsProperty,
                                       std::move(ip_configs));
@@ -863,8 +927,7 @@ void ManagedNetworkConfigurationHandlerImpl::GetPropertiesCallback(
         network_state_handler_->GetNetworkState(service_path);
     if (state && !state->guid().empty()) {
       guid = state->guid();
-      shill_properties_copy->SetStringWithoutPathExpansion(shill::kGuidProperty,
-                                                           guid);
+      shill_properties_copy->SetKey(shill::kGuidProperty, base::Value(guid));
     } else {
       LOG(ERROR) << "Network has no GUID specified: " << service_path;
     }
@@ -916,8 +979,7 @@ void ManagedNetworkConfigurationHandlerImpl::GetDevicePropertiesSuccess(
     const std::string& device_path,
     const base::DictionaryValue& device_properties) {
   // Create a "Device" dictionary in |network_properties|.
-  network_properties->SetWithoutPathExpansion(
-      shill::kDeviceProperty, base::MakeUnique<base::Value>(device_properties));
+  network_properties->SetKey(shill::kDeviceProperty, device_properties.Clone());
   send_callback.Run(service_path, std::move(network_properties));
 }
 

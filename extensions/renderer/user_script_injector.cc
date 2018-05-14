@@ -67,7 +67,7 @@ struct GreasemonkeyApiJsString {
 // the GreasemonkeyApiJs resource.
 GreasemonkeyApiJsString::GreasemonkeyApiJsString() {
   base::StringPiece source_piece =
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
+      ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_GREASEMONKEY_API_JS);
   source_ =
       blink::WebString::FromUTF8(source_piece.data(), source_piece.length());
@@ -143,6 +143,14 @@ bool UserScriptInjector::IsUserGesture() const {
 
 bool UserScriptInjector::ExpectsResults() const {
   return false;
+}
+
+base::Optional<CSSOrigin> UserScriptInjector::GetCssOrigin() const {
+  return base::nullopt;
+}
+
+const base::Optional<std::string> UserScriptInjector::GetInjectionKey() const {
+  return base::nullopt;
 }
 
 bool UserScriptInjector::ShouldInjectJs(

@@ -20,7 +20,7 @@ namespace invalidation {
 
 ScopedJavaLocalRef<jobject> InvalidationServiceFactoryAndroid::GetForProfile(
     const JavaRef<jobject>& j_profile) {
-  Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile.obj());
+  Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile);
   invalidation::ProfileInvalidationProvider* provider =
       ProfileInvalidationProviderFactory::GetForProfile(profile);
   InvalidationServiceAndroid* service_android =
@@ -35,15 +35,16 @@ ScopedJavaLocalRef<jobject> InvalidationServiceFactoryAndroid::GetForTest() {
   return ScopedJavaLocalRef<jobject>(service_android->java_ref_);
 }
 
-ScopedJavaLocalRef<jobject> GetForProfile(
+ScopedJavaLocalRef<jobject> JNI_InvalidationServiceFactory_GetForProfile(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz,
     const JavaParamRef<jobject>& j_profile) {
   return InvalidationServiceFactoryAndroid::GetForProfile(j_profile);
 }
 
-ScopedJavaLocalRef<jobject> GetForTest(JNIEnv* env,
-                                       const JavaParamRef<jclass>& clazz) {
+ScopedJavaLocalRef<jobject> JNI_InvalidationServiceFactory_GetForTest(
+    JNIEnv* env,
+    const JavaParamRef<jclass>& clazz) {
   return InvalidationServiceFactoryAndroid::GetForTest();
 }
 

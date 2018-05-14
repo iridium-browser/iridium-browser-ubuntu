@@ -16,6 +16,7 @@
 #include "chrome/browser/devtools/devtools_embedder_message_dispatcher.h"
 #include "chrome/browser/devtools/devtools_file_helper.h"
 #include "chrome/browser/devtools/devtools_file_system_indexer.h"
+#include "chrome/browser/devtools/devtools_infobar_delegate.h"
 #include "chrome/browser/devtools/devtools_targets_ui.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -40,12 +41,6 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
                            public net::URLFetcherDelegate,
                            public DevToolsFileHelper::Delegate {
  public:
-  static DevToolsUIBindings* ForWebContents(
-      content::WebContents* web_contents);
-
-  static GURL SanitizeFrontendURL(const GURL& url);
-  static bool IsValidFrontendURL(const GURL& url);
-
   class Delegate {
    public:
     virtual ~Delegate() {}
@@ -63,9 +58,18 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
     virtual void InspectedContentsClosing() = 0;
     virtual void OnLoadCompleted() = 0;
     virtual void ReadyForTest() = 0;
+    virtual void ConnectionReady() = 0;
+    virtual void SetOpenNewWindowForPopups(bool value) = 0;
     virtual InfoBarService* GetInfoBarService() = 0;
     virtual void RenderProcessGone(bool crashed) = 0;
+    virtual void ShowCertificateViewer(const std::string& cert_chain) = 0;
   };
+
+  static DevToolsUIBindings* ForWebContents(content::WebContents* web_contents);
+
+  static GURL SanitizeFrontendURL(const GURL& url);
+  static bool IsValidFrontendURL(const GURL& url);
+  static bool IsValidRemoteFrontendURL(const GURL& url);
 
   explicit DevToolsUIBindings(content::WebContents* web_contents);
   ~DevToolsUIBindings() override;
@@ -91,8 +95,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   // content::DevToolsAgentHostClient implementation.
   void DispatchProtocolMessage(content::DevToolsAgentHost* agent_host,
                                const std::string& message) override;
-  void AgentHostClosed(content::DevToolsAgentHost* agent_host,
-                       bool replaced_with_another_client) override;
+  void AgentHostClosed(content::DevToolsAgentHost* agent_host) override;
 
   // DevToolsEmbedderMessageDispatcher::Delegate implementation.
   void ActivateWindow() override;
@@ -107,13 +110,14 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
                            int stream_id) override;
   void SetIsDocked(const DispatchCallback& callback, bool is_docked) override;
   void OpenInNewTab(const std::string& url) override;
+  void ShowItemInFolder(const std::string& file_system_path) override;
   void SaveToFile(const std::string& url,
                   const std::string& content,
                   bool save_as) override;
   void AppendToFile(const std::string& url,
                     const std::string& content) override;
   void RequestFileSystems() override;
-  void AddFileSystem(const std::string& file_system_path) override;
+  void AddFileSystem(const std::string& type) override;
   void RemoveFileSystem(const std::string& file_system_path) override;
   void UpgradeDraggedFileSystemPermissions(
       const std::string& file_system_url) override;
@@ -156,6 +160,8 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   void ClearPreferences() override;
   void Reattach(const DispatchCallback& callback) override;
   void ReadyForTest() override;
+  void ConnectionReady() override;
+  void SetOpenNewWindowForPopups(bool value) override;
   void RegisterExtensionsAPI(const std::string& origin,
                              const std::string& script) override;
 
@@ -166,6 +172,7 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
 
   void SendMessageAck(int request_id,
                       const base::Value* arg1);
+  void InnerAttach();
 
   // DevToolsAndroidBridge::DeviceCountListener override:
   void DeviceCountChanged(int count) override;
@@ -188,14 +195,15 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
 
   // DevToolsFileHelper::Delegate overrides.
   void FileSystemAdded(
-      const DevToolsFileHelper::FileSystem& file_system) override;
+      const std::string& error,
+      const DevToolsFileHelper::FileSystem* file_system) override;
   void FileSystemRemoved(const std::string& file_system_path) override;
   void FilePathsChanged(const std::vector<std::string>& changed_paths,
                         const std::vector<std::string>& added_paths,
                         const std::vector<std::string>& removed_paths) override;
 
   // DevToolsFileHelper callbacks.
-  void FileSavedAs(const std::string& url);
+  void FileSavedAs(const std::string& url, const std::string& file_system_path);
   void CanceledFileSaveAs(const std::string& url);
   void AppendedTo(const std::string& url);
   void IndexingTotalWorkCalculated(int request_id,
@@ -208,9 +216,8 @@ class DevToolsUIBindings : public DevToolsEmbedderMessageDispatcher::Delegate,
   void SearchCompleted(int request_id,
                        const std::string& file_system_path,
                        const std::vector<std::string>& file_paths);
-  typedef base::Callback<void(bool)> InfoBarCallback;
-  void ShowDevToolsConfirmInfoBar(const base::string16& message,
-                                  const InfoBarCallback& callback);
+  void ShowDevToolsInfoBar(const base::string16& message,
+                           const DevToolsInfoBarDelegate::Callback& callback);
 
   // Extensions support.
   void AddDevToolsExtensionsToClient();

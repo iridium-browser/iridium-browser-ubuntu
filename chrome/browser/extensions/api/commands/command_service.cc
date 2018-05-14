@@ -4,11 +4,11 @@
 
 #include "chrome/browser/extensions/api/commands/command_service.h"
 
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -87,7 +87,7 @@ std::string StripCurrentPlatform(const std::string& key) {
 void SetInitialBindingsHaveBeenAssigned(
     ExtensionPrefs* prefs, const std::string& extension_id) {
   prefs->UpdateExtensionPref(extension_id, kInitialBindingsHaveBeenAssigned,
-                             base::MakeUnique<base::Value>(true));
+                             std::make_unique<base::Value>(true));
 }
 
 bool InitialBindingsHaveBeenAssigned(
@@ -133,8 +133,8 @@ void CommandService::RegisterProfilePrefs(
 CommandService::CommandService(content::BrowserContext* context)
     : profile_(Profile::FromBrowserContext(context)),
       extension_registry_observer_(this) {
-  ExtensionFunctionRegistry::GetInstance()->
-      RegisterFunction<GetAllCommandsFunction>();
+  ExtensionFunctionRegistry::GetInstance()
+      .RegisterFunction<GetAllCommandsFunction>();
 
   extension_registry_observer_.Add(ExtensionRegistry::Get(profile_));
 }
@@ -142,14 +142,13 @@ CommandService::CommandService(content::BrowserContext* context)
 CommandService::~CommandService() {
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<CommandService>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<CommandService>>::
+    DestructorAtExit g_command_service_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<CommandService>*
 CommandService::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_command_service_factory.Pointer();
 }
 
 // static
@@ -178,16 +177,16 @@ bool CommandService::GetBrowserActionCommand(const std::string& extension_id,
                                              QueryType type,
                                              Command* command,
                                              bool* active) const {
-  return GetExtensionActionCommand(
-      extension_id, type, command, active, BROWSER_ACTION);
+  return GetExtensionActionCommand(extension_id, type, command, active,
+                                   Command::Type::kBrowserAction);
 }
 
 bool CommandService::GetPageActionCommand(const std::string& extension_id,
                                           QueryType type,
                                           Command* command,
                                           bool* active) const {
-  return GetExtensionActionCommand(
-      extension_id, type, command, active, PAGE_ACTION);
+  return GetExtensionActionCommand(extension_id, type, command, active,
+                                   Command::Type::kPageAction);
 }
 
 bool CommandService::GetNamedCommands(const std::string& extension_id,
@@ -278,7 +277,7 @@ bool CommandService::AddKeybindingPref(
     RemoveKeybindingPrefs(extension_id, command_name);
 
   // Set the keybinding pref.
-  auto keybinding = base::MakeUnique<base::DictionaryValue>();
+  auto keybinding = std::make_unique<base::DictionaryValue>();
   keybinding->SetString(kExtension, extension_id);
   keybinding->SetString(kCommandName, command_name);
   keybinding->SetBoolean(kGlobal, global);
@@ -404,8 +403,7 @@ Command CommandService::FindCommandByName(const std::string& extension_id,
 bool CommandService::GetSuggestedExtensionCommand(
     const std::string& extension_id,
     const ui::Accelerator& accelerator,
-    Command* command,
-    ExtensionCommandType* command_type) const {
+    Command* command) const {
   const Extension* extension =
       ExtensionRegistry::Get(profile_)
           ->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
@@ -420,8 +418,6 @@ bool CommandService::GetSuggestedExtensionCommand(
       accelerator == prospective_command.accelerator()) {
     if (command)
       *command = prospective_command;
-    if (command_type)
-      *command_type = BROWSER_ACTION;
     return true;
   } else if (GetPageActionCommand(extension_id,
                                   CommandService::SUGGESTED,
@@ -430,8 +426,6 @@ bool CommandService::GetSuggestedExtensionCommand(
              accelerator == prospective_command.accelerator()) {
     if (command)
       *command = prospective_command;
-    if (command_type)
-      *command_type = PAGE_ACTION;
     return true;
   } else if (GetNamedCommands(extension_id,
                               CommandService::SUGGESTED,
@@ -443,8 +437,6 @@ bool CommandService::GetSuggestedExtensionCommand(
       if (accelerator == it->second.accelerator()) {
         if (command)
           *command = it->second;
-        if (command_type)
-          *command_type = NAMED;
         return true;
       }
     }
@@ -455,11 +447,10 @@ bool CommandService::GetSuggestedExtensionCommand(
 bool CommandService::RequestsBookmarkShortcutOverride(
     const Extension* extension) const {
   return RemovesBookmarkShortcut(extension) &&
-      GetSuggestedExtensionCommand(
-          extension->id(),
-          chrome::GetPrimaryChromeAcceleratorForCommandId(IDC_BOOKMARK_PAGE),
-          NULL,
-          NULL);
+         GetSuggestedExtensionCommand(
+             extension->id(),
+             chrome::GetPrimaryChromeAcceleratorForCommandId(IDC_BOOKMARK_PAGE),
+             nullptr);
 }
 
 void CommandService::AddObserver(Observer* observer) {
@@ -859,7 +850,7 @@ bool CommandService::GetExtensionActionCommand(
     QueryType query_type,
     Command* command,
     bool* active,
-    ExtensionCommandType action_type) const {
+    Command::Type action_type) const {
   const ExtensionSet& extensions =
       ExtensionRegistry::Get(profile_)->enabled_extensions();
   const Extension* extension = extensions.GetByID(extension_id);
@@ -870,13 +861,13 @@ bool CommandService::GetExtensionActionCommand(
 
   const Command* requested_command = NULL;
   switch (action_type) {
-    case BROWSER_ACTION:
+    case Command::Type::kBrowserAction:
       requested_command = CommandsInfo::GetBrowserActionCommand(extension);
       break;
-    case PAGE_ACTION:
+    case Command::Type::kPageAction:
       requested_command = CommandsInfo::GetPageActionCommand(extension);
       break;
-    case NAMED:
+    case Command::Type::kNamed:
       NOTREACHED();
       return false;
   }

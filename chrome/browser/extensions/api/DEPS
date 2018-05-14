@@ -3,15 +3,23 @@ include_rules = [
   "+chrome/browser/apps",
   "+components/about_handler",
   "+components/guest_view/common",
-  "+device/hid",
+  "+components/language/core/browser",
+  "+services/device/public",
    # Enable remote assistance on Chrome OS
   "+remoting/base",
   "+remoting/host",
+  "+services/network",
 ]
 
 specific_include_rules = {
   ".*test.*": [
     "+chrome/browser/ui/views/frame",
     "+components/captive_portal",
+  ],
+
+  # TODO(eladalon): Remove along with webrtc_event_log_apitest.cc.
+  # https://crbug.com/775415
+   "webrtc_event_log_apitest.cc": [
+    "+content/browser/webrtc",
   ],
 }

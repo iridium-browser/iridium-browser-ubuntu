@@ -14,7 +14,7 @@
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/message_center/message_center_style.h"
+#include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/views/message_popup_collection.h"
 #include "ui/wm/core/shadow_types.h"
 
@@ -65,7 +65,7 @@ void AshPopupAlignmentDelegate::SetTrayBubbleHeight(int height) {
   }
 
   if (tray_bubble_height_ > 0)
-    tray_bubble_height_ += message_center::kMarginBetweenItems;
+    tray_bubble_height_ += message_center::kMarginBetweenPopups;
   else
     tray_bubble_height_ = 0;
 
@@ -84,7 +84,7 @@ int AshPopupAlignmentDelegate::GetToastOriginX(
   return work_area_.right() - kToastMarginX - toast_bounds.width();
 }
 
-int AshPopupAlignmentDelegate::GetBaseLine() const {
+int AshPopupAlignmentDelegate::GetBaseline() const {
   return work_area_.bottom() - kNoToastMarginBorderAndShadowOffset -
          tray_bubble_height_;
 }
@@ -113,7 +113,7 @@ void AshPopupAlignmentDelegate::ConfigureWidgetInitParamsForContainer(
     views::Widget* widget,
     views::Widget::InitParams* init_params) {
   init_params->shadow_type = views::Widget::InitParams::SHADOW_TYPE_DROP;
-  init_params->shadow_elevation = ::wm::ShadowElevation::MEDIUM;
+  init_params->shadow_elevation = ::wm::kShadowElevationInactiveWindow;
   // On ash, popups go in the status container.
   init_params->parent = shelf_->GetWindow()->GetRootWindow()->GetChildById(
       kShellWindowId_StatusContainer);

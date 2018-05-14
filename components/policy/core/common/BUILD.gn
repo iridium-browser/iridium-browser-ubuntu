@@ -140,6 +140,7 @@ source_set("internal") {
   deps = [
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
+    "//components/crash/core/common:crash_key",  # Remove once https://crbug.com/685996 is fixed.
     "//components/data_use_measurement/core",
     "//components/json_schema",
     "//components/prefs",
@@ -152,9 +153,11 @@ source_set("internal") {
 
   if (is_win) {
     libs = [
+      "netapi32.lib",
+      "ntdsapi.lib",
+      "secur32.lib",
       "shlwapi.lib",
       "userenv.lib",
-      "ntdsapi.lib",
     ]
   }
 
@@ -259,6 +262,7 @@ static_library("test_support") {
   public_deps = [
     ":common",
     "//base",
+    "//base/test:test_support",
 
     # Explicitly link in the generated policy target into the test support
     # so it will be linked to dependent targets. Otherwise in component

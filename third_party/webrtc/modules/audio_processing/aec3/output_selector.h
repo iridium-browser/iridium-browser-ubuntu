@@ -8,11 +8,11 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_
-#define WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_
+#ifndef MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_
+#define MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_
 
-#include "webrtc/rtc_base/array_view.h"
-#include "webrtc/rtc_base/constructormagic.h"
+#include "api/array_view.h"
+#include "rtc_base/constructormagic.h"
 
 namespace webrtc {
 
@@ -28,9 +28,6 @@ class OutputSelector {
                         rtc::ArrayView<const float> subtractor_output,
                         rtc::ArrayView<float> capture);
 
-  // Returns true if the linear aec output is the one used.
-  bool UseSubtractorOutput() const { return use_subtractor_output_; }
-
  private:
   bool use_subtractor_output_ = false;
   RTC_DISALLOW_COPY_AND_ASSIGN(OutputSelector);
@@ -38,4 +35,4 @@ class OutputSelector {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_
+#endif  // MODULES_AUDIO_PROCESSING_AEC3_OUTPUT_SELECTOR_H_

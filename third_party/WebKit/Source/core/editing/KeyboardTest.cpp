@@ -33,8 +33,8 @@
 #include <memory>
 
 #include "build/build_config.h"
+#include "core/dom/events/EventTarget.h"
 #include "core/editing/Editor.h"
-#include "core/events/EventTarget.h"
 #include "core/events/KeyboardEvent.h"
 #include "core/frame/Settings.h"
 #include "platform/KeyboardCodes.h"
@@ -51,7 +51,7 @@ class KeyboardTest : public ::testing::Test {
   // E.g., sending in the enter key gives back "InsertNewline".
   const char* InterpretKeyEvent(const WebKeyboardEvent& web_keyboard_event) {
     KeyboardEvent* keyboard_event =
-        KeyboardEvent::Create(web_keyboard_event, 0);
+        KeyboardEvent::Create(web_keyboard_event, nullptr);
     std::unique_ptr<Settings> settings = Settings::Create();
     EditingBehavior behavior(settings->GetEditingBehaviorType());
     return behavior.InterpretKeyEvent(*keyboard_event);
@@ -62,7 +62,7 @@ class KeyboardTest : public ::testing::Test {
                                            WebInputEvent::Type type,
                                            const String& key = g_empty_string) {
     WebKeyboardEvent event(type, modifiers,
-                           WebInputEvent::kTimeStampForTesting);
+                           WebInputEvent::GetStaticTimeStampForTests());
     event.text[0] = key_code;
     event.windows_key_code = key_code;
     event.dom_key = Platform::Current()->DomKeyEnumFromString(key);

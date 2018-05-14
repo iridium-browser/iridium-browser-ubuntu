@@ -11,6 +11,7 @@
 #include "base/strings/string_util.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "services/network/public/cpp/cors/cors_legacy.h"
 #include "url/url_util.h"
 
 namespace content {
@@ -20,8 +21,9 @@ namespace {
 // prevent any destructors from being called that will slow us down or cause
 // problems.
 std::vector<std::string>* savable_schemes = nullptr;
-// Note we store GURLs here instead of strings to deal with canonicalization.
-std::vector<GURL>* secure_origins = nullptr;
+// Note we store url::Origins here instead of strings to deal with
+// canonicalization.
+std::vector<url::Origin>* secure_origins = nullptr;
 std::vector<std::string>* service_worker_schemes = nullptr;
 
 const char* const kDefaultSavableSchemes[] = {
@@ -52,12 +54,14 @@ void RegisterContentSchemes(bool lock_schemes) {
     url::AddReferrerScheme(scheme.c_str(), url::SCHEME_WITHOUT_PORT);
 
   schemes.secure_schemes.push_back(kChromeUIScheme);
+  schemes.secure_schemes.push_back(kChromeErrorScheme);
   for (auto& scheme : schemes.secure_schemes)
     url::AddSecureScheme(scheme.c_str());
 
   for (auto& scheme : schemes.local_schemes)
     url::AddLocalScheme(scheme.c_str());
 
+  schemes.no_access_schemes.push_back(kChromeErrorScheme);
   for (auto& scheme : schemes.no_access_schemes)
     url::AddNoAccessScheme(scheme.c_str());
 
@@ -65,6 +69,8 @@ void RegisterContentSchemes(bool lock_schemes) {
   for (auto& scheme : schemes.cors_enabled_schemes)
     url::AddCORSEnabledScheme(scheme.c_str());
 
+  // TODO(mkwst): Investigate whether chrome-error should be included in
+  // csp_bypassing_schemes.
   for (auto& scheme : schemes.csp_bypassing_schemes)
     url::AddCSPBypassingScheme(scheme.c_str());
 
@@ -93,15 +99,16 @@ void RegisterContentSchemes(bool lock_schemes) {
   *service_worker_schemes = std::move(schemes.service_worker_schemes);
 
   delete secure_origins;
-  secure_origins = new std::vector<GURL>;
+  secure_origins = new std::vector<url::Origin>;
   *secure_origins = std::move(schemes.secure_origins);
+  network::cors::legacy::RegisterSecureOrigins(*secure_origins);
 }
 
 const std::vector<std::string>& GetSavableSchemes() {
   return *savable_schemes;
 }
 
-const std::vector<GURL>& GetSecureOrigins() {
+const std::vector<url::Origin>& GetSecureOrigins() {
   return *secure_origins;
 }
 

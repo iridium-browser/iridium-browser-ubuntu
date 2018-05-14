@@ -8,18 +8,18 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_
-#define WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_
+#ifndef MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_
+#define MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_
 
 #include <stdint.h>
 
 #include <map>
 #include <memory>
 
-#include "webrtc/api/video_codecs/video_encoder.h"
-#include "webrtc/common_video/include/video_bitrate_allocator.h"
-#include "webrtc/modules/video_coding/codecs/vp8/temporal_layers.h"
-#include "webrtc/rtc_base/constructormagic.h"
+#include "api/video_codecs/video_encoder.h"
+#include "common_video/include/video_bitrate_allocator.h"
+#include "modules/video_coding/codecs/vp8/temporal_layers.h"
+#include "rtc_base/constructormagic.h"
 
 namespace webrtc {
 
@@ -39,6 +39,12 @@ class SimulcastRateAllocator : public VideoBitrateAllocator,
   const VideoCodec& GetCodec() const;
 
  private:
+  void DistributeAllocationToSimulcastLayers(
+      uint32_t total_bitrate_bps,
+      BitrateAllocation* allocated_bitrates_bps);
+  void DistributeAllocationToTemporalLayers(
+      uint32_t framerate,
+      BitrateAllocation* allocated_bitrates_bps);
   const VideoCodec codec_;
   std::map<uint32_t, TemporalLayers*> temporal_layers_;
   std::unique_ptr<TemporalLayersFactory> tl_factory_;
@@ -48,4 +54,4 @@ class SimulcastRateAllocator : public VideoBitrateAllocator,
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_
+#endif  // MODULES_VIDEO_CODING_CODECS_VP8_SIMULCAST_RATE_ALLOCATOR_H_

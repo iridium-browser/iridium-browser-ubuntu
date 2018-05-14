@@ -47,9 +47,7 @@ class V8ObjectBuilder;
 using PerformanceEntryType = unsigned;
 using PerformanceEntryTypeMask = unsigned;
 
-class CORE_EXPORT PerformanceEntry
-    : public GarbageCollectedFinalized<PerformanceEntry>,
-      public ScriptWrappable {
+class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -89,19 +87,19 @@ class CORE_EXPORT PerformanceEntry
 
   static bool StartTimeCompareLessThan(PerformanceEntry* a,
                                        PerformanceEntry* b) {
+    if (a->startTime() == b->startTime())
+      return a->index_ < b->index_;
     return a->startTime() < b->startTime();
   }
 
   static PerformanceEntry::EntryType ToEntryTypeEnum(const String& entry_type);
-
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
 
  protected:
   PerformanceEntry(const String& name,
                    const String& entry_type,
                    double start_time,
                    double finish_time);
-  virtual void BuildJSONValue(ScriptState*, V8ObjectBuilder&) const;
+  virtual void BuildJSONValue(V8ObjectBuilder&) const;
 
  private:
   const String name_;
@@ -109,6 +107,7 @@ class CORE_EXPORT PerformanceEntry
   const double start_time_;
   const double duration_;
   const PerformanceEntryType entry_type_enum_;
+  const int index_;
 };
 
 }  // namespace blink

@@ -12,8 +12,7 @@
 #include "media/media_features.h"
 
 #if BUILDFLAG(ENABLE_WEBRTC)
-#include "chrome/browser/media/audio_debug_recordings_handler.h"
-#include "chrome/browser/media/webrtc/webrtc_event_log_handler.h"
+#include "chrome/browser/media/webrtc/audio_debug_recordings_handler.h"
 #include "chrome/browser/media/webrtc/webrtc_logging_handler_host.h"
 #endif
 
@@ -257,32 +256,25 @@ class WebrtcLoggingPrivateStopAudioDebugRecordingsFunction
   bool RunAsync() override;
 };
 
-class WebrtcLoggingPrivateStartWebRtcEventLoggingFunction
-    : public WebrtcLoggingPrivateFunctionWithRecordingDoneCallback {
+class WebrtcLoggingPrivateGetLogsDirectoryFunction
+    : public WebrtcLoggingPrivateFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("webrtcLoggingPrivate.startWebRtcEventLogging",
-                             WEBRTCLOGGINGPRIVATE_STARTRTCEVENTLOGGING)
-  WebrtcLoggingPrivateStartWebRtcEventLoggingFunction() {}
+  DECLARE_EXTENSION_FUNCTION("webrtcLoggingPrivate.getLogsDirectory",
+                             WEBRTCLOGGINGPRIVATE_GETLOGSDIRECTORY)
+  WebrtcLoggingPrivateGetLogsDirectoryFunction() {}
 
  private:
-  ~WebrtcLoggingPrivateStartWebRtcEventLoggingFunction() override {}
+  ~WebrtcLoggingPrivateGetLogsDirectoryFunction() override {}
 
   // ExtensionFunction overrides.
   bool RunAsync() override;
-};
 
-class WebrtcLoggingPrivateStopWebRtcEventLoggingFunction
-    : public WebrtcLoggingPrivateFunctionWithRecordingDoneCallback {
- public:
-  DECLARE_EXTENSION_FUNCTION("webrtcLoggingPrivate.stopWebRtcEventLogging",
-                             WEBRTCLOGGINGPRIVATE_STOPRTCEVENTLOGGING)
-  WebrtcLoggingPrivateStopWebRtcEventLoggingFunction() {}
-
- private:
-  ~WebrtcLoggingPrivateStopWebRtcEventLoggingFunction() override {}
-
-  // ExtensionFunction overrides.
-  bool RunAsync() override;
+#if BUILDFLAG(ENABLE_WEBRTC)
+  // Must be called on UI thread.
+  void FireErrorCallback(const std::string& error_message);
+  void FireCallback(const std::string& filesystem_id,
+                    const std::string& base_name);
+#endif
 };
 
 }  // namespace extensions

@@ -23,23 +23,23 @@
 #include "core/html/forms/FileInputType.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/HTMLNames.h"
-#include "core/InputTypeNames.h"
+#include "core/css/StyleChangeReason.h"
 #include "core/dom/ShadowRoot.h"
-#include "core/dom/StyleChangeReason.h"
-#include "core/dom/UserGestureIndicator.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
+#include "core/events/KeyboardEvent.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileList.h"
 #include "core/frame/UseCounter.h"
-#include "core/html/FormData.h"
-#include "core/html/HTMLInputElement.h"
 #include "core/html/forms/FormController.h"
+#include "core/html/forms/FormData.h"
+#include "core/html/forms/HTMLInputElement.h"
+#include "core/html_names.h"
+#include "core/input_type_names.h"
 #include "core/layout/LayoutFileUploadControl.h"
 #include "core/page/ChromeClient.h"
 #include "core/page/DragData.h"
 #include "platform/FileMetadata.h"
-#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/runtime_enabled_features.h"
 #include "platform/text/PlatformLocale.h"
 #include "platform/wtf/text/StringBuilder.h"
 #include "platform/wtf/text/WTFString.h"
@@ -48,6 +48,21 @@ namespace blink {
 
 using blink::WebLocalizedString;
 using namespace HTMLNames;
+
+namespace {
+
+WebVector<WebString> CollectAcceptTypes(const HTMLInputElement& input) {
+  Vector<String> mime_types = input.AcceptMIMETypes();
+  Vector<String> extensions = input.AcceptFileExtensions();
+
+  Vector<String> accept_types;
+  accept_types.ReserveCapacity(mime_types.size() + extensions.size());
+  accept_types.AppendVector(mime_types);
+  accept_types.AppendVector(extensions);
+  return accept_types;
+}
+
+}  // namespace
 
 inline FileInputType::FileInputType(HTMLInputElement& element)
     : InputType(element),
@@ -58,7 +73,7 @@ InputType* FileInputType::Create(HTMLInputElement& element) {
   return new FileInputType(element);
 }
 
-DEFINE_TRACE(FileInputType) {
+void FileInputType::Trace(blink::Visitor* visitor) {
   visitor->Trace(file_list_);
   KeyboardClickableInputTypeView::Trace(visitor);
   InputType::Trace(visitor);
@@ -132,24 +147,29 @@ void FileInputType::HandleDOMActivateEvent(Event* event) {
   if (GetElement().IsDisabledFormControl())
     return;
 
-  if (!UserGestureIndicator::ProcessingUserGesture())
+  if (!Frame::HasTransientUserActivation(GetElement().GetDocument().GetFrame()))
     return;
 
-  if (ChromeClient* chrome_client = this->GetChromeClient()) {
-    FileChooserSettings settings;
+  if (ChromeClient* chrome_client = GetChromeClient()) {
+    WebFileChooserParams params;
     HTMLInputElement& input = GetElement();
-    settings.allows_directory_upload =
-        input.FastHasAttribute(webkitdirectoryAttr);
-    settings.allows_multiple_files = settings.allows_directory_upload ||
-                                     input.FastHasAttribute(multipleAttr);
-    settings.accept_mime_types = input.AcceptMIMETypes();
-    settings.accept_file_extensions = input.AcceptFileExtensions();
-    settings.selected_files = file_list_->PathsForUserVisibleFiles();
-    settings.use_media_capture =
-        RuntimeEnabledFeatures::MediaCaptureEnabled() &&
-        input.FastHasAttribute(captureAttr);
-    chrome_client->OpenFileChooser(input.GetDocument().GetFrame(),
-                                   NewFileChooser(settings));
+    Document& document = input.GetDocument();
+    bool is_directory = input.FastHasAttribute(webkitdirectoryAttr);
+    params.directory = is_directory;
+    params.need_local_path = is_directory;
+    params.multi_select = is_directory || input.FastHasAttribute(multipleAttr);
+    params.accept_types = CollectAcceptTypes(input);
+    params.selected_files = file_list_->PathsForUserVisibleFiles();
+    params.use_media_capture = RuntimeEnabledFeatures::MediaCaptureEnabled() &&
+                               input.FastHasAttribute(captureAttr);
+    params.requestor = document.Url();
+
+    UseCounter::Count(
+        document, document.IsSecureContext()
+                      ? WebFeature::kInputTypeFileSecureOriginOpenChooser
+                      : WebFeature::kInputTypeFileInsecureOriginOpenChooser);
+
+    chrome_client->OpenFileChooser(document.GetFrame(), NewFileChooser(params));
   }
   event->SetDefaultHandled();
 }
@@ -258,9 +278,9 @@ void FileInputType::CountUsage() {
 }
 
 void FileInputType::CreateShadowSubtree() {
-  DCHECK(GetElement().Shadow());
-  HTMLInputElement* button =
-      HTMLInputElement::Create(GetElement().GetDocument(), false);
+  DCHECK(IsShadowHost(GetElement()));
+  auto* button = HTMLInputElement::Create(GetElement().GetDocument(),
+                                          CreateElementFlags());
   button->setType(InputTypeNames::button);
   button->setAttribute(
       valueAttr,
@@ -273,7 +293,7 @@ void FileInputType::CreateShadowSubtree() {
 }
 
 void FileInputType::DisabledAttributeChanged() {
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
   if (Element* button =
           ToElementOrDie(GetElement().UserAgentShadowRoot()->firstChild()))
     button->SetBooleanAttribute(disabledAttr,
@@ -281,7 +301,7 @@ void FileInputType::DisabledAttributeChanged() {
 }
 
 void FileInputType::MultipleAttributeChanged() {
-  DCHECK(GetElement().Shadow());
+  DCHECK(IsShadowHost(GetElement()));
   if (Element* button =
           ToElementOrDie(GetElement().UserAgentShadowRoot()->firstChild()))
     button->setAttribute(
@@ -319,6 +339,7 @@ void FileInputType::SetFiles(FileList* files) {
   if (files_changed) {
     // This call may cause destruction of this instance.
     // input instance is safe since it is ref-counted.
+    GetElement().DispatchInputEvent();
     GetElement().DispatchChangeEvent();
   }
 }
@@ -329,15 +350,16 @@ void FileInputType::FilesChosen(const Vector<FileChooserFileInfo>& files) {
 }
 
 void FileInputType::SetFilesFromDirectory(const String& path) {
-  if (ChromeClient* chrome_client = this->GetChromeClient()) {
-    FileChooserSettings settings;
-    HTMLInputElement& input = GetElement();
-    settings.allows_directory_upload = true;
-    settings.allows_multiple_files = true;
-    settings.selected_files.push_back(path);
-    settings.accept_mime_types = input.AcceptMIMETypes();
-    settings.accept_file_extensions = input.AcceptFileExtensions();
-    chrome_client->EnumerateChosenDirectory(NewFileChooser(settings));
+  if (ChromeClient* chrome_client = GetChromeClient()) {
+    Vector<String> files;
+    files.push_back(path);
+    WebFileChooserParams params;
+    params.directory = true;
+    params.multi_select = true;
+    params.selected_files = files;
+    params.accept_types = CollectAcceptTypes(GetElement());
+    params.requestor = GetElement().GetDocument().Url();
+    chrome_client->EnumerateChosenDirectory(NewFileChooser(params));
   }
 }
 
@@ -403,6 +425,32 @@ void FileInputType::CopyNonAttributeProperties(const HTMLInputElement& source) {
   const FileList* source_list = source.files();
   for (unsigned i = 0; i < source_list->length(); ++i)
     file_list_->Append(source_list->item(i)->Clone());
+}
+
+void FileInputType::HandleKeypressEvent(KeyboardEvent* event) {
+  if (GetElement().FastHasAttribute(webkitdirectoryAttr)) {
+    // Override to invoke the action on Enter key up (not press) to avoid
+    // repeats committing the file chooser.
+    const String& key = event->key();
+    if (key == "Enter") {
+      event->SetDefaultHandled();
+      return;
+    }
+  }
+  KeyboardClickableInputTypeView::HandleKeypressEvent(event);
+}
+
+void FileInputType::HandleKeyupEvent(KeyboardEvent* event) {
+  if (GetElement().FastHasAttribute(webkitdirectoryAttr)) {
+    // Override to invoke the action on Enter key up (not press) to avoid
+    // repeats committing the file chooser.
+    if (event->key() == "Enter") {
+      GetElement().DispatchSimulatedClick(event);
+      event->SetDefaultHandled();
+      return;
+    }
+  }
+  KeyboardClickableInputTypeView::HandleKeyupEvent(event);
 }
 
 }  // namespace blink

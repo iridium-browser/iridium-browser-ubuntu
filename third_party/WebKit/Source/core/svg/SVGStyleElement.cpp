@@ -22,24 +22,24 @@
 
 #include "core/svg/SVGStyleElement.h"
 
-#include "core/MediaTypeNames.h"
 #include "core/css/CSSStyleSheet.h"
-#include "core/dom/TaskRunnerHelper.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
+#include "core/media_type_names.h"
 #include "platform/wtf/StdLibExtras.h"
+#include "public/platform/TaskType.h"
 
 namespace blink {
 
 inline SVGStyleElement::SVGStyleElement(Document& document,
-                                        bool created_by_parser)
+                                        const CreateElementFlags flags)
     : SVGElement(SVGNames::styleTag, document),
-      StyleElement(&document, created_by_parser) {}
+      StyleElement(&document, flags.IsCreatedByParser()) {}
 
-SVGStyleElement::~SVGStyleElement() {}
+SVGStyleElement::~SVGStyleElement() = default;
 
 SVGStyleElement* SVGStyleElement::Create(Document& document,
-                                         bool created_by_parser) {
-  return new SVGStyleElement(document, created_by_parser);
+                                         const CreateElementFlags flags) {
+  return new SVGStyleElement(document, flags);
 }
 
 bool SVGStyleElement::disabled() const {
@@ -130,18 +130,19 @@ void SVGStyleElement::ChildrenChanged(const ChildrenChange& change) {
 
 void SVGStyleElement::NotifyLoadedSheetAndAllCriticalSubresources(
     LoadedSheetErrorStatus error_status) {
-  if (error_status != kNoErrorLoadingSubresource)
-    TaskRunnerHelper::Get(TaskType::kDOMManipulation, &GetDocument())
-        ->PostTask(BLINK_FROM_HERE,
-                   WTF::Bind(&SVGStyleElement::DispatchPendingEvent,
-                             WrapPersistent(this)));
+  if (error_status != kNoErrorLoadingSubresource) {
+    GetDocument()
+        .GetTaskRunner(TaskType::kDOMManipulation)
+        ->PostTask(FROM_HERE, WTF::Bind(&SVGStyleElement::DispatchPendingEvent,
+                                        WrapPersistent(this)));
+  }
 }
 
 void SVGStyleElement::DispatchPendingEvent() {
   DispatchEvent(Event::Create(EventTypeNames::error));
 }
 
-DEFINE_TRACE(SVGStyleElement) {
+void SVGStyleElement::Trace(blink::Visitor* visitor) {
   StyleElement::Trace(visitor);
   SVGElement::Trace(visitor);
 }

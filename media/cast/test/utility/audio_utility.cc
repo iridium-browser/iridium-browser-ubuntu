@@ -29,7 +29,7 @@ TestAudioBusFactory::TestAudioBusFactory(int num_channels,
   CHECK_LE(volume_, 1.0f);
 }
 
-TestAudioBusFactory::~TestAudioBusFactory() {}
+TestAudioBusFactory::~TestAudioBusFactory() = default;
 
 std::unique_ptr<AudioBus> TestAudioBusFactory::NextAudioBus(
     const base::TimeDelta& duration) {
@@ -44,7 +44,7 @@ std::unique_ptr<AudioBus> TestAudioBusFactory::NextAudioBus(
 int CountZeroCrossings(const float* samples, int length) {
   // The sample values must pass beyond |kAmplitudeThreshold| on the opposite
   // side of zero before a crossing will be counted.
-  const float kAmplitudeThreshold = 0.03f;  // 3% of max amplitude.
+  const float kAmplitudeThreshold = 0.02f;  // 2% of max amplitude.
 
   int count = 0;
   int i = 0;

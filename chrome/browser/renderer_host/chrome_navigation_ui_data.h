@@ -8,6 +8,9 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "chrome/common/prerender_types.h"
+#include "components/offline_pages/buildflags/buildflags.h"
+#include "components/offline_pages/core/request_header/offline_page_navigation_ui_data.h"
 #include "content/public/browser/navigation_ui_data.h"
 #include "extensions/browser/extension_navigation_ui_data.h"
 #include "extensions/features/features.h"
@@ -15,6 +18,8 @@
 namespace content {
 class NavigationHandle;
 }
+
+enum class WindowOpenDisposition;
 
 // PlzNavigate
 // Contains data that is passed from the UI thread to the IO thread at the
@@ -27,9 +32,13 @@ class ChromeNavigationUIData : public content::NavigationUIData {
   explicit ChromeNavigationUIData(content::NavigationHandle* navigation_handle);
   ~ChromeNavigationUIData() override;
 
+  static std::unique_ptr<ChromeNavigationUIData> CreateForMainFrameNavigation(
+      content::WebContents* web_contents,
+      WindowOpenDisposition disposition);
+
   // Creates a new ChromeNavigationUIData that is a deep copy of the original.
   // Any changes to the original after the clone is created will not be
-  // reflected in the clone.  |extension_data_| is deep copied.
+  // reflected in the clone.  All owned data members are deep copied.
   std::unique_ptr<content::NavigationUIData> Clone() const override;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -41,11 +50,37 @@ class ChromeNavigationUIData : public content::NavigationUIData {
   }
 #endif
 
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  void SetOfflinePageNavigationUIData(
+      std::unique_ptr<offline_pages::OfflinePageNavigationUIData>
+          offline_page_data);
+
+  offline_pages::OfflinePageNavigationUIData* GetOfflinePageNavigationUIData()
+      const {
+    return offline_page_data_.get();
+  }
+#endif
+  WindowOpenDisposition window_open_disposition() const { return disposition_; }
+  prerender::PrerenderMode prerender_mode() const { return prerender_mode_; }
+  const std::string& prerender_histogram_prefix() {
+    return prerender_histogram_prefix_;
+  }
+
  private:
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Manages the lifetime of optional ExtensionNavigationUIData information.
   std::unique_ptr<extensions::ExtensionNavigationUIData> extension_data_;
 #endif
+
+#if BUILDFLAG(ENABLE_OFFLINE_PAGES)
+  // Manages the lifetime of optional OfflinePageNavigationUIData information.
+  std::unique_ptr<offline_pages::OfflinePageNavigationUIData>
+      offline_page_data_;
+#endif
+
+  WindowOpenDisposition disposition_;
+  prerender::PrerenderMode prerender_mode_ = prerender::NO_PRERENDER;
+  std::string prerender_histogram_prefix_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeNavigationUIData);
 };

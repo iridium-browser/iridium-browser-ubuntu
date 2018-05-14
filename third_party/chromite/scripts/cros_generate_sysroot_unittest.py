@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -79,6 +80,16 @@ class InterfaceTest(cros_test_lib.TempDirTestCase):
   def testDefaultTargetName(self):
     """We are getting the right default target name."""
     options = self._Parse([])
+    self.assertEquals(
+        options.out_file, 'sysroot_chromeos-base_chromeos-chrome.tar.xz')
+
+  def testMultiplePkgsTargetName(self):
+    """Test getting the right target name with multiple pkgs."""
+    pkgs = "%s virtual/target-os" %constants.CHROME_CP
+    options = cros_gen.ParseCommandLine(
+        ['--board', BOARD, '--out-dir', self.tempdir,
+         '--package', pkgs])
+
     self.assertEquals(
         options.out_file, 'sysroot_chromeos-base_chromeos-chrome.tar.xz')
 

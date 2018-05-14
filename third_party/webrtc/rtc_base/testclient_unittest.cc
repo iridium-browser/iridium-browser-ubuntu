@@ -8,26 +8,26 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/testclient.h"
-#include "webrtc/rtc_base/gunit.h"
-#include "webrtc/rtc_base/nethelpers.h"
-#include "webrtc/rtc_base/physicalsocketserver.h"
-#include "webrtc/rtc_base/ptr_util.h"
-#include "webrtc/rtc_base/testechoserver.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/testclient.h"
+#include "rtc_base/gunit.h"
+#include "rtc_base/nethelpers.h"
+#include "rtc_base/physicalsocketserver.h"
+#include "rtc_base/ptr_util.h"
+#include "rtc_base/testechoserver.h"
+#include "rtc_base/thread.h"
 
 using namespace rtc;
 
-#define MAYBE_SKIP_IPV4                    \
-  if (!HasIPv4Enabled()) {                 \
-    LOG(LS_INFO) << "No IPv4... skipping"; \
-    return;                                \
+#define MAYBE_SKIP_IPV4                        \
+  if (!HasIPv4Enabled()) {                     \
+    RTC_LOG(LS_INFO) << "No IPv4... skipping"; \
+    return;                                    \
   }
 
-#define MAYBE_SKIP_IPV6                    \
-  if (!HasIPv6Enabled()) {                 \
-    LOG(LS_INFO) << "No IPv6... skipping"; \
-    return;                                \
+#define MAYBE_SKIP_IPV6                        \
+  if (!HasIPv6Enabled()) {                     \
+    RTC_LOG(LS_INFO) << "No IPv6... skipping"; \
+    return;                                    \
   }
 
 void TestUdpInternal(const SocketAddress& loopback) {

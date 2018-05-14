@@ -12,6 +12,7 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Canvas;
+import android.support.annotation.Nullable;
 import android.support.v4.view.ViewCompat;
 import android.support.v4.view.animation.FastOutLinearInInterpolator;
 import android.support.v7.view.ContextThemeWrapper;
@@ -27,12 +28,12 @@ import android.view.animation.Interpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 
-import org.chromium.base.Callback;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ntp.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.cards.CardViewHolder;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
+import org.chromium.chrome.browser.ntp.cards.ScrollToLoadListener;
 import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 
 import java.util.ArrayList;
@@ -49,16 +50,14 @@ import java.util.Set;
 public class SuggestionsRecyclerView extends RecyclerView {
     private static final Interpolator DISMISS_INTERPOLATOR = new FastOutLinearInInterpolator();
     private static final int DISMISS_ANIMATION_TIME_MS = 300;
-    /**
-     * A single instance of {@link ResetForDismissCallback} that can be reused as it has no
-     * state.
-     */
-    public static final NewTabPageViewHolder.PartialBindCallback RESET_FOR_DISMISS_CALLBACK =
-            new ResetForDismissCallback();
+    private static final int NEW_CONTENT_HIGHLIGHT_DURATION_MS = 3000;
 
     private final GestureDetector mGestureDetector;
     private final LinearLayoutManager mLayoutManager;
     private final SuggestionsMetrics.ScrollEventReporter mScrollEventReporter;
+
+    // The ScrollToLoadListener triggers loading more content when the user is near the end.
+    @Nullable private ScrollToLoadListener mScrollToLoadListener;
 
     /**
      * Total height of the items being dismissed.  Tracked to allow the bottom space to compensate
@@ -77,6 +76,7 @@ public class SuggestionsRecyclerView extends RecyclerView {
      * Whether the {@link SuggestionsRecyclerView} and its children should react to touch events.
      */
     private boolean mTouchEnabled = true;
+    private boolean mScrollEnabled = true;
 
     /** The ui config for this view. */
     private UiConfig mUiConfig;
@@ -88,6 +88,7 @@ public class SuggestionsRecyclerView extends RecyclerView {
         this(context, null);
     }
 
+    @SuppressWarnings("RestrictTo")
     public SuggestionsRecyclerView(Context context, AttributeSet attrs) {
         super(new ContextThemeWrapper(context, R.style.NewTabPageRecyclerView), attrs);
 
@@ -131,16 +132,42 @@ public class SuggestionsRecyclerView extends RecyclerView {
         mTouchEnabled = enabled;
     }
 
+    /**
+     * @return Whether the {@link SuggestionsRecyclerView} and its children should react to touch
+     * events.
+     */
+    protected boolean getTouchEnabled() {
+        return mTouchEnabled;
+    }
+
     @Override
     public boolean onInterceptTouchEvent(MotionEvent ev) {
         mGestureDetector.onTouchEvent(ev);
-        if (!mTouchEnabled) return true;
+        if (!getTouchEnabled()) return true;
         return super.onInterceptTouchEvent(ev);
+    }
+
+    /**
+     * Toggle whether scrolling is enabled.
+     */
+    public void setScrollEnabled(boolean enabled) {
+        mScrollEnabled = enabled;
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (ev.getActionMasked() == MotionEvent.ACTION_DOWN && !mScrollEnabled) {
+            setLayoutFrozen(true);
+        } else if (ev.getActionMasked() == MotionEvent.ACTION_UP
+                || ev.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            setLayoutFrozen(false);
+        }
+        return super.dispatchTouchEvent(ev);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent ev) {
-        if (!mTouchEnabled) return false;
+        if (!getTouchEnabled()) return false;
 
         // Action down would already have been handled in onInterceptTouchEvent
         if (ev.getActionMasked() != MotionEvent.ACTION_DOWN) {
@@ -173,10 +200,18 @@ public class SuggestionsRecyclerView extends RecyclerView {
         // be through a OnLayoutChangeListener, but then we get notified of the change after the
         // layout pass, which means that the new style will only be visible after layout happens
         // again. We prefer updating here to avoid having to require that additional layout pass.
-        mUiConfig.updateDisplayStyle();
+        if (mUiConfig != null) mUiConfig.updateDisplayStyle();
 
         // Close the Context Menu as it may have moved (https://crbug.com/642688).
-        mContextMenuManager.closeContextMenu();
+        if (mContextMenuManager != null) mContextMenuManager.closeContextMenu();
+    }
+
+    /** Highlights the current length of the view by temporarily showing the scrollbar. */
+    public void highlightContentLength() {
+        int defaultDelay = getScrollBarDefaultDelayBeforeFade();
+        setScrollBarDefaultDelayBeforeFade(NEW_CONTENT_HIGHLIGHT_DURATION_MS);
+        awakenScrollBars();
+        setScrollBarDefaultDelayBeforeFade(defaultDelay);
     }
 
     @Override
@@ -184,18 +219,14 @@ public class SuggestionsRecyclerView extends RecyclerView {
         int numberViews = getChildCount();
         for (int i = 0; i < numberViews; ++i) {
             View view = getChildAt(i);
-            NewTabPageViewHolder viewHolder = (NewTabPageViewHolder) getChildViewHolder(view);
-            if (viewHolder == null) return;
-            viewHolder.updateLayoutParams();
+            ((NewTabPageViewHolder) getChildViewHolder(view)).updateLayoutParams();
         }
         super.onLayout(changed, l, t, r, b);
     }
 
-    public void init(
-            UiConfig uiConfig, ContextMenuManager contextMenuManager, NewTabPageAdapter adapter) {
+    public void init(UiConfig uiConfig, ContextMenuManager contextMenuManager) {
         mUiConfig = uiConfig;
         mContextMenuManager = contextMenuManager;
-        setAdapter(adapter);
     }
 
     public NewTabPageAdapter getNewTabPageAdapter() {
@@ -273,12 +304,10 @@ public class SuggestionsRecyclerView extends RecyclerView {
             // The item does not exist anymore, so ignore.
             return;
         }
-        getNewTabPageAdapter().dismissItem(position, new Callback<String>() {
-            @Override
-            public void onResult(String removedItemTitle) {
-                announceForAccessibility(getResources().getString(
-                        R.string.ntp_accessibility_item_removed, removedItemTitle));
-            }
+        getNewTabPageAdapter().dismissItem(position, removedItemTitle -> {
+            announceForAccessibility(getResources().getString(
+                    R.string.ntp_accessibility_item_removed, removedItemTitle));
+            if (mScrollToLoadListener != null) mScrollToLoadListener.onItemDismissed();
         });
     }
 
@@ -332,6 +361,32 @@ public class SuggestionsRecyclerView extends RecyclerView {
         return mScrollEventReporter;
     }
 
+    /**
+     * Resets a card's properties affected by swipe to dismiss. Intended to be used as
+     * {@link NewTabPageViewHolder.PartialBindCallback}
+     */
+    public static void resetForDismissCallback(NewTabPageViewHolder holder) {
+        ((CardViewHolder) holder).getRecyclerView().updateViewStateForDismiss(0, holder);
+    }
+
+    /**
+     * Sets the ScrollToLoadListener for the RecyclerView.
+     */
+    public void setScrollToLoadListener(ScrollToLoadListener scrollToLoadListener) {
+        mScrollToLoadListener = scrollToLoadListener;
+        addOnScrollListener(mScrollToLoadListener);
+    }
+
+    /**
+     * Clears the currently registered ScrollToLoadListener.
+     */
+    public void clearScrollToLoadListener() {
+        if (mScrollToLoadListener == null) return;
+
+        removeOnScrollListener(mScrollToLoadListener);
+        mScrollToLoadListener = null;
+    }
+
     private class ItemTouchCallbacks extends ItemTouchHelper.Callback {
         @Override
         public void onSwiped(ViewHolder viewHolder, int direction) {
@@ -360,8 +415,6 @@ public class SuggestionsRecyclerView extends RecyclerView {
 
         @Override
         public int getMovementFlags(RecyclerView recyclerView, ViewHolder viewHolder) {
-            assert viewHolder instanceof NewTabPageViewHolder;
-
             int swipeFlags = 0;
             if (((NewTabPageViewHolder) viewHolder).isDismissable()) {
                 swipeFlags = ItemTouchHelper.START | ItemTouchHelper.END;
@@ -398,16 +451,5 @@ public class SuggestionsRecyclerView extends RecyclerView {
             viewHolders.add(siblingViewHolder);
         }
         return viewHolders;
-    }
-
-    /**
-     * Callback to reset a card's properties affected by swipe to dismiss.
-     */
-    private static class ResetForDismissCallback extends NewTabPageViewHolder.PartialBindCallback {
-        @Override
-        public void onResult(NewTabPageViewHolder holder) {
-            assert holder instanceof CardViewHolder;
-            ((CardViewHolder) holder).getRecyclerView().updateViewStateForDismiss(0, holder);
-        }
     }
 }

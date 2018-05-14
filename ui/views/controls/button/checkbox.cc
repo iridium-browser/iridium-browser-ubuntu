@@ -12,6 +12,7 @@
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
@@ -23,9 +24,12 @@
 #include "ui/views/painter.h"
 #include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/style/platform_style.h"
+#include "ui/views/style/typography.h"
 #include "ui/views/vector_icons.h"
 
 namespace views {
+
+constexpr int kFocusRingThicknessDip = 2;
 
 // View used to paint the focus ring around the Checkbox icon.
 // The icon is painted separately.
@@ -50,7 +54,7 @@ IconFocusRing::IconFocusRing(Checkbox* checkbox) : checkbox_(checkbox) {
 
 void IconFocusRing::Layout() {
   gfx::Rect focus_bounds = checkbox_->image()->bounds();
-  focus_bounds.Inset(gfx::Insets(-2.f));
+  focus_bounds.Inset(-kFocusRingThicknessDip, -kFocusRingThicknessDip);
   SetBoundsRect(focus_bounds);
 }
 
@@ -69,9 +73,11 @@ void IconFocusRing::OnPaint(gfx::Canvas* canvas) {
 // static
 const char Checkbox::kViewClassName[] = "Checkbox";
 
-Checkbox::Checkbox(const base::string16& label)
+Checkbox::Checkbox(const base::string16& label, bool force_md)
     : LabelButton(NULL, label),
-      checked_(false) {
+      checked_(false),
+      use_md_(force_md ||
+              ui::MaterialDesignController::IsSecondaryUiMaterial()) {
   SetHorizontalAlignment(gfx::ALIGN_LEFT);
   SetFocusForPlatform();
   SetFocusPainter(nullptr);
@@ -142,9 +148,14 @@ void Checkbox::SetChecked(bool checked) {
   UpdateImage();
 }
 
-// static
-bool Checkbox::UseMd() {
-  return ui::MaterialDesignController::IsSecondaryUiMaterial();
+void Checkbox::SetMultiLine(bool multi_line) {
+  label()->SetMultiLine(multi_line);
+}
+
+// TODO(tetsui): Remove this method and |use_md_| when MD for secondary UI
+// becomes default and IsSecondaryUiMaterial() is tautology.
+bool Checkbox::UseMd() const {
+  return use_md_;
 }
 
 const char* Checkbox::GetClassName() const {
@@ -153,17 +164,16 @@ const char* Checkbox::GetClassName() const {
 
 void Checkbox::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   LabelButton::GetAccessibleNodeData(node_data);
-  node_data->role = ui::AX_ROLE_CHECK_BOX;
-  const ui::AXCheckedState checked_state =
-      checked() ? ui::AX_CHECKED_STATE_TRUE : ui::AX_CHECKED_STATE_FALSE;
-  node_data->AddIntAttribute(ui::AX_ATTR_CHECKED_STATE, checked_state);
+  node_data->role = ax::mojom::Role::kCheckBox;
+  const ax::mojom::CheckedState checked_state =
+      checked() ? ax::mojom::CheckedState::kTrue
+                : ax::mojom::CheckedState::kFalse;
+  node_data->SetCheckedState(checked_state);
   if (enabled()) {
     if (checked()) {
-      node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
-                                 ui::AX_DEFAULT_ACTION_VERB_UNCHECK);
+      node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kUncheck);
     } else {
-      node_data->AddIntAttribute(ui::AX_ATTR_DEFAULT_ACTION_VERB,
-                                 ui::AX_DEFAULT_ACTION_VERB_CHECK);
+      node_data->SetDefaultActionVerb(ax::mojom::DefaultActionVerb::kCheck);
     }
   }
 }
@@ -205,18 +215,17 @@ std::unique_ptr<InkDropRipple> Checkbox::CreateInkDropRipple() const {
 }
 
 SkColor Checkbox::GetInkDropBaseColor() const {
-  return GetNativeTheme()->GetSystemColor(
-      ui::NativeTheme::kColorId_LabelEnabledColor);
+  // Usually ink drop ripples match the text color. Checkboxes use the color of
+  // the unchecked, enabled icon.
+  return GetIconImageColor(IconState::ENABLED);
 }
 
 gfx::ImageSkia Checkbox::GetImage(ButtonState for_state) const {
   if (UseMd()) {
-    return gfx::CreateVectorIcon(
-        GetVectorIcon(), 16,
-        // When not checked, the icon color matches the button text color.
-        GetNativeTheme()->GetSystemColor(
-            checked_ ? ui::NativeTheme::kColorId_FocusedBorderColor
-                     : ui::NativeTheme::kColorId_LabelEnabledColor));
+    const int checked = checked_ ? IconState::CHECKED : 0;
+    const int enabled = for_state != STATE_DISABLED ? IconState::ENABLED : 0;
+    return gfx::CreateVectorIcon(GetVectorIcon(), 16,
+                                 GetIconImageColor(checked | enabled));
   }
 
   const size_t checked_index = checked_ ? 1 : 0;
@@ -248,11 +257,28 @@ void Checkbox::SetCustomImage(bool checked,
 void Checkbox::PaintFocusRing(View* view,
                               gfx::Canvas* canvas,
                               const cc::PaintFlags& flags) {
-  canvas->DrawRoundRect(view->GetLocalBounds(), 2.f, flags);
+  gfx::RectF bounds(view->GetLocalBounds());
+  bounds.Inset(kFocusRingThicknessDip, kFocusRingThicknessDip);
+  canvas->DrawRoundRect(bounds, kFocusRingThicknessDip, flags);
 }
 
 const gfx::VectorIcon& Checkbox::GetVectorIcon() const {
   return checked() ? kCheckboxActiveIcon : kCheckboxNormalIcon;
+}
+
+SkColor Checkbox::GetIconImageColor(int icon_state) const {
+  DCHECK(UseMd());
+  const SkColor active_color =
+      (icon_state & IconState::CHECKED)
+          ? GetNativeTheme()->GetSystemColor(
+                ui::NativeTheme::kColorId_FocusedBorderColor)
+          // When unchecked, the icon color matches push button text color.
+          : style::GetColor(*this, style::CONTEXT_BUTTON_MD,
+                            style::STYLE_PRIMARY);
+  return (icon_state & IconState::ENABLED)
+             ? active_color
+             : color_utils::BlendTowardOppositeLuma(active_color,
+                                                    gfx::kDisabledControlAlpha);
 }
 
 void Checkbox::NotifyClick(const ui::Event& event) {

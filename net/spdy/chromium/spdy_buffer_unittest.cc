@@ -6,11 +6,10 @@
 
 #include <cstddef>
 #include <cstring>
-#include <memory>
 #include <utility>
 
 #include "base/bind.h"
-#include "base/memory/ptr_util.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/io_buffer.h"
 #include "net/spdy/core/spdy_protocol.h"
@@ -34,7 +33,7 @@ SpdyString BufferToString(const SpdyBuffer& buffer) {
 // Construct a SpdyBuffer from a SpdySerializedFrame and make sure its data
 // points to the frame's underlying data.
 TEST_F(SpdyBufferTest, FrameConstructor) {
-  SpdyBuffer buffer(base::MakeUnique<SpdySerializedFrame>(
+  SpdyBuffer buffer(std::make_unique<SpdySerializedFrame>(
       const_cast<char*>(kData), kDataSize, false /* owns_buffer */));
 
   EXPECT_EQ(kData, buffer.GetRemainingData());
@@ -121,7 +120,7 @@ TEST_F(SpdyBufferTest, GetIOBufferForRemainingData) {
 // Make sure the IOBuffer returned by GetIOBufferForRemainingData()
 // outlives the buffer itself.
 TEST_F(SpdyBufferTest, IOBufferForRemainingDataOutlivesBuffer) {
-  auto buffer = base::MakeUnique<SpdyBuffer>(kData, kDataSize);
+  auto buffer = std::make_unique<SpdyBuffer>(kData, kDataSize);
   scoped_refptr<IOBuffer> io_buffer = buffer->GetIOBufferForRemainingData();
   buffer.reset();
 

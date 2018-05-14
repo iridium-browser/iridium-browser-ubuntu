@@ -43,7 +43,7 @@ class ManagePasswordsDecoration : public ImageDecoration {
   ~ManagePasswordsDecoration() override;
 
   // Implement |LocationBarDecoration|
-  bool AcceptsMousePress() override;
+  AcceptsPress AcceptsMousePress() override;
   bool OnMousePressed(NSRect frame, NSPoint location) override;
   NSString* GetToolTip() override;
   NSPoint GetBubblePointInFrame(NSRect frame) override;
@@ -67,6 +67,10 @@ class ManagePasswordsDecoration : public ImageDecoration {
 
   // Updates child view states.
   void UpdateUIState();
+
+  // Whether a bubble is already showing. Handles both views and Cocoa
+  // bubbles.
+  bool IsBubbleShowing();
 
   // Shows the manage passwords bubble.
   CommandUpdater* command_updater_;  // Weak, owned by Browser.

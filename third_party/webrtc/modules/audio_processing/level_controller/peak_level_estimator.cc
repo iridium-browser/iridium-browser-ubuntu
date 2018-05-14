@@ -8,12 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/modules/audio_processing/level_controller/peak_level_estimator.h"
+#include "modules/audio_processing/level_controller/peak_level_estimator.h"
 
 #include <algorithm>
 
-#include "webrtc/modules/audio_processing/audio_buffer.h"
-#include "webrtc/modules/audio_processing/logging/apm_data_dumper.h"
+#include "common_audio/include/audio_util.h"
+#include "modules/audio_processing/audio_buffer.h"
+#include "modules/audio_processing/logging/apm_data_dumper.h"
 
 namespace webrtc {
 namespace {
@@ -32,8 +33,7 @@ void PeakLevelEstimator::Initialize(float initial_peak_level_dbfs) {
   RTC_DCHECK_LE(-100.f, initial_peak_level_dbfs);
   RTC_DCHECK_GE(0.f, initial_peak_level_dbfs);
 
-  peak_level_ = std::pow(10.f, initial_peak_level_dbfs / 20.f) * 32768.f;
-  peak_level_ = std::max(peak_level_, kMinLevel);
+  peak_level_ = std::max(DbfsToFloatS16(initial_peak_level_dbfs), kMinLevel);
 
   hold_counter_ = 0;
   initialization_phase_ = true;

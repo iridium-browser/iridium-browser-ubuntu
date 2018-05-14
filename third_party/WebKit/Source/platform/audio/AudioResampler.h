@@ -47,7 +47,7 @@ class PLATFORM_EXPORT AudioResampler {
  public:
   AudioResampler();
   AudioResampler(unsigned number_of_channels);
-  ~AudioResampler() {}
+  ~AudioResampler() = default;
 
   // Given an AudioSourceProvider, process() resamples the source stream into
   // destinationBus.
@@ -69,7 +69,7 @@ class PLATFORM_EXPORT AudioResampler {
  private:
   double rate_;
   Vector<std::unique_ptr<AudioResamplerKernel>> kernels_;
-  RefPtr<AudioBus> source_bus_;
+  scoped_refptr<AudioBus> source_bus_;
 };
 
 }  // namespace blink

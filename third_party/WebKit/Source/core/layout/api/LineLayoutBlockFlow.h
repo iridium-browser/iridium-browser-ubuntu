@@ -28,7 +28,7 @@ class LineLayoutBlockFlow : public LineLayoutBox {
 
   explicit LineLayoutBlockFlow(std::nullptr_t) : LineLayoutBox(nullptr) {}
 
-  LineLayoutBlockFlow() {}
+  LineLayoutBlockFlow() = default;
 
   LineLayoutItem FirstChild() const {
     return LineLayoutItem(ToBlockFlow()->FirstChild());
@@ -40,6 +40,10 @@ class LineLayoutBlockFlow : public LineLayoutBox {
   LayoutUnit StartAlignedOffsetForLine(LayoutUnit position,
                                        IndentTextOrNot indent_text) {
     return ToBlockFlow()->StartAlignedOffsetForLine(position, indent_text);
+  }
+
+  bool CanContainFirstFormattedLine() const {
+    return ToBlockFlow()->CanContainFirstFormattedLine();
   }
 
   LayoutUnit TextIndentOffset() const {

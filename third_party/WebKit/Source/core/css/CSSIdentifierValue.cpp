@@ -51,6 +51,7 @@ CSSIdentifierValue::CSSIdentifierValue(const Length& length)
       break;
     case kExtendToZoom:
       value_id_ = CSSValueInternalExtendToZoom;
+      break;
     case kPercent:
     case kFixed:
     case kCalculated:
@@ -62,7 +63,7 @@ CSSIdentifierValue::CSSIdentifierValue(const Length& length)
   }
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(CSSIdentifierValue) {
+void CSSIdentifierValue::TraceAfterDispatch(blink::Visitor* visitor) {
   CSSValue::TraceAfterDispatch(visitor);
 }
 

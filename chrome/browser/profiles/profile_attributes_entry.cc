@@ -2,21 +2,57 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
+#include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/signin/signin_util.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
+#include "components/prefs/scoped_user_pref_update.h"
+#include "ui/base/resource/resource_bundle.h"
+
+namespace {
+
+const char kShortcutNameKey[] = "shortcut_name";
+const char kActiveTimeKey[] = "active_time";
+const char kAuthCredentialsKey[] = "local_auth_credentials";
+const char kPasswordTokenKey[] = "gaia_password_token";
+const char kIsAuthErrorKey[] = "is_auth_error";
+
+}  // namespace
+
+const char ProfileAttributesEntry::kAvatarIconKey[] = "avatar_icon";
+const char ProfileAttributesEntry::kBackgroundAppsKey[] = "background_apps";
+const char ProfileAttributesEntry::kProfileIsEphemeral[] = "is_ephemeral";
+const char ProfileAttributesEntry::kUserNameKey[] = "user_name";
 
 ProfileAttributesEntry::ProfileAttributesEntry()
-    : profile_info_cache_(nullptr), profile_path_(base::FilePath()) {}
+    : profile_info_cache_(nullptr),
+      prefs_(nullptr),
+      profile_path_(base::FilePath()) {}
 
-void ProfileAttributesEntry::Initialize(
-    ProfileInfoCache* cache, const base::FilePath& path) {
+void ProfileAttributesEntry::Initialize(ProfileInfoCache* cache,
+                                        const base::FilePath& path,
+                                        PrefService* prefs) {
   DCHECK(!profile_info_cache_);
   DCHECK(cache);
   profile_info_cache_ = cache;
+
   DCHECK(profile_path_.empty());
   DCHECK(!path.empty());
   profile_path_ = path;
+
+  DCHECK(!prefs_);
+  DCHECK(prefs);
+  prefs_ = prefs;
+
+  DCHECK(profile_info_cache_->GetUserDataDir() == profile_path_.DirName());
+  storage_key_ = profile_path_.BaseName().MaybeAsASCII();
+
   is_force_signin_enabled_ = signin_util::IsForceSigninEnabled();
   if (!IsAuthenticated() && is_force_signin_enabled_)
     is_force_signin_profile_locked_ = true;
@@ -27,38 +63,56 @@ base::string16 ProfileAttributesEntry::GetName() const {
 }
 
 base::string16 ProfileAttributesEntry::GetShortcutName() const {
-  return profile_info_cache_->GetShortcutNameOfProfileAtIndex(profile_index());
+  return GetString16(kShortcutNameKey);
 }
 
 base::FilePath ProfileAttributesEntry::GetPath() const {
-  return profile_info_cache_->GetPathOfProfileAtIndex(profile_index());
+  return profile_path_;
 }
 
 base::Time ProfileAttributesEntry::GetActiveTime() const {
-  return profile_info_cache_->GetProfileActiveTimeAtIndex(profile_index());
+  if (IsDouble(kActiveTimeKey)) {
+    return base::Time::FromDoubleT(GetDouble(kActiveTimeKey));
+  } else {
+    return base::Time();
+  }
 }
 
 base::string16 ProfileAttributesEntry::GetUserName() const {
-  return profile_info_cache_->GetUserNameOfProfileAtIndex(profile_index());
+  return GetString16(kUserNameKey);
 }
 
 const gfx::Image& ProfileAttributesEntry::GetAvatarIcon() const {
-  return profile_info_cache_->GetAvatarIconOfProfileAtIndex(profile_index());
+  if (IsUsingGAIAPicture()) {
+    const gfx::Image* image = GetGAIAPicture();
+    if (image)
+      return *image;
+  }
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  // Use the high resolution version of the avatar if it exists. Mobile and
+  // ChromeOS don't need the high resolution version so no need to fetch it.
+  const gfx::Image* image = GetHighResAvatar();
+  if (image)
+    return *image;
+#endif
+
+  int resource_id =
+      profiles::GetDefaultAvatarIconResourceIDAtIndex(GetAvatarIconIndex());
+  return ui::ResourceBundle::GetSharedInstance().GetNativeImageNamed(
+      resource_id);
 }
 
 std::string ProfileAttributesEntry::GetLocalAuthCredentials() const {
-  return profile_info_cache_->GetLocalAuthCredentialsOfProfileAtIndex(
-      profile_index());
+  return GetString(kAuthCredentialsKey);
 }
 
 std::string ProfileAttributesEntry::GetPasswordChangeDetectionToken() const {
-  return profile_info_cache_->GetPasswordChangeDetectionTokenAtIndex(
-      profile_index());
+  return GetString(kPasswordTokenKey);
 }
 
 bool ProfileAttributesEntry::GetBackgroundStatus() const {
-  return profile_info_cache_->GetBackgroundStatusOfProfileAtIndex(
-      profile_index());
+  return GetBool(kBackgroundAppsKey);
 }
 
 base::string16 ProfileAttributesEntry::GetGAIAName() const {
@@ -79,6 +133,11 @@ const gfx::Image* ProfileAttributesEntry::GetGAIAPicture() const {
 
 bool ProfileAttributesEntry::IsUsingGAIAPicture() const {
   return profile_info_cache_->IsUsingGAIAPictureOfProfileAtIndex(
+      profile_index());
+}
+
+bool ProfileAttributesEntry::IsGAIAPictureLoaded() const {
+  return profile_info_cache_->IsGAIAPictureOfProfileAtIndexLoaded(
       profile_index());
 }
 
@@ -109,7 +168,7 @@ std::string ProfileAttributesEntry::GetSupervisedUserId() const {
 }
 
 bool ProfileAttributesEntry::IsEphemeral() const {
-  return profile_info_cache_->ProfileIsEphemeralAtIndex(profile_index());
+  return GetBool(kProfileIsEphemeral);
 }
 
 bool ProfileAttributesEntry::IsUsingDefaultName() const {
@@ -117,7 +176,11 @@ bool ProfileAttributesEntry::IsUsingDefaultName() const {
 }
 
 bool ProfileAttributesEntry::IsAuthenticated() const {
-  return profile_info_cache_->ProfileIsAuthenticatedAtIndex(profile_index());
+  // The profile is authenticated if the gaia_id of the info is not empty.
+  // If it is empty, also check if the user name is not empty.  This latter
+  // check is needed in case the profile has not been loaded yet and the
+  // gaia_id property has not yet been written.
+  return !GetGAIAId().empty() || !GetUserName().empty();
 }
 
 bool ProfileAttributesEntry::IsUsingDefaultAvatar() const {
@@ -126,12 +189,16 @@ bool ProfileAttributesEntry::IsUsingDefaultAvatar() const {
 }
 
 bool ProfileAttributesEntry::IsAuthError() const {
-  return profile_info_cache_->ProfileIsAuthErrorAtIndex(profile_index());
+  return GetBool(kIsAuthErrorKey);
 }
 
 size_t ProfileAttributesEntry::GetAvatarIconIndex() const {
-  return profile_info_cache_->GetAvatarIconIndexOfProfileAtIndex(
-      profile_index());
+  std::string icon_url = GetString(kAvatarIconKey);
+  size_t icon_index = 0;
+  if (!profiles::IsDefaultAvatarIconUrl(icon_url, &icon_index))
+    DLOG(WARNING) << "Unknown avatar icon: " << icon_url;
+
+  return icon_index;
 }
 
 void ProfileAttributesEntry::SetName(const base::string16& name) {
@@ -139,11 +206,15 @@ void ProfileAttributesEntry::SetName(const base::string16& name) {
 }
 
 void ProfileAttributesEntry::SetShortcutName(const base::string16& name) {
-  profile_info_cache_->SetShortcutNameOfProfileAtIndex(profile_index(), name);
+  SetString16(kShortcutNameKey, name);
 }
 
 void ProfileAttributesEntry::SetActiveTimeToNow() {
-  profile_info_cache_->SetProfileActiveTimeAtIndex(profile_index());
+  if (IsDouble(kActiveTimeKey) &&
+      base::Time::Now() - GetActiveTime() < base::TimeDelta::FromHours(1)) {
+    return;
+  }
+  SetDouble(kActiveTimeKey, base::Time::Now().ToDoubleT());
 }
 
 void ProfileAttributesEntry::SetIsOmitted(bool is_omitted) {
@@ -155,19 +226,16 @@ void ProfileAttributesEntry::SetSupervisedUserId(const std::string& id) {
 }
 
 void ProfileAttributesEntry::SetLocalAuthCredentials(const std::string& auth) {
-  profile_info_cache_->SetLocalAuthCredentialsOfProfileAtIndex(
-      profile_index(), auth);
+  SetString(kAuthCredentialsKey, auth);
 }
 
 void ProfileAttributesEntry::SetPasswordChangeDetectionToken(
     const std::string& token) {
-  profile_info_cache_->SetPasswordChangeDetectionTokenAtIndex(
-      profile_index(), token);
+  SetString(kPasswordTokenKey, token);
 }
 
 void ProfileAttributesEntry::SetBackgroundStatus(bool running_background_apps) {
-  profile_info_cache_->SetBackgroundStatusOfProfileAtIndex(
-      profile_index(), running_background_apps);
+  SetBool(kBackgroundAppsKey, running_background_apps);
 }
 
 void ProfileAttributesEntry::SetGAIAName(const base::string16& name) {
@@ -202,7 +270,7 @@ void ProfileAttributesEntry::LockForceSigninProfile(bool is_lock) {
 }
 
 void ProfileAttributesEntry::SetIsEphemeral(bool value) {
-  profile_info_cache_->SetProfileIsEphemeralAtIndex(profile_index(), value);
+  SetBool(kProfileIsEphemeral, value);
 }
 
 void ProfileAttributesEntry::SetIsUsingDefaultName(bool value) {
@@ -216,12 +284,24 @@ void ProfileAttributesEntry::SetIsUsingDefaultAvatar(bool value) {
 }
 
 void ProfileAttributesEntry::SetIsAuthError(bool value) {
-  profile_info_cache_->SetProfileIsAuthErrorAtIndex(profile_index(), value);
+  SetBool(kIsAuthErrorKey, value);
 }
 
 void ProfileAttributesEntry::SetAvatarIconIndex(size_t icon_index) {
-  profile_info_cache_->SetAvatarIconOfProfileAtIndex(
-      profile_index(), icon_index);
+  if (!profiles::IsDefaultAvatarIconIndex(icon_index)) {
+    DLOG(WARNING) << "Unknown avatar icon index: " << icon_index;
+    // switch to generic avatar
+    icon_index = 0;
+  }
+  SetString(kAvatarIconKey, profiles::GetDefaultAvatarIconUrl(icon_index));
+
+  base::FilePath profile_path = GetPath();
+
+  if (!profile_info_cache_->GetDisableAvatarDownloadForTesting())
+    profile_info_cache_->DownloadHighResAvatarIfNeeded(icon_index,
+                                                       profile_path);
+
+  profile_info_cache_->NotifyOnProfileAvatarChanged(profile_path);
 }
 
 void ProfileAttributesEntry::SetAuthInfo(
@@ -234,4 +314,137 @@ size_t ProfileAttributesEntry::profile_index() const {
   size_t index = profile_info_cache_->GetIndexOfProfileWithPath(profile_path_);
   DCHECK(index < profile_info_cache_->GetNumberOfProfiles());
   return index;
+}
+
+const gfx::Image* ProfileAttributesEntry::GetHighResAvatar() const {
+  const size_t avatar_index = GetAvatarIconIndex();
+
+  // If this is the placeholder avatar, it is already included in the
+  // resources, so it doesn't need to be downloaded.
+  if (avatar_index == profiles::GetPlaceholderAvatarIndex()) {
+    return &ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        profiles::GetPlaceholderAvatarIconResourceID());
+  }
+
+  const std::string key =
+      profiles::GetDefaultAvatarIconFileNameAtIndex(avatar_index);
+  const base::FilePath image_path =
+      profiles::GetPathOfHighResAvatarAtIndex(avatar_index);
+  return profile_info_cache_->LoadAvatarPictureFromPath(GetPath(), key,
+                                                        image_path);
+}
+
+const base::Value* ProfileAttributesEntry::GetEntryData() const {
+  const base::DictionaryValue* cache =
+      prefs_->GetDictionary(prefs::kProfileInfoCache);
+  return cache->FindKeyOfType(storage_key_, base::Value::Type::DICTIONARY);
+}
+
+void ProfileAttributesEntry::SetEntryData(base::Value data) {
+  DCHECK(data.is_dict());
+
+  DictionaryPrefUpdate update(prefs_, prefs::kProfileInfoCache);
+  base::DictionaryValue* cache = update.Get();
+  cache->SetKey(storage_key_, std::move(data));
+}
+
+const base::Value* ProfileAttributesEntry::GetValue(const char* key) const {
+  const base::Value* entry_data = GetEntryData();
+  return entry_data ? entry_data->FindKey(key) : nullptr;
+}
+
+std::string ProfileAttributesEntry::GetString(const char* key) const {
+  const base::Value* value = GetValue(key);
+  if (!value || !value->is_string())
+    return std::string();
+  return value->GetString();
+}
+
+base::string16 ProfileAttributesEntry::GetString16(const char* key) const {
+  const base::Value* value = GetValue(key);
+  if (!value || !value->is_string())
+    return base::string16();
+  return base::UTF8ToUTF16(value->GetString());
+}
+
+double ProfileAttributesEntry::GetDouble(const char* key) const {
+  const base::Value* value = GetValue(key);
+  if (!value || !value->is_double())
+    return 0.0;
+  return value->GetDouble();
+}
+
+bool ProfileAttributesEntry::GetBool(const char* key) const {
+  const base::Value* value = GetValue(key);
+  return value && value->is_bool() && value->GetBool();
+}
+
+// Type checking. Only IsDouble is implemented because others do not have
+// callsites.
+bool ProfileAttributesEntry::IsDouble(const char* key) const {
+  const base::Value* value = GetValue(key);
+  return value && value->is_double();
+}
+
+// Internal setters using keys;
+bool ProfileAttributesEntry::SetString(const char* key, std::string value) {
+  const base::Value* old_data = GetEntryData();
+  if (old_data) {
+    const base::Value* old_value = old_data->FindKey(key);
+    if (old_value && old_value->is_string() && old_value->GetString() == value)
+      return false;
+  }
+
+  base::Value new_data = old_data ? GetEntryData()->Clone()
+                                  : base::Value(base::Value::Type::DICTIONARY);
+  new_data.SetKey(key, base::Value(value));
+  SetEntryData(std::move(new_data));
+  return true;
+}
+
+bool ProfileAttributesEntry::SetString16(const char* key,
+                                         base::string16 value) {
+  const base::Value* old_data = GetEntryData();
+  if (old_data) {
+    const base::Value* old_value = old_data->FindKey(key);
+    if (old_value && old_value->is_string() &&
+        base::UTF8ToUTF16(old_value->GetString()) == value)
+      return false;
+  }
+
+  base::Value new_data = old_data ? GetEntryData()->Clone()
+                                  : base::Value(base::Value::Type::DICTIONARY);
+  new_data.SetKey(key, base::Value(value));
+  SetEntryData(std::move(new_data));
+  return true;
+}
+
+bool ProfileAttributesEntry::SetDouble(const char* key, double value) {
+  const base::Value* old_data = GetEntryData();
+  if (old_data) {
+    const base::Value* old_value = old_data->FindKey(key);
+    if (old_value && old_value->is_double() && old_value->GetDouble() == value)
+      return false;
+  }
+
+  base::Value new_data = old_data ? GetEntryData()->Clone()
+                                  : base::Value(base::Value::Type::DICTIONARY);
+  new_data.SetKey(key, base::Value(value));
+  SetEntryData(std::move(new_data));
+  return true;
+}
+
+bool ProfileAttributesEntry::SetBool(const char* key, bool value) {
+  const base::Value* old_data = GetEntryData();
+  if (old_data) {
+    const base::Value* old_value = old_data->FindKey(key);
+    if (old_value && old_value->is_bool() && old_value->GetBool() == value)
+      return false;
+  }
+
+  base::Value new_data = old_data ? GetEntryData()->Clone()
+                                  : base::Value(base::Value::Type::DICTIONARY);
+  new_data.SetKey(key, base::Value(value));
+  SetEntryData(std::move(new_data));
+  return true;
 }

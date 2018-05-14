@@ -7,7 +7,6 @@ package org.chromium.chrome.browser;
 import android.content.Intent;
 import android.util.Pair;
 
-import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabDelegateFactory;
 import org.chromium.chrome.browser.tab.TabUma.TabCreationState;
@@ -16,6 +15,7 @@ import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.document.TabDelegate;
+import org.chromium.content_public.browser.ChildProcessImportance;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.io.File;
@@ -26,7 +26,6 @@ import java.io.File;
  * Example applications that might use this Activity would be webapps and streaming media
  * activities - anything where maintaining multiple tabs is unnecessary.
  */
-@SuppressFBWarnings("URF_UNREAD_FIELD")
 public abstract class SingleTabActivity extends ChromeActivity {
     protected static final String BUNDLE_TAB_ID = "tabId";
     protected static final String BUNDLE_TAB_URL = "tabUrl";
@@ -66,6 +65,7 @@ public abstract class SingleTabActivity extends ChromeActivity {
         Tab tab = createTab();
         getTabModelSelector().setTab(tab);
         tab.show(TabSelectionType.FROM_NEW);
+        tab.setImportance(ChildProcessImportance.MODERATE);
     }
 
     @Override
@@ -93,13 +93,13 @@ public abstract class SingleTabActivity extends ChromeActivity {
         if (tabId != Tab.INVALID_TAB_ID && tabUrl != null && getActivityDirectory() != null) {
             // Restore the tab.
             TabState tabState = TabState.restoreTabState(getActivityDirectory(), tabId);
-            tab = new Tab(tabId, Tab.INVALID_TAB_ID, false, this, getWindowAndroid(),
+            tab = new Tab(tabId, Tab.INVALID_TAB_ID, false, getWindowAndroid(),
                     TabLaunchType.FROM_RESTORE, TabCreationState.FROZEN_ON_RESTORE, tabState);
             unfreeze = true;
         }
 
         if (tab == null) {
-            tab = new Tab(Tab.INVALID_TAB_ID, Tab.INVALID_TAB_ID, false, this, getWindowAndroid(),
+            tab = new Tab(Tab.INVALID_TAB_ID, Tab.INVALID_TAB_ID, false, getWindowAndroid(),
                     TabLaunchType.FROM_CHROME_UI, null, null);
         }
 

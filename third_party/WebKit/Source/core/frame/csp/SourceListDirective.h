@@ -5,6 +5,7 @@
 #ifndef SourceListDirective_h
 #define SourceListDirective_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/frame/csp/CSPDirective.h"
 #include "core/frame/csp/CSPSource.h"
@@ -21,13 +22,11 @@ class ContentSecurityPolicy;
 class KURL;
 
 class CORE_EXPORT SourceListDirective final : public CSPDirective {
-  WTF_MAKE_NONCOPYABLE(SourceListDirective);
-
  public:
   SourceListDirective(const String& name,
                       const String& value,
                       ContentSecurityPolicy*);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void Parse(const UChar* begin, const UChar* end);
 
@@ -40,6 +39,7 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
                   ResourceRequest::RedirectStatus::kNoRedirect) const;
   bool AllowInline() const;
   bool AllowEval() const;
+  bool AllowWasmEval() const;
   bool AllowDynamic() const;
   bool AllowNonce(const String& nonce) const;
   bool AllowHash(const CSPHashValue&) const;
@@ -99,6 +99,7 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
   void AddSourceStar();
   void AddSourceUnsafeInline();
   void AddSourceUnsafeEval();
+  void AddSourceWasmEval();
   void AddSourceStrictDynamic();
   void AddSourceUnsafeHashedAttributes();
   void AddReportSample();
@@ -128,12 +129,15 @@ class CORE_EXPORT SourceListDirective final : public CSPDirective {
   bool allow_star_;
   bool allow_inline_;
   bool allow_eval_;
+  bool allow_wasm_eval_;
   bool allow_dynamic_;
   bool allow_hashed_attributes_;
   bool report_sample_;
   HashSet<String> nonces_;
   HashSet<CSPHashValue> hashes_;
   uint8_t hash_algorithms_used_;
+
+  DISALLOW_COPY_AND_ASSIGN(SourceListDirective);
 };
 
 }  // namespace blink

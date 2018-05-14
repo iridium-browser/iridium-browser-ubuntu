@@ -20,22 +20,23 @@
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_elevated_toolbar.h"
-#import "ios/chrome/browser/ui/bookmarks/bookmark_extended_button.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_folder_view_controller.h"
-#import "ios/chrome/browser/ui/bookmarks/bookmark_interaction_controller.h"
+#import "ios/chrome/browser/ui/bookmarks/bookmark_mediator.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
 #import "ios/chrome/browser/ui/bookmarks/bookmark_utils_ios.h"
 #import "ios/chrome/browser/ui/bookmarks/cells/bookmark_parent_folder_item.h"
 #import "ios/chrome/browser/ui/bookmarks/cells/bookmark_text_field_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
 #import "ios/chrome/browser/ui/icons/chrome_icon.h"
-#import "ios/chrome/browser/ui/image_util.h"
+#import "ios/chrome/browser/ui/image_util/image_util.h"
 #import "ios/chrome/browser/ui/keyboard/UIKeyCommand+Chrome.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/browser/ui/ui_util.h"
+#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #import "ios/public/provider/chrome/browser/ui/text_field_styling.h"
+#import "ios/third_party/material_components_ios/src/components/Buttons/src/MDCFlatButton.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/ShadowElevations/src/MaterialShadowElevations.h"
 #import "ios/third_party/material_components_ios/src/components/ShadowLayer/src/MaterialShadowLayer.h"
@@ -220,48 +221,21 @@ typedef NS_ENUM(NSInteger, ItemType) {
   self.doneItem = doneItem;
 
   BookmarksElevatedToolbar* buttonBar = [[BookmarksElevatedToolbar alloc] init];
-  UIBarButtonItem* deleteItem = [[UIBarButtonItem alloc]
-      initWithTitle:l10n_util::GetNSString(IDS_IOS_BOOKMARK_DELETE)
-              style:UIBarButtonItemStylePlain
-             target:self
-             action:@selector(deleteBookmark)];
-  deleteItem.accessibilityIdentifier = @"Delete_action";
-  [deleteItem setTitleTextAttributes:@{
-    NSForegroundColorAttributeName : [UIColor blackColor]
-  }
-                            forState:UIControlStateNormal];
-  [buttonBar.layer addSublayer:[[MDCShadowLayer alloc] init]];
-  buttonBar.shadowElevation = MDCShadowElevationSearchBarResting;
-  buttonBar.backgroundColor = [UIColor whiteColor];
-  buttonBar.items = @[ deleteItem ];
+  MDCButton* deleteButton = [[MDCFlatButton alloc] init];
+  [deleteButton setTitle:l10n_util::GetNSString(IDS_IOS_BOOKMARK_DELETE)
+                forState:UIControlStateNormal];
+  [deleteButton addTarget:self
+                   action:@selector(deleteBookmark)
+         forControlEvents:UIControlEventTouchUpInside];
+  deleteButton.accessibilityIdentifier = @"Delete_action";
+
+  [buttonBar setButton:deleteButton];
   [self.view addSubview:buttonBar];
 
   // Constraint |buttonBar| to be in bottom
   buttonBar.translatesAutoresizingMaskIntoConstraints = NO;
-  [self.view addConstraints:
-                 [NSLayoutConstraint
-                     constraintsWithVisualFormat:@"H:|[buttonBar]|"
-                                         options:0
-                                         metrics:nil
-                                           views:NSDictionaryOfVariableBindings(
-                                                     buttonBar)]];
-  [self.view addConstraint:[NSLayoutConstraint
-                               constraintWithItem:buttonBar
-                                        attribute:NSLayoutAttributeBottom
-                                        relatedBy:NSLayoutRelationEqual
-                                           toItem:self.view
-                                        attribute:NSLayoutAttributeBottom
-                                       multiplier:1.0
-                                         constant:0.0]];
-  [self.view
-      addConstraint:[NSLayoutConstraint
-                        constraintWithItem:buttonBar
-                                 attribute:NSLayoutAttributeHeight
-                                 relatedBy:NSLayoutRelationEqual
-                                    toItem:nil
-                                 attribute:NSLayoutAttributeNotAnAttribute
-                                multiplier:1.0
-                                  constant:48.0]];
+  ApplyVisualConstraints(@[ @"H:|[buttonBar]|", @"V:[buttonBar]|" ],
+                         NSDictionaryOfVariableBindings(buttonBar));
   [self updateUIFromBookmark];
 }
 
@@ -296,6 +270,15 @@ typedef NS_ENUM(NSInteger, ItemType) {
   GURL url = ConvertUserDataToGURL([self inputURLString]);
   // If the URL was not valid, the |save| message shouldn't have been sent.
   DCHECK([self inputURLIsValid]);
+
+  // Tell delegate if bookmark name or title has been changed.
+  if (self.bookmark &&
+      (self.bookmark->GetTitle() !=
+           base::SysNSStringToUTF16([self inputBookmarkName]) ||
+       self.bookmark->url() != url)) {
+    [self.delegate bookmarkEditorWillCommitTitleOrUrlChange:self];
+  }
+
   bookmark_utils_ios::CreateOrUpdateBookmarkWithUndoToast(
       self.bookmark, [self inputBookmarkName], url, self.folder,
       self.bookmarkModel, self.browserState);
@@ -304,8 +287,8 @@ typedef NS_ENUM(NSInteger, ItemType) {
 - (void)changeFolder:(const BookmarkNode*)folder {
   DCHECK(folder->is_folder());
   self.folder = folder;
-  [BookmarkInteractionController setFolderForNewBookmarks:self.folder
-                                           inBrowserState:self.browserState];
+  [BookmarkMediator setFolderForNewBookmarks:self.folder
+                              inBrowserState:self.browserState];
   [self updateFolderLabel];
 }
 

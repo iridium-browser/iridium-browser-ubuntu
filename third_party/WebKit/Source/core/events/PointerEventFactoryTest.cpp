@@ -35,17 +35,52 @@ const char* PointerTypeNameForWebPointPointerType(
 class PointerEventFactoryTest : public ::testing::Test {
  protected:
   void SetUp() override;
-  PointerEvent* CreateAndCheckTouchCancel(WebPointerProperties::PointerType,
-                                          int raw_id,
-                                          int unique_id,
-                                          bool is_primary);
-  PointerEvent* CreateAndCheckTouchEvent(
-      WebPointerProperties::PointerType,
+  PointerEvent* CreateAndCheckPointerCancel(WebPointerProperties::PointerType,
+                                            int raw_id,
+                                            int unique_id,
+                                            bool is_primary);
+  PointerEvent* CreateAndCheckWebPointerEvent(
+      WebPointerProperties::PointerType pointer_type,
       int raw_id,
       int unique_id,
       bool is_primary,
-      WebTouchPoint::State = WebTouchPoint::kStatePressed,
-      size_t coalesced_event_count = 0);
+      WebInputEvent::Type type = WebInputEvent::kPointerDown,
+      size_t coalesced_event_count = 0,
+      bool hovering = false) {
+    WebPointerEvent web_pointer_event;
+    web_pointer_event.pointer_type = pointer_type;
+    web_pointer_event.id = raw_id;
+    web_pointer_event.SetType(type);
+    web_pointer_event.SetTimeStampSeconds(
+        WebInputEvent::GetStaticTimeStampForTests());
+    web_pointer_event.force = 1.0;
+    web_pointer_event.hovering = hovering;
+    Vector<WebPointerEvent> coalesced_events;
+    for (size_t i = 0; i < coalesced_event_count; i++) {
+      coalesced_events.push_back(web_pointer_event);
+    }
+    PointerEvent* pointer_event = pointer_event_factory_.Create(
+        web_pointer_event, coalesced_events, nullptr);
+    EXPECT_EQ(unique_id, pointer_event->pointerId());
+    EXPECT_EQ(is_primary, pointer_event->isPrimary());
+    EXPECT_EQ(TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests()),
+              pointer_event->PlatformTimeStamp());
+    const char* expected_pointer_type =
+        PointerTypeNameForWebPointPointerType(pointer_type);
+    EXPECT_EQ(expected_pointer_type, pointer_event->pointerType());
+    EXPECT_EQ(coalesced_event_count,
+              pointer_event->getCoalescedEvents().size());
+    for (size_t i = 0; i < coalesced_event_count; i++) {
+      EXPECT_EQ(unique_id, pointer_event->getCoalescedEvents()[i]->pointerId());
+      EXPECT_EQ(is_primary,
+                pointer_event->getCoalescedEvents()[i]->isPrimary());
+      EXPECT_EQ(expected_pointer_type, pointer_event->pointerType());
+      EXPECT_EQ(
+          TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests()),
+          pointer_event->PlatformTimeStamp());
+    }
+    return pointer_event;
+  }
   PointerEvent* CreateAndCheckMouseEvent(
       WebPointerProperties::PointerType,
       int raw_id,
@@ -54,17 +89,11 @@ class PointerEventFactoryTest : public ::testing::Test {
       WebInputEvent::Modifiers = WebInputEvent::kNoModifiers,
       size_t coalesced_event_count = 0);
   void CreateAndCheckPointerTransitionEvent(PointerEvent*, const AtomicString&);
+  void CheckNonHoveringPointers(const std::set<int>& expected);
 
   PointerEventFactory pointer_event_factory_;
-  unsigned expected_mouse_id_;
-  unsigned mapped_id_start_;
-
-  class WebTouchPointBuilder : public WebTouchPoint {
-   public:
-    WebTouchPointBuilder(WebPointerProperties::PointerType,
-                         int,
-                         WebTouchPoint::State);
-  };
+  int expected_mouse_id_;
+  int mapped_id_start_;
 
   class WebMouseEventBuilder : public WebMouseEvent {
    public:
@@ -80,16 +109,6 @@ void PointerEventFactoryTest::SetUp() {
   mapped_id_start_ = 2;
 }
 
-PointerEventFactoryTest::WebTouchPointBuilder::WebTouchPointBuilder(
-    WebPointerProperties::PointerType pointer_type_param,
-    int id_param,
-    WebTouchPoint::State state_param) {
-  id = id_param;
-  pointer_type = pointer_type_param;
-  force = 1.0;
-  state = state_param;
-}
-
 PointerEventFactoryTest::WebMouseEventBuilder::WebMouseEventBuilder(
     WebPointerProperties::PointerType pointer_type_param,
     int id_param,
@@ -102,19 +121,22 @@ PointerEventFactoryTest::WebMouseEventBuilder::WebMouseEventBuilder(
   time_stamp_seconds_ = platform_time_stamp;
 }
 
-PointerEvent* PointerEventFactoryTest::CreateAndCheckTouchCancel(
+PointerEvent* PointerEventFactoryTest::CreateAndCheckPointerCancel(
     WebPointerProperties::PointerType pointer_type,
     int raw_id,
     int unique_id,
     bool is_primary) {
-  TimeTicks now = TimeTicks::Now();
   PointerEvent* pointer_event = pointer_event_factory_.CreatePointerCancelEvent(
-      unique_id, pointer_type, now);
+      unique_id,
+      TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests()));
+  EXPECT_EQ("pointercancel", pointer_event->type());
   EXPECT_EQ(unique_id, pointer_event->pointerId());
   EXPECT_EQ(is_primary, pointer_event->isPrimary());
   EXPECT_EQ(PointerTypeNameForWebPointPointerType(pointer_type),
             pointer_event->pointerType());
-  EXPECT_EQ(now, pointer_event->PlatformTimeStamp());
+  EXPECT_EQ(TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests()),
+            pointer_event->PlatformTimeStamp());
+
   return pointer_event;
 }
 
@@ -130,39 +152,14 @@ void PointerEventFactoryTest::CreateAndCheckPointerTransitionEvent(
   EXPECT_EQ(clone_pointer_event->type(), type);
 }
 
-PointerEvent* PointerEventFactoryTest::CreateAndCheckTouchEvent(
-    WebPointerProperties::PointerType pointer_type,
-    int raw_id,
-    int unique_id,
-    bool is_primary,
-    WebTouchPoint::State state,
-    size_t coalesced_event_count) {
-  Vector<std::pair<WebTouchPoint, TimeTicks>> coalesced_events;
-  TimeTicks now = TimeTicks::Now();
-  for (size_t i = 0; i < coalesced_event_count; i++) {
-    coalesced_events.push_back(std::pair<WebTouchPoint, TimeTicks>(
-        PointerEventFactoryTest::WebTouchPointBuilder(pointer_type, raw_id,
-                                                      state),
-        now));
+void PointerEventFactoryTest::CheckNonHoveringPointers(
+    const std::set<int>& expected_pointers) {
+  Vector<int> pointers =
+      pointer_event_factory_.GetPointerIdsOfNonHoveringPointers();
+  EXPECT_EQ(pointers.size(), expected_pointers.size());
+  for (int p : pointers) {
+    EXPECT_TRUE(expected_pointers.find(p) != expected_pointers.end());
   }
-  PointerEvent* pointer_event = pointer_event_factory_.Create(
-      PointerEventFactoryTest::WebTouchPointBuilder(pointer_type, raw_id,
-                                                    state),
-      coalesced_events, WebInputEvent::kNoModifiers, now, nullptr, nullptr);
-  EXPECT_EQ(unique_id, pointer_event->pointerId());
-  EXPECT_EQ(is_primary, pointer_event->isPrimary());
-  EXPECT_EQ(now, pointer_event->PlatformTimeStamp());
-  const char* expected_pointer_type =
-      PointerTypeNameForWebPointPointerType(pointer_type);
-  EXPECT_EQ(expected_pointer_type, pointer_event->pointerType());
-  EXPECT_EQ(coalesced_event_count, pointer_event->getCoalescedEvents().size());
-  for (size_t i = 0; i < coalesced_event_count; i++) {
-    EXPECT_EQ(unique_id, pointer_event->getCoalescedEvents()[i]->pointerId());
-    EXPECT_EQ(is_primary, pointer_event->getCoalescedEvents()[i]->isPrimary());
-    EXPECT_EQ(expected_pointer_type, pointer_event->pointerType());
-    EXPECT_EQ(now, pointer_event->PlatformTimeStamp());
-  }
-  return pointer_event;
 }
 
 PointerEvent* PointerEventFactoryTest::CreateAndCheckMouseEvent(
@@ -176,17 +173,18 @@ PointerEvent* PointerEventFactoryTest::CreateAndCheckMouseEvent(
   for (size_t i = 0; i < coalesced_event_count; i++) {
     coalesced_events.push_back(PointerEventFactoryTest::WebMouseEventBuilder(
         pointer_type, raw_id, modifiers,
-        WebInputEvent::kTimeStampForTesting + i));
+        WebInputEvent::GetStaticTimeStampForTests() + i));
   }
   PointerEvent* pointer_event = pointer_event_factory_.Create(
       coalesced_event_count ? EventTypeNames::mousemove
                             : EventTypeNames::mousedown,
       PointerEventFactoryTest::WebMouseEventBuilder(
-          pointer_type, raw_id, modifiers, WebInputEvent::kTimeStampForTesting),
+          pointer_type, raw_id, modifiers,
+          WebInputEvent::GetStaticTimeStampForTests()),
       coalesced_events, nullptr);
   EXPECT_EQ(unique_id, pointer_event->pointerId());
   EXPECT_EQ(is_primary, pointer_event->isPrimary());
-  EXPECT_EQ(TimeTicks::FromSeconds(WebInputEvent::kTimeStampForTesting),
+  EXPECT_EQ(TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests()),
             pointer_event->PlatformTimeStamp());
   const char* expected_pointer_type =
       PointerTypeNameForWebPointPointerType(pointer_type);
@@ -196,8 +194,9 @@ PointerEvent* PointerEventFactoryTest::CreateAndCheckMouseEvent(
     EXPECT_EQ(unique_id, pointer_event->getCoalescedEvents()[i]->pointerId());
     EXPECT_EQ(is_primary, pointer_event->getCoalescedEvents()[i]->isPrimary());
     EXPECT_EQ(expected_pointer_type, pointer_event->pointerType());
-    EXPECT_EQ(TimeTicks::FromSeconds(WebInputEvent::kTimeStampForTesting + i),
-              pointer_event->getCoalescedEvents()[i]->PlatformTimeStamp());
+    EXPECT_EQ(
+        TimeTicksFromSeconds(WebInputEvent::GetStaticTimeStampForTests() + i),
+        pointer_event->getCoalescedEvents()[i]->PlatformTimeStamp());
   }
   return pointer_event;
 }
@@ -236,20 +235,33 @@ TEST_F(PointerEventFactoryTest, MousePointer) {
                            expected_mouse_id_, true);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 20,
                            expected_mouse_id_, true);
+
+  CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 0,
+                           expected_mouse_id_, true,
+                           WebInputEvent::kLeftButtonDown);
+
+  EXPECT_TRUE(pointer_event_factory_.IsActive(expected_mouse_id_));
+  EXPECT_TRUE(pointer_event_factory_.IsActiveButtonsState(expected_mouse_id_));
+
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kMouse, 0,
+                              expected_mouse_id_, true);
+
+  EXPECT_TRUE(pointer_event_factory_.IsActive(expected_mouse_id_));
+  EXPECT_FALSE(pointer_event_factory_.IsActiveButtonsState(expected_mouse_id_));
 }
 
 TEST_F(PointerEventFactoryTest, TouchPointerPrimaryRemovedWhileAnotherIsThere) {
-  PointerEvent* pointer_event1 = CreateAndCheckTouchEvent(
+  PointerEvent* pointer_event1 = CreateAndCheckWebPointerEvent(
       WebPointerProperties::PointerType::kTouch, 0, mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 1,
-                           mapped_id_start_ + 1, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 1,
+                                mapped_id_start_ + 1, false);
 
   pointer_event_factory_.Remove(pointer_event1->pointerId());
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 2,
-                           mapped_id_start_ + 2, false);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 1,
-                           mapped_id_start_ + 1, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 2,
+                                mapped_id_start_ + 2, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 1,
+                                mapped_id_start_ + 1, false);
 }
 
 TEST_F(PointerEventFactoryTest, TouchPointerReleasedAndPressedAgain) {
@@ -259,11 +271,11 @@ TEST_F(PointerEventFactoryTest, TouchPointerReleasedAndPressedAgain) {
   EXPECT_FALSE(
       pointer_event_factory_.IsActiveButtonsState(mapped_id_start_ + 1));
 
-  PointerEvent* pointer_event1 = CreateAndCheckTouchEvent(
+  PointerEvent* pointer_event1 = CreateAndCheckWebPointerEvent(
       WebPointerProperties::PointerType::kTouch, 0, mapped_id_start_, true);
   PointerEvent* pointer_event2 =
-      CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 1,
-                               mapped_id_start_ + 1, false);
+      CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch,
+                                    1, mapped_id_start_ + 1, false);
 
   CreateAndCheckPointerTransitionEvent(pointer_event1,
                                        EventTypeNames::pointerleave);
@@ -285,32 +297,32 @@ TEST_F(PointerEventFactoryTest, TouchPointerReleasedAndPressedAgain) {
   EXPECT_FALSE(
       pointer_event_factory_.IsActiveButtonsState(mapped_id_start_ + 1));
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 1,
-                           mapped_id_start_ + 2, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_ + 3, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 1,
+                                mapped_id_start_ + 2, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 3, false);
 
   pointer_event_factory_.Clear();
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 10,
-                           mapped_id_start_, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 10,
+                                mapped_id_start_, true);
 }
 
 TEST_F(PointerEventFactoryTest, TouchAndDrag) {
   EXPECT_FALSE(pointer_event_factory_.IsActive(mapped_id_start_));
   EXPECT_FALSE(pointer_event_factory_.IsActiveButtonsState(mapped_id_start_));
 
-  PointerEvent* pointer_event1 = CreateAndCheckTouchEvent(
+  PointerEvent* pointer_event1 = CreateAndCheckWebPointerEvent(
       WebPointerProperties::PointerType::kTouch, 0, mapped_id_start_, true);
-  PointerEvent* pointer_event2 = CreateAndCheckTouchEvent(
+  PointerEvent* pointer_event2 = CreateAndCheckWebPointerEvent(
       WebPointerProperties::PointerType::kTouch, 0, mapped_id_start_, true);
 
   EXPECT_TRUE(pointer_event_factory_.IsActive(mapped_id_start_));
   EXPECT_TRUE(pointer_event_factory_.IsActiveButtonsState(mapped_id_start_));
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_, true,
-                           WebTouchPoint::kStateReleased);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_, true,
+                                WebInputEvent::kPointerUp);
 
   EXPECT_TRUE(pointer_event_factory_.IsActive(mapped_id_start_));
   EXPECT_FALSE(pointer_event_factory_.IsActiveButtonsState(mapped_id_start_));
@@ -325,10 +337,10 @@ TEST_F(PointerEventFactoryTest, TouchAndDrag) {
   EXPECT_FALSE(
       pointer_event_factory_.IsActiveButtonsState(mapped_id_start_ + 1));
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_ + 1, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 1, true);
 
   // Remove an obsolete (i.e. already removed) pointer event which should have
   // no effect.
@@ -338,17 +350,17 @@ TEST_F(PointerEventFactoryTest, TouchAndDrag) {
   EXPECT_TRUE(
       pointer_event_factory_.IsActiveButtonsState(mapped_id_start_ + 1));
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_ + 1, true);
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kTouch, 0,
-                            mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 1, true);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kTouch, 0,
+                              mapped_id_start_ + 1, true);
 
   EXPECT_TRUE(pointer_event_factory_.IsActive(mapped_id_start_ + 1));
   EXPECT_FALSE(
       pointer_event_factory_.IsActiveButtonsState(mapped_id_start_ + 1));
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 1, true);
 
   EXPECT_TRUE(pointer_event_factory_.IsActive(mapped_id_start_ + 1));
   EXPECT_TRUE(
@@ -358,37 +370,80 @@ TEST_F(PointerEventFactoryTest, TouchAndDrag) {
 TEST_F(PointerEventFactoryTest, MouseAndTouchAndPen) {
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 0,
                            expected_mouse_id_, true);
-  PointerEvent* pointer_event1 = CreateAndCheckTouchEvent(
+  PointerEvent* pointer_event1 = CreateAndCheckWebPointerEvent(
       WebPointerProperties::PointerType::kTouch, 0, mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 1, true);
 
   PointerEvent* pointer_event2 =
-      CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 1,
-                               mapped_id_start_ + 2, false);
+      CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch,
+                                    1, mapped_id_start_ + 2, false);
   PointerEvent* pointer_event3 =
-      CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 2,
-                               mapped_id_start_ + 3, false);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_ + 1, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 47213,
-                           mapped_id_start_ + 4, false);
+      CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch,
+                                    2, mapped_id_start_ + 3, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 47213,
+                                mapped_id_start_ + 4, false);
 
   pointer_event_factory_.Remove(pointer_event1->pointerId());
   pointer_event_factory_.Remove(pointer_event2->pointerId());
   pointer_event_factory_.Remove(pointer_event3->pointerId());
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 100,
-                           mapped_id_start_ + 5, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 100,
+                                mapped_id_start_ + 5, true);
 
   pointer_event_factory_.Clear();
 
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 0,
                            expected_mouse_id_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_ + 1, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 1, true);
+}
+
+TEST_F(PointerEventFactoryTest, NonHoveringPointers) {
+  CheckNonHoveringPointers({});
+
+  CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 0,
+                           expected_mouse_id_, true);
+  PointerEvent* pointer_event1 = CreateAndCheckMouseEvent(
+      WebPointerProperties::PointerType::kPen, 0, mapped_id_start_, true);
+  CheckNonHoveringPointers({});
+
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_, true);
+  CheckNonHoveringPointers({mapped_id_start_});
+
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_ + 1, true);
+  CheckNonHoveringPointers({mapped_id_start_, mapped_id_start_ + 1});
+
+  pointer_event_factory_.Remove(pointer_event1->pointerId());
+  CheckNonHoveringPointers({mapped_id_start_ + 1});
+
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 1,
+                                mapped_id_start_ + 2, false);
+
+  CheckNonHoveringPointers({mapped_id_start_ + 1, mapped_id_start_ + 2});
+
+  CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kTouch, 1,
+                           mapped_id_start_ + 2, false);
+
+  CheckNonHoveringPointers({mapped_id_start_ + 1});
+
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 3, true);
+
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 1,
+                                mapped_id_start_ + 4, false);
+
+  CheckNonHoveringPointers(
+      {mapped_id_start_ + 1, mapped_id_start_ + 3, mapped_id_start_ + 4});
+
+  pointer_event_factory_.Clear();
+  CheckNonHoveringPointers({});
 }
 
 TEST_F(PointerEventFactoryTest, PenAsTouchAndMouseEvent) {
@@ -402,34 +457,34 @@ TEST_F(PointerEventFactoryTest, PenAsTouchAndMouseEvent) {
                            mapped_id_start_, true);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kPen, 1,
                            mapped_id_start_ + 1, false);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 1,
-                           mapped_id_start_ + 1, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 1,
+                                mapped_id_start_ + 1, false);
 
   pointer_event_factory_.Remove(pointer_event1->pointerId());
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_ + 3, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 3, false);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kPen, 0,
                            mapped_id_start_ + 3, false);
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kPen, 0,
-                            mapped_id_start_ + 3, false);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kPen, 0,
+                              mapped_id_start_ + 3, false);
 
   pointer_event_factory_.Clear();
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 1,
-                           mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kPen, 0,
-                           mapped_id_start_ + 1, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 1,
+                                mapped_id_start_, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kPen, 0,
+                                mapped_id_start_ + 1, false);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kPen, 1,
                            mapped_id_start_, true);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kPen, 0,
                            mapped_id_start_ + 1, false);
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kPen, 1,
-                            mapped_id_start_, true);
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kPen, 0,
-                            mapped_id_start_ + 1, false);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kPen, 1,
+                              mapped_id_start_, true);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kPen, 0,
+                              mapped_id_start_ + 1, false);
 }
 
 TEST_F(PointerEventFactoryTest, OutOfRange) {
@@ -439,21 +494,21 @@ TEST_F(PointerEventFactoryTest, OutOfRange) {
                            mapped_id_start_ + 1, false);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kUnknown, 2,
                            mapped_id_start_ + 2, false);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kUnknown, 0,
-                           mapped_id_start_, true);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kUnknown, 3,
-                           mapped_id_start_ + 3, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kUnknown, 0,
+                                mapped_id_start_, true);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kUnknown, 3,
+                                mapped_id_start_ + 3, false);
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kUnknown, 2,
                            mapped_id_start_ + 2, false);
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kUnknown, 3,
-                            mapped_id_start_ + 3, false);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kUnknown, 3,
+                              mapped_id_start_ + 3, false);
 
   pointer_event_factory_.Remove(pointer_event1->pointerId());
 
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kUnknown, 0,
-                           mapped_id_start_ + 4, false);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kUnknown, INT_MAX,
-                           mapped_id_start_ + 5, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kUnknown, 0,
+                                mapped_id_start_ + 4, false);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kUnknown,
+                                INT_MAX, mapped_id_start_ + 5, false);
 
   pointer_event_factory_.Clear();
 
@@ -463,20 +518,20 @@ TEST_F(PointerEventFactoryTest, OutOfRange) {
   }
 
   for (int i = 0; i < 100; ++i) {
-    CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kMouse, i,
-                             expected_mouse_id_, true);
+    CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kMouse, i,
+                                  expected_mouse_id_, true);
   }
-  CreateAndCheckTouchCancel(WebPointerProperties::PointerType::kMouse, 0,
-                            expected_mouse_id_, true);
+  CreateAndCheckPointerCancel(WebPointerProperties::PointerType::kMouse, 0,
+                              expected_mouse_id_, true);
 }
 
 TEST_F(PointerEventFactoryTest, CoalescedEvents) {
   CreateAndCheckMouseEvent(WebPointerProperties::PointerType::kMouse, 0,
                            expected_mouse_id_, true,
                            WebInputEvent::kNoModifiers, 4);
-  CreateAndCheckTouchEvent(WebPointerProperties::PointerType::kTouch, 0,
-                           mapped_id_start_, true, WebTouchPoint::kStateMoved,
-                           3);
+  CreateAndCheckWebPointerEvent(WebPointerProperties::PointerType::kTouch, 0,
+                                mapped_id_start_, true,
+                                WebInputEvent::kPointerMove, 3);
 }
 
 }  // namespace blink

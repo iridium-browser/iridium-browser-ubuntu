@@ -26,9 +26,9 @@
 #include "platform/image-decoders/gif/GIFImageDecoder.h"
 
 #include <limits>
+#include <memory>
 #include "platform/image-decoders/gif/GIFImageReader.h"
 #include "platform/wtf/NotFound.h"
-#include "platform/wtf/PtrUtil.h"
 
 namespace blink {
 
@@ -38,7 +38,7 @@ GIFImageDecoder::GIFImageDecoder(AlphaOption alpha_option,
     : ImageDecoder(alpha_option, color_behavior, max_decoded_bytes),
       repetition_count_(kAnimationLoopOnce) {}
 
-GIFImageDecoder::~GIFImageDecoder() {}
+GIFImageDecoder::~GIFImageDecoder() = default;
 
 void GIFImageDecoder::OnSetData(SegmentReader* data) {
   if (reader_)
@@ -84,11 +84,12 @@ bool GIFImageDecoder::FrameIsReceivedAtIndex(size_t index) const {
          reader_->FrameContext(index)->IsComplete();
 }
 
-float GIFImageDecoder::FrameDurationAtIndex(size_t index) const {
+TimeDelta GIFImageDecoder::FrameDurationAtIndex(size_t index) const {
   return (reader_ && (index < reader_->ImagesCount()) &&
           reader_->FrameContext(index)->IsHeaderDefined())
-             ? reader_->FrameContext(index)->DelayTime()
-             : 0;
+             ? TimeDelta::FromMilliseconds(
+                   reader_->FrameContext(index)->DelayTime())
+             : TimeDelta();
 }
 
 bool GIFImageDecoder::SetFailed() {
@@ -223,7 +224,7 @@ void GIFImageDecoder::InitializeNewFrame(size_t index) {
   const GIFFrameContext* frame_context = reader_->FrameContext(index);
   buffer->SetOriginalFrameRect(
       Intersection(frame_context->FrameRect(), IntRect(IntPoint(), Size())));
-  buffer->SetDuration(frame_context->DelayTime());
+  buffer->SetDuration(TimeDelta::FromMilliseconds(frame_context->DelayTime()));
   buffer->SetDisposalMethod(frame_context->GetDisposalMethod());
   buffer->SetRequiredPreviousFrameIndex(
       FindRequiredPreviousFrame(index, false));
@@ -261,7 +262,7 @@ void GIFImageDecoder::Parse(GIFParseQuery query) {
     return;
 
   if (!reader_) {
-    reader_ = WTF::MakeUnique<GIFImageReader>(this);
+    reader_ = std::make_unique<GIFImageReader>(this);
     reader_->SetData(data_);
   }
 

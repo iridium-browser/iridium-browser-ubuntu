@@ -7,6 +7,7 @@
 
 #include "base/time/time.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/autofill/core/common/submission_source.h"
 
 namespace gfx {
 class RectF;
@@ -35,9 +36,16 @@ class AutofillProvider {
                                     const gfx::RectF& bounding_box,
                                     const base::TimeTicks timestamp) = 0;
 
-  virtual bool OnWillSubmitForm(AutofillHandlerProxy* handler,
-                                const FormData& form,
-                                const base::TimeTicks timestamp) = 0;
+  virtual void OnTextFieldDidScroll(AutofillHandlerProxy* handler,
+                                    const FormData& form,
+                                    const FormFieldData& field,
+                                    const gfx::RectF& bounding_box) = 0;
+
+  virtual bool OnFormSubmitted(AutofillHandlerProxy* handler,
+                               const FormData& form,
+                               bool known_success,
+                               SubmissionSource source,
+                               base::TimeTicks timestamp) = 0;
 
   virtual void OnFocusNoLongerOnForm(AutofillHandlerProxy* handler) = 0;
 
@@ -49,6 +57,10 @@ class AutofillProvider {
   virtual void OnDidFillAutofillFormData(AutofillHandlerProxy* handler,
                                          const FormData& form,
                                          base::TimeTicks timestamp) = 0;
+
+  virtual void OnFormsSeen(AutofillHandlerProxy* handler,
+                           const std::vector<FormData>& forms,
+                           const base::TimeTicks timestamp) = 0;
 
   virtual void Reset(AutofillHandlerProxy* handler) = 0;
 

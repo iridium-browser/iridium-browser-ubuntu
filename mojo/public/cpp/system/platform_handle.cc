@@ -65,7 +65,7 @@ MojoResult UnwrapPlatformFile(ScopedHandle handle, base::PlatformFile* file) {
 ScopedSharedBufferHandle WrapSharedMemoryHandle(
     const base::SharedMemoryHandle& memory_handle,
     size_t size,
-    bool read_only) {
+    UnwrappedSharedMemoryHandleProtection protection) {
   if (!memory_handle.IsValid())
     return ScopedSharedBufferHandle();
   MojoPlatformHandle platform_handle;
@@ -81,8 +81,8 @@ ScopedSharedBufferHandle WrapSharedMemoryHandle(
 
   MojoPlatformSharedBufferHandleFlags flags =
       MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_NONE;
-  if (read_only)
-    flags |= MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY;
+  if (protection == UnwrappedSharedMemoryHandleProtection::kReadOnly)
+    flags |= MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_HANDLE_IS_READ_ONLY;
 
   MojoSharedBufferGuid guid;
   guid.high = memory_handle.GetGUID().GetHighForSerialization();
@@ -95,10 +95,11 @@ ScopedSharedBufferHandle WrapSharedMemoryHandle(
   return ScopedSharedBufferHandle(SharedBufferHandle(mojo_handle));
 }
 
-MojoResult UnwrapSharedMemoryHandle(ScopedSharedBufferHandle handle,
-                                    base::SharedMemoryHandle* memory_handle,
-                                    size_t* size,
-                                    bool* read_only) {
+MojoResult UnwrapSharedMemoryHandle(
+    ScopedSharedBufferHandle handle,
+    base::SharedMemoryHandle* memory_handle,
+    size_t* size,
+    UnwrappedSharedMemoryHandleProtection* protection) {
   if (!handle.is_valid())
     return MOJO_RESULT_INVALID_ARGUMENT;
   MojoPlatformHandle platform_handle;
@@ -116,8 +117,12 @@ MojoResult UnwrapSharedMemoryHandle(ScopedSharedBufferHandle handle,
   if (size)
     *size = num_bytes;
 
-  if (read_only)
-    *read_only = flags & MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_READ_ONLY;
+  if (protection) {
+    *protection =
+        flags & MOJO_PLATFORM_SHARED_BUFFER_HANDLE_FLAG_HANDLE_IS_READ_ONLY
+            ? UnwrappedSharedMemoryHandleProtection::kReadOnly
+            : UnwrappedSharedMemoryHandleProtection::kReadWrite;
+  }
 
   base::UnguessableToken guid =
       base::UnguessableToken::Deserialize(mojo_guid.high, mojo_guid.low);
@@ -128,7 +133,7 @@ MojoResult UnwrapSharedMemoryHandle(ScopedSharedBufferHandle handle,
 #elif defined(OS_FUCHSIA)
   DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE);
   *memory_handle = base::SharedMemoryHandle(
-      static_cast<mx_handle_t>(platform_handle.value), num_bytes, guid);
+      static_cast<zx_handle_t>(platform_handle.value), num_bytes, guid);
 #elif defined(OS_POSIX)
   DCHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_FILE_DESCRIPTOR);
   *memory_handle = base::SharedMemoryHandle(
@@ -172,7 +177,8 @@ MojoResult UnwrapMachPort(ScopedHandle handle, mach_port_t* port) {
   if (result != MOJO_RESULT_OK)
     return result;
 
-  CHECK_EQ(platform_handle.type, MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT);
+  CHECK(platform_handle.type == MOJO_PLATFORM_HANDLE_TYPE_MACH_PORT ||
+        platform_handle.type == MOJO_PLATFORM_HANDLE_TYPE_INVALID);
   *port = static_cast<mach_port_t>(platform_handle.value);
   return MOJO_RESULT_OK;
 }

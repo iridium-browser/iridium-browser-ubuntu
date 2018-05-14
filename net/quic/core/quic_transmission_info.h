@@ -42,10 +42,8 @@ struct QUIC_EXPORT_PRIVATE QuicTransmissionInfo {
   TransmissionType transmission_type;
   // In flight packets have not been abandoned or lost.
   bool in_flight;
-  // True if the packet can never be acked, so it can be removed.  Occurs when
-  // a packet is never sent, after it is acknowledged once, or if it's a crypto
-  // packet we never expect to receive an ack for.
-  bool is_unackable;
+  // State of this packet.
+  SentPacketState state;
   // True if the packet contains stream data from the crypto stream.
   bool has_crypto_handshake;
   // Non-zero if the packet needs padding if it's retransmitted.
@@ -53,8 +51,6 @@ struct QUIC_EXPORT_PRIVATE QuicTransmissionInfo {
   // Stores the packet number of the next retransmission of this packet.
   // Zero if the packet has not been retransmitted.
   QuicPacketNumber retransmission;
-  // Non-empty if there is a listener for this packet.
-  std::list<AckListenerWrapper> ack_listeners;
   // The largest_acked in the ack frame, if the packet contains an ack.
   QuicPacketNumber largest_acked;
 };

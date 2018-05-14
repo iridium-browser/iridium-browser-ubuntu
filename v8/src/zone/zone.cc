@@ -42,7 +42,8 @@ const size_t kASanRedzoneBytes = 0;
 
 }  // namespace
 
-Zone::Zone(AccountingAllocator* allocator, const char* name)
+Zone::Zone(AccountingAllocator* allocator, const char* name,
+           SegmentSize segment_size)
     : allocation_size_(0),
       segment_bytes_allocated_(0),
       position_(0),
@@ -50,7 +51,8 @@ Zone::Zone(AccountingAllocator* allocator, const char* name)
       allocator_(allocator),
       segment_head_(nullptr),
       name_(name),
-      sealed_(false) {
+      sealed_(false),
+      segment_size_(segment_size) {
   allocator_->ZoneCreation(this);
 }
 
@@ -59,7 +61,7 @@ Zone::~Zone() {
 
   DeleteAll();
 
-  DCHECK(segment_bytes_allocated_ == 0);
+  DCHECK_EQ(segment_bytes_allocated_, 0);
 }
 
 void* Zone::New(size_t size) {
@@ -148,6 +150,9 @@ Address Zone::NewExpand(size_t size) {
     V8::FatalProcessOutOfMemory("Zone");
     return nullptr;
   }
+  if (segment_size_ == SegmentSize::kLarge) {
+    new_size = kMaximumSegmentSize;
+  }
   if (new_size < kMinimumSegmentSize) {
     new_size = kMinimumSegmentSize;
   } else if (new_size > kMaximumSegmentSize) {
@@ -171,7 +176,7 @@ Address Zone::NewExpand(size_t size) {
   Address result = RoundUp(segment->start(), kAlignmentInBytes);
   position_ = result + size;
   // Check for address overflow.
-  // (Should not happen since the segment is guaranteed to accomodate
+  // (Should not happen since the segment is guaranteed to accommodate
   // size bytes + header and alignment padding)
   DCHECK(reinterpret_cast<uintptr_t>(position_) >=
          reinterpret_cast<uintptr_t>(result));

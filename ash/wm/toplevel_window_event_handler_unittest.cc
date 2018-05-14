@@ -4,7 +4,6 @@
 
 #include "ash/wm/toplevel_window_event_handler.h"
 
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
@@ -44,7 +43,7 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
   explicit TestWindowDelegate(int hittest_code) {
     set_window_component(hittest_code);
   }
-  ~TestWindowDelegate() override {}
+  ~TestWindowDelegate() override = default;
 
  private:
   // Overridden from aura::Test::TestWindowDelegate:
@@ -55,8 +54,8 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
 
 class ToplevelWindowEventHandlerTest : public AshTestBase {
  public:
-  ToplevelWindowEventHandlerTest() {}
-  ~ToplevelWindowEventHandlerTest() override {}
+  ToplevelWindowEventHandlerTest() = default;
+  ~ToplevelWindowEventHandlerTest() override = default;
 
  protected:
   aura::Window* CreateWindow(int hittest_code) {
@@ -112,7 +111,7 @@ void ContinueAndCompleteDrag(ui::test::EventGenerator* generator,
                              wm::WindowState* window_state,
                              aura::Window* window) {
   ASSERT_TRUE(window->HasCapture());
-  ASSERT_FALSE(window_state->window_position_managed());
+  ASSERT_FALSE(window_state->GetWindowPositionManaged());
   generator->DragMouseBy(100, 100);
   generator->ReleaseLeftButton();
 }
@@ -129,7 +128,7 @@ TEST_F(ToplevelWindowEventHandlerTest, WindowPositionAutoManagement) {
 
   // Explicitly enable window position auto management, and expect it to be
   // restored after drag completes.
-  window_state->set_window_position_managed(true);
+  window_state->SetWindowPositionManaged(true);
   generator.PressLeftButton();
   ::wm::WindowMoveClient* move_client =
       ::wm::GetWindowMoveClient(w1->GetRootWindow());
@@ -141,7 +140,7 @@ TEST_F(ToplevelWindowEventHandlerTest, WindowPositionAutoManagement) {
             move_client->RunMoveLoop(w1.get(), gfx::Vector2d(100, 100),
                                      ::wm::WINDOW_MOVE_SOURCE_MOUSE));
   // Window position auto manage property should be restored to true.
-  EXPECT_TRUE(window_state->window_position_managed());
+  EXPECT_TRUE(window_state->GetWindowPositionManaged());
   // Position should have been offset by 100,100.
   EXPECT_EQ("100,100", w1->bounds().origin().ToString());
   // Size should remain the same.
@@ -149,7 +148,7 @@ TEST_F(ToplevelWindowEventHandlerTest, WindowPositionAutoManagement) {
 
   // Explicitly disable window position auto management, and expect it to be
   // restored after drag completes.
-  window_state->set_window_position_managed(false);
+  window_state->SetWindowPositionManaged(false);
   generator.PressLeftButton();
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
@@ -159,7 +158,7 @@ TEST_F(ToplevelWindowEventHandlerTest, WindowPositionAutoManagement) {
             move_client->RunMoveLoop(w1.get(), gfx::Vector2d(100, 100),
                                      ::wm::WINDOW_MOVE_SOURCE_MOUSE));
   // Window position auto manage property should be restored to true.
-  EXPECT_FALSE(window_state->window_position_managed());
+  EXPECT_FALSE(window_state->GetWindowPositionManaged());
   // Position should have been offset by 100,100.
   EXPECT_EQ("200,200", w1->bounds().origin().ToString());
   // Size should remain the same.
@@ -474,7 +473,8 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
 
   // Verify that the window has moved after the gesture.
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
-  EXPECT_EQ(wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED, window_state->GetStateType());
+  EXPECT_EQ(mojom::WindowStateType::RIGHT_SNAPPED,
+            window_state->GetStateType());
 
   old_bounds = target->bounds();
 
@@ -486,7 +486,7 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
   RunAllPendingInMessageLoop();
 
   EXPECT_NE(old_bounds.ToString(), target->bounds().ToString());
-  EXPECT_EQ(wm::WINDOW_STATE_TYPE_LEFT_SNAPPED, window_state->GetStateType());
+  EXPECT_EQ(mojom::WindowStateType::LEFT_SNAPPED, window_state->GetStateType());
 
   gfx::Rect bounds_before_maximization = target->bounds();
   bounds_before_maximization.Offset(0, 100);
@@ -703,8 +703,43 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragToRestore) {
 }
 
 // Tests that EasyResizeWindowTargeter expands the hit-test area when a
+// top-level window can be resized but not when the window is not resizable.
+TEST_F(ToplevelWindowEventHandlerTest, EasyResizerUsedForTopLevel) {
+  std::unique_ptr<aura::Window> w1(CreateTestWindowInShellWithDelegate(
+      new TestWindowDelegate(HTCAPTION), -1, gfx::Rect(0, 0, 100, 100)));
+  std::unique_ptr<aura::Window> w2(CreateTestWindowInShellWithDelegate(
+      new TestWindowDelegate(HTCAPTION), -2, gfx::Rect(40, 40, 100, 100)));
+  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                     gfx::Point(5, 5));
+
+  generator.PressMoveAndReleaseTouchTo(gfx::Point(5, 5));
+  EXPECT_TRUE(wm::IsActiveWindow(w1.get()));
+
+  // Make |w1| resizable to allow touch events to go to it (and not |w2|) thanks
+  // to EasyResizeWindowTargeter.
+  w1->SetProperty(aura::client::kResizeBehaviorKey,
+                  ui::mojom::kResizeBehaviorCanMaximize |
+                      ui::mojom::kResizeBehaviorCanMinimize |
+                      ui::mojom::kResizeBehaviorCanResize);
+  // Clicking a point within |w2| but close to |w1| should not activate |w2|.
+  const gfx::Point touch_point(105, 105);
+  generator.MoveTouch(touch_point);
+  generator.PressMoveAndReleaseTouchTo(touch_point);
+  EXPECT_TRUE(wm::IsActiveWindow(w1.get()));
+
+  // Make |w1| not resizable to allow touch events to go to |w2| even when close
+  // to |w1|.
+  w1->SetProperty(aura::client::kResizeBehaviorKey,
+                  ui::mojom::kResizeBehaviorCanMaximize |
+                      ui::mojom::kResizeBehaviorCanMinimize);
+  // Clicking a point within |w2| should activate that window.
+  generator.PressMoveAndReleaseTouchTo(touch_point);
+  EXPECT_TRUE(wm::IsActiveWindow(w2.get()));
+}
+
+// Tests that EasyResizeWindowTargeter expands the hit-test area when a
 // window is a transient child of a top-level window and is resizable.
-TEST_F(ToplevelWindowEventHandlerTest, EasyResizerUsed) {
+TEST_F(ToplevelWindowEventHandlerTest, EasyResizerUsedForTransient) {
   std::unique_ptr<aura::Window> w1(CreateTestWindowInShellWithDelegate(
       new TestWindowDelegate(HTCAPTION), -1, gfx::Rect(0, 0, 100, 100)));
   std::unique_ptr<aura::Window> w11(CreateTestWindowInShellWithDelegate(
@@ -954,11 +989,6 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDragCaptureLoss) {
 // Tests that dragging a snapped window to another display updates the
 // window's bounds correctly.
 TEST_F(ToplevelWindowEventHandlerTest, DragSnappedWindowToExternalDisplay) {
-  // TODO: SetLayoutForCurrentDisplays() needs to ported to mash.
-  // http://crbug.com/698043.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   UpdateDisplay("940x550,940x550");
   int64_t primary_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
   int64_t secondary_id = display_manager()->GetSecondaryDisplay().id();

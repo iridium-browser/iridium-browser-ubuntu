@@ -33,22 +33,31 @@
 
 #include <memory>
 #include "base/gtest_prod_util.h"
+#include "base/thread_annotations.h"
 #include "platform/FileMetadata.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/ThreadSafeRefCounted.h"
+#include "platform/wtf/ThreadingPrimitives.h"
 #include "platform/wtf/text/WTFString.h"
-#include "storage/public/interfaces/blobs.mojom-blink.h"
+#include "third_party/WebKit/public/mojom/blob/blob.mojom-blink.h"
+#include "third_party/WebKit/public/mojom/blob/data_element.mojom-blink.h"
 
 namespace blink {
+namespace mojom {
+namespace blink {
+class BlobRegistry;
+}
+}  // namespace mojom
 
+class BlobBytesProvider;
 class BlobDataHandle;
 
 class PLATFORM_EXPORT RawData : public ThreadSafeRefCounted<RawData> {
  public:
-  static PassRefPtr<RawData> Create() { return AdoptRef(new RawData()); }
-
-  void DetachFromCurrentThread();
+  static scoped_refptr<RawData> Create() {
+    return base::AdoptRef(new RawData());
+  }
 
   const char* data() const { return data_.data(); }
   size_t length() const { return data_.size(); }
@@ -60,98 +69,12 @@ class PLATFORM_EXPORT RawData : public ThreadSafeRefCounted<RawData> {
   Vector<char> data_;
 };
 
-struct PLATFORM_EXPORT BlobDataItem {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  static const long long kToEndOfFile;
-
-  // Default constructor.
-  BlobDataItem()
-      : type(kData),
-        offset(0),
-        length(kToEndOfFile),
-        expected_modification_time(InvalidFileTime()) {}
-
-  // Constructor for String type (complete string).
-  explicit BlobDataItem(PassRefPtr<RawData> data)
-      : type(kData),
-        data(std::move(data)),
-        offset(0),
-        length(kToEndOfFile),
-        expected_modification_time(InvalidFileTime()) {}
-
-  // Constructor for File type (complete file).
-  explicit BlobDataItem(const String& path)
-      : type(kFile),
-        path(path),
-        offset(0),
-        length(kToEndOfFile),
-        expected_modification_time(InvalidFileTime()) {}
-
-  // Constructor for File type (partial file).
-  BlobDataItem(const String& path,
-               long long offset,
-               long long length,
-               double expected_modification_time)
-      : type(kFile),
-        path(path),
-        offset(offset),
-        length(length),
-        expected_modification_time(expected_modification_time) {}
-
-  // Constructor for Blob type.
-  BlobDataItem(PassRefPtr<BlobDataHandle> blob_data_handle,
-               long long offset,
-               long long length)
-      : type(kBlob),
-        blob_data_handle(std::move(blob_data_handle)),
-        offset(offset),
-        length(length),
-        expected_modification_time(InvalidFileTime()) {}
-
-  // Constructor for FileSystem file type.
-  BlobDataItem(const KURL& file_system_url,
-               long long offset,
-               long long length,
-               double expected_modification_time)
-      : type(kFileSystemURL),
-        file_system_url(file_system_url),
-        offset(offset),
-        length(length),
-        expected_modification_time(expected_modification_time) {}
-
-  // Detaches from current thread so that it can be passed to another thread.
-  void DetachFromCurrentThread();
-
-  const enum { kData, kFile, kBlob, kFileSystemURL } type;
-
-  RefPtr<RawData> data;                   // For Data type.
-  String path;                            // For File type.
-  KURL file_system_url;                   // For FileSystemURL type.
-  RefPtr<BlobDataHandle> blob_data_handle;  // For Blob type.
-
-  long long offset;
-  long long length;
-  double expected_modification_time;
-
- private:
-  friend class BlobData;
-
-  // Constructor for String type (partial string).
-  BlobDataItem(PassRefPtr<RawData> data, long long offset, long long length)
-      : type(kData),
-        data(std::move(data)),
-        offset(offset),
-        length(length),
-        expected_modification_time(InvalidFileTime()) {}
-};
-
-typedef Vector<BlobDataItem> BlobDataItemList;
-
 class PLATFORM_EXPORT BlobData {
   USING_FAST_MALLOC(BlobData);
-  WTF_MAKE_NONCOPYABLE(BlobData);
 
  public:
+  static constexpr long long kToEndOfFile = -1;
+
   static std::unique_ptr<BlobData> Create();
 
   // Calling append* on objects returned by createFor___WithUnknownSize will
@@ -172,10 +95,15 @@ class PLATFORM_EXPORT BlobData {
   const String& ContentType() const { return content_type_; }
   void SetContentType(const String&);
 
-  const BlobDataItemList& Items() const { return items_; }
+  const Vector<mojom::blink::DataElementPtr>& Elements() const {
+    return elements_;
+  }
+  Vector<mojom::blink::DataElementPtr> ReleaseElements() {
+    return std::move(elements_);
+  }
 
   void AppendBytes(const void*, size_t length);
-  void AppendData(PassRefPtr<RawData>, long long offset, long long length);
+  void AppendData(scoped_refptr<RawData>);
   void AppendFile(const String& path,
                   long long offset,
                   long long length,
@@ -183,7 +111,7 @@ class PLATFORM_EXPORT BlobData {
 
   // The given blob must not be a file with unknown size. Please use the
   // File::appendTo instead.
-  void AppendBlob(PassRefPtr<BlobDataHandle>,
+  void AppendBlob(scoped_refptr<BlobDataHandle>,
                   long long offset,
                   long long length);
   void AppendFileSystemURL(const KURL&,
@@ -195,15 +123,13 @@ class PLATFORM_EXPORT BlobData {
   // The value of the size property for a Blob who has this data.
   // BlobDataItem::toEndOfFile if the Blob has a file whose size was not yet
   // determined.
-  long long length() const;
+  uint64_t length() const;
 
   bool IsSingleUnknownSizeFile() const {
     return file_composition_ == FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE;
   }
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(BlobDataTest, Consolidation);
-
   enum class FileCompositionStatus {
     SINGLE_UNKNOWN_SIZE_FILE,
     NO_UNKNOWN_SIZE_FILES
@@ -212,32 +138,49 @@ class PLATFORM_EXPORT BlobData {
   explicit BlobData(FileCompositionStatus composition)
       : file_composition_(composition) {}
 
-  bool CanConsolidateData(size_t length);
+  void AppendDataInternal(base::span<const char> data,
+                          scoped_refptr<RawData> = nullptr);
 
   String content_type_;
   FileCompositionStatus file_composition_;
-  BlobDataItemList items_;
+
+  Vector<mojom::blink::DataElementPtr> elements_;
+  size_t current_memory_population_ = 0;
+  BlobBytesProvider* last_bytes_provider_ = nullptr;
+
+  DISALLOW_COPY_AND_ASSIGN(BlobData);
 };
 
 class PLATFORM_EXPORT BlobDataHandle
     : public ThreadSafeRefCounted<BlobDataHandle> {
  public:
   // For empty blob construction.
-  static PassRefPtr<BlobDataHandle> Create() {
-    return AdoptRef(new BlobDataHandle());
+  static scoped_refptr<BlobDataHandle> Create() {
+    return base::AdoptRef(new BlobDataHandle());
   }
 
   // For initial creation.
-  static PassRefPtr<BlobDataHandle> Create(std::unique_ptr<BlobData> data,
-                                           long long size) {
-    return AdoptRef(new BlobDataHandle(std::move(data), size));
+  static scoped_refptr<BlobDataHandle> Create(std::unique_ptr<BlobData> data,
+                                              long long size) {
+    return base::AdoptRef(new BlobDataHandle(std::move(data), size));
   }
 
   // For deserialization of script values and ipc messages.
-  static PassRefPtr<BlobDataHandle> Create(const String& uuid,
-                                           const String& type,
-                                           long long size) {
-    return AdoptRef(new BlobDataHandle(uuid, type, size));
+  static scoped_refptr<BlobDataHandle> Create(const String& uuid,
+                                              const String& type,
+                                              long long size) {
+    return base::AdoptRef(new BlobDataHandle(uuid, type, size));
+  }
+
+  static scoped_refptr<BlobDataHandle> Create(const String& uuid,
+                                       const String& type,
+                                       long long size,
+                                       mojom::blink::BlobPtrInfo blob_info) {
+    if (blob_info.is_valid()) {
+      return base::AdoptRef(
+          new BlobDataHandle(uuid, type, size, std::move(blob_info)));
+    }
+    return base::AdoptRef(new BlobDataHandle(uuid, type, size));
   }
 
   String Uuid() const { return uuid_.IsolatedCopy(); }
@@ -248,16 +191,37 @@ class PLATFORM_EXPORT BlobDataHandle
 
   ~BlobDataHandle();
 
+  mojom::blink::BlobPtr CloneBlobPtr();
+
+  void ReadAll(mojo::ScopedDataPipeProducerHandle,
+               mojom::blink::BlobReaderClientPtr);
+  void ReadRange(uint64_t offset,
+                 uint64_t length,
+                 mojo::ScopedDataPipeProducerHandle,
+                 mojom::blink::BlobReaderClientPtr);
+
+  static mojom::blink::BlobRegistry* GetBlobRegistry();
+  static void SetBlobRegistryForTesting(mojom::blink::BlobRegistry*);
+
  private:
   BlobDataHandle();
   BlobDataHandle(std::unique_ptr<BlobData>, long long size);
   BlobDataHandle(const String& uuid, const String& type, long long size);
+  BlobDataHandle(const String& uuid,
+                 const String& type,
+                 long long size,
+                 mojom::blink::BlobPtrInfo);
 
   const String uuid_;
   const String type_;
   const long long size_;
   const bool is_single_unknown_size_file_;
-  storage::mojom::blink::BlobPtr blob_;
+  // This class is supposed to be thread safe. So to be able to use the mojo
+  // Blob interface from multiple threads store a InterfacePtrInfo combined with
+  // a mutex, and make sure any access to the mojo interface is done protected
+  // by the mutex.
+  mojom::blink::BlobPtrInfo blob_info_ GUARDED_BY(blob_info_mutex_);
+  Mutex blob_info_mutex_;
 };
 
 }  // namespace blink

@@ -10,7 +10,7 @@
 
 namespace blink {
 
-class CSSFontFamilyValue : public CSSValue {
+class CORE_EXPORT CSSFontFamilyValue : public CSSValue {
  public:
   static CSSFontFamilyValue* Create(const String& family_name);
 
@@ -22,7 +22,7 @@ class CSSFontFamilyValue : public CSSValue {
     return string_ == other.string_;
   }
 
-  DECLARE_TRACE_AFTER_DISPATCH();
+  void TraceAfterDispatch(blink::Visitor*);
 
  private:
   friend class CSSValuePool;

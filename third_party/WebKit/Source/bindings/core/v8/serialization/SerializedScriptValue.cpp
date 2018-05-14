@@ -45,8 +45,8 @@
 #include "bindings/core/v8/serialization/Transferables.h"
 #include "bindings/core/v8/serialization/UnpackedSerializedScriptValue.h"
 #include "core/dom/ExceptionCode.h"
-#include "core/dom/MessagePort.h"
 #include "core/imagebitmap/ImageBitmap.h"
+#include "core/messaging/MessagePort.h"
 #include "core/typed_arrays/DOMArrayBuffer.h"
 #include "core/typed_arrays/DOMSharedArrayBuffer.h"
 #include "platform/SharedBuffer.h"
@@ -58,15 +58,15 @@
 #include "platform/wtf/Assertions.h"
 #include "platform/wtf/ByteOrder.h"
 #include "platform/wtf/CheckedNumeric.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/Vector.h"
 #include "platform/wtf/dtoa/utils.h"
 #include "platform/wtf/text/StringBuffer.h"
 #include "platform/wtf/text/StringHash.h"
+#include "public/web/WebSerializedScriptValueVersion.h"
 
 namespace blink {
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::Serialize(
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Serialize(
     v8::Isolate* isolate,
     v8::Local<v8::Value> value,
     const SerializeOptions& options,
@@ -75,23 +75,23 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::Serialize(
                                                          options, exception);
 }
 
-PassRefPtr<SerializedScriptValue>
+scoped_refptr<SerializedScriptValue>
 SerializedScriptValue::SerializeAndSwallowExceptions(
     v8::Isolate* isolate,
     v8::Local<v8::Value> value) {
   DummyExceptionStateForTesting exception_state;
-  RefPtr<SerializedScriptValue> serialized =
+  scoped_refptr<SerializedScriptValue> serialized =
       Serialize(isolate, value, SerializeOptions(), exception_state);
   if (exception_state.HadException())
     return NullValue();
   return serialized;
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create() {
-  return AdoptRef(new SerializedScriptValue);
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create() {
+  return base::AdoptRef(new SerializedScriptValue);
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
     const String& data) {
   CheckedNumeric<size_t> data_buffer_size = data.length();
   data_buffer_size *= 2;
@@ -101,8 +101,8 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
   DataBufferPtr data_buffer = AllocateBuffer(data_buffer_size.ValueOrDie());
   data.CopyTo(reinterpret_cast<UChar*>(data_buffer.get()), 0, data.length());
 
-  return AdoptRef(new SerializedScriptValue(std::move(data_buffer),
-                                            data_buffer_size.ValueOrDie()));
+  return base::AdoptRef(new SerializedScriptValue(
+      std::move(data_buffer), data_buffer_size.ValueOrDie()));
 }
 
 // Versions 16 and below (prior to April 2017) used ntohs() to byte-swap SSV
@@ -203,7 +203,8 @@ inline static bool IsByteSwappedWiredData(const uint8_t* data, size_t length) {
 }
 
 static void SwapWiredDataIfNeeded(uint8_t* buffer, size_t buffer_size) {
-  DCHECK(!(buffer_size % sizeof(UChar)));
+  if (buffer_size % sizeof(UChar))
+    return;
 
   if (!IsByteSwappedWiredData(buffer, buffer_size))
     return;
@@ -215,7 +216,7 @@ static void SwapWiredDataIfNeeded(uint8_t* buffer, size_t buffer_size) {
     uchars[i] = ntohs(uchars[i]);
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
     const char* data,
     size_t length) {
   if (!data)
@@ -225,11 +226,12 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
   std::copy(data, data + length, data_buffer.get());
   SwapWiredDataIfNeeded(data_buffer.get(), length);
 
-  return AdoptRef(new SerializedScriptValue(std::move(data_buffer), length));
+  return base::AdoptRef(
+      new SerializedScriptValue(std::move(data_buffer), length));
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
-    RefPtr<const SharedBuffer> buffer) {
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
+    scoped_refptr<const SharedBuffer> buffer) {
   if (!buffer)
     return Create();
 
@@ -243,7 +245,7 @@ PassRefPtr<SerializedScriptValue> SerializedScriptValue::Create(
   });
   SwapWiredDataIfNeeded(data_buffer.get(), buffer->size());
 
-  return AdoptRef(
+  return base::AdoptRef(
       new SerializedScriptValue(std::move(data_buffer), buffer->size()));
 }
 
@@ -275,7 +277,7 @@ SerializedScriptValue::~SerializedScriptValue() {
   }
 }
 
-PassRefPtr<SerializedScriptValue> SerializedScriptValue::NullValue() {
+scoped_refptr<SerializedScriptValue> SerializedScriptValue::NullValue() {
   // The format here may fall a bit out of date, because we support
   // deserializing SSVs written by old browser versions.
   static const uint8_t kNullData[] = {0xFF, 17, 0xFF, 13, '0', 0x00};
@@ -293,19 +295,6 @@ String SerializedScriptValue::ToWireString() const {
   if (string_size_bytes > data_buffer_size_)
     reinterpret_cast<char*>(destination)[string_size_bytes - 1] = '\0';
   return wire_string;
-}
-
-void SerializedScriptValue::ToWireBytes(Vector<char>& result) const {
-  DCHECK(result.IsEmpty());
-
-  size_t result_size = (data_buffer_size_ + 1) & ~1;
-  result.resize(result_size);
-  memcpy(result.data(), data_buffer_.get(), data_buffer_size_);
-
-  if (result_size > data_buffer_size_) {
-    DCHECK_EQ(result_size, data_buffer_size_ + 1);
-    result[data_buffer_size_] = 0;
-  }
 }
 
 SerializedScriptValue::ImageBitmapContentsArray
@@ -381,6 +370,24 @@ void SerializedScriptValue::TransferArrayBuffers(
       TransferArrayBufferContents(isolate, array_buffers, exception_state);
 }
 
+void SerializedScriptValue::CloneSharedArrayBuffers(
+    SharedArrayBufferArray& array_buffers) {
+  if (!array_buffers.size())
+    return;
+
+  HeapHashSet<Member<DOMArrayBufferBase>> visited;
+  shared_array_buffers_contents_.Grow(array_buffers.size());
+  size_t i = 0;
+  for (auto it = array_buffers.begin(); it != array_buffers.end(); ++it) {
+    DOMSharedArrayBuffer* shared_array_buffer = *it;
+    if (visited.Contains(shared_array_buffer))
+      continue;
+    visited.insert(shared_array_buffer);
+    shared_array_buffer->ShareContentsWith(shared_array_buffers_contents_[i]);
+    i++;
+  }
+}
+
 v8::Local<v8::Value> SerializedScriptValue::Deserialize(
     v8::Isolate* isolate,
     const DeserializeOptions& options) {
@@ -390,7 +397,7 @@ v8::Local<v8::Value> SerializedScriptValue::Deserialize(
 
 // static
 UnpackedSerializedScriptValue* SerializedScriptValue::Unpack(
-    RefPtr<SerializedScriptValue> value) {
+    scoped_refptr<SerializedScriptValue> value) {
   if (!value)
     return nullptr;
 #if DCHECK_IS_ON()
@@ -402,6 +409,7 @@ UnpackedSerializedScriptValue* SerializedScriptValue::Unpack(
 
 bool SerializedScriptValue::HasPackedContents() const {
   return !array_buffer_contents_array_.IsEmpty() ||
+         !shared_array_buffers_contents_.IsEmpty() ||
          !image_bitmap_contents_array_.IsEmpty();
 }
 
@@ -414,15 +422,16 @@ bool SerializedScriptValue::ExtractTransferables(
   if (value.IsEmpty() || value->IsUndefined())
     return true;
 
-  Vector<v8::Local<v8::Value>> transferable_array =
-      NativeValueTraits<IDLSequence<v8::Local<v8::Value>>>::NativeValue(
-          isolate, value, exception_state);
+  Vector<ScriptValue> transferable_array =
+      NativeValueTraits<IDLSequence<ScriptValue>>::NativeValue(isolate, value,
+                                                               exception_state);
   if (exception_state.HadException())
     return false;
 
   // Validate the passed array of transferables.
   uint32_t i = 0;
-  for (const auto& transferable_object : transferable_array) {
+  for (const auto& script_value : transferable_array) {
+    v8::Local<v8::Value> transferable_object = script_value.V8Value();
     // Validation of non-null objects, per HTML5 spec 10.3.3.
     if (IsUndefinedOrNull(transferable_object)) {
       exception_state.ThrowTypeError(
@@ -433,7 +442,7 @@ bool SerializedScriptValue::ExtractTransferables(
     }
     // Validation of Objects implementing an interface, per WebIDL spec 4.1.15.
     if (V8MessagePort::hasInstance(transferable_object, isolate)) {
-      MessagePort* port = V8MessagePort::toImpl(
+      MessagePort* port = V8MessagePort::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       // Check for duplicate MessagePorts.
       if (transferables.message_ports.Contains(port)) {
@@ -444,7 +453,7 @@ bool SerializedScriptValue::ExtractTransferables(
       }
       transferables.message_ports.push_back(port);
     } else if (transferable_object->IsArrayBuffer()) {
-      DOMArrayBuffer* array_buffer = V8ArrayBuffer::toImpl(
+      DOMArrayBuffer* array_buffer = V8ArrayBuffer::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.array_buffers.Contains(array_buffer)) {
         exception_state.ThrowDOMException(
@@ -454,7 +463,7 @@ bool SerializedScriptValue::ExtractTransferables(
       }
       transferables.array_buffers.push_back(array_buffer);
     } else if (transferable_object->IsSharedArrayBuffer()) {
-      DOMSharedArrayBuffer* shared_array_buffer = V8SharedArrayBuffer::toImpl(
+      DOMSharedArrayBuffer* shared_array_buffer = V8SharedArrayBuffer::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.array_buffers.Contains(shared_array_buffer)) {
         exception_state.ThrowDOMException(
@@ -465,7 +474,7 @@ bool SerializedScriptValue::ExtractTransferables(
       }
       transferables.array_buffers.push_back(shared_array_buffer);
     } else if (V8ImageBitmap::hasInstance(transferable_object, isolate)) {
-      ImageBitmap* image_bitmap = V8ImageBitmap::toImpl(
+      ImageBitmap* image_bitmap = V8ImageBitmap::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.image_bitmaps.Contains(image_bitmap)) {
         exception_state.ThrowDOMException(
@@ -475,7 +484,7 @@ bool SerializedScriptValue::ExtractTransferables(
       }
       transferables.image_bitmaps.push_back(image_bitmap);
     } else if (V8OffscreenCanvas::hasInstance(transferable_object, isolate)) {
-      OffscreenCanvas* offscreen_canvas = V8OffscreenCanvas::toImpl(
+      OffscreenCanvas* offscreen_canvas = V8OffscreenCanvas::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.offscreen_canvases.Contains(offscreen_canvas)) {
         exception_state.ThrowDOMException(
@@ -509,8 +518,8 @@ ArrayBufferArray SerializedScriptValue::ExtractNonSharedArrayBuffers(
   // Copy the non-shared array buffers into result, and remove them from
   // array_buffers.
   result.AppendRange(non_shared_begin, array_buffers.end());
-  array_buffers.erase(non_shared_begin - array_buffers.begin(),
-                      array_buffers.end() - non_shared_begin);
+  array_buffers.EraseAt(non_shared_begin - array_buffers.begin(),
+                        array_buffers.end() - non_shared_begin);
   return result;
 }
 
@@ -545,15 +554,10 @@ SerializedScriptValue::TransferArrayBufferContents(
 
     size_t index = std::distance(array_buffers.begin(), it);
     if (array_buffer_base->IsShared()) {
-      DOMSharedArrayBuffer* shared_array_buffer =
-          static_cast<DOMSharedArrayBuffer*>(array_buffer_base);
-      if (!shared_array_buffer->ShareContentsWith(contents.at(index))) {
-        exception_state.ThrowDOMException(kDataCloneError,
-                                          "SharedArrayBuffer at index " +
-                                              String::Number(index) +
-                                              " could not be transferred.");
-        return ArrayBufferContentsArray();
-      }
+      exception_state.ThrowDOMException(
+          kDataCloneError, "SharedArrayBuffer at index " +
+                               String::Number(index) + " is not transferable.");
+      return ArrayBufferContentsArray();
     } else {
       DOMArrayBuffer* array_buffer =
           static_cast<DOMArrayBuffer*>(array_buffer_base);
@@ -582,6 +586,8 @@ void SerializedScriptValue::
   if (!transferables_need_external_allocation_registration_) {
     for (auto& buffer : array_buffer_contents_array_)
       buffer.UnregisterExternalAllocationWithCurrentContext();
+    for (auto& buffer : shared_array_buffers_contents_)
+      buffer.UnregisterExternalAllocationWithCurrentContext();
     transferables_need_external_allocation_registration_ = true;
   }
 }
@@ -600,7 +606,17 @@ void SerializedScriptValue::RegisterMemoryAllocatedWithCurrentScriptContext() {
   if (transferables_need_external_allocation_registration_) {
     for (auto& buffer : array_buffer_contents_array_)
       buffer.RegisterExternalAllocationWithCurrentContext();
+    for (auto& buffer : shared_array_buffers_contents_)
+      buffer.RegisterExternalAllocationWithCurrentContext();
   }
 }
+
+// This ensures that the version number published in
+// WebSerializedScriptValueVersion.h matches the serializer's understanding.
+// TODO(jbroman): Fix this to also account for the V8-side version. See
+// https://crbug.com/704293.
+static_assert(kSerializedScriptValueVersion ==
+                  SerializedScriptValue::kWireFormatVersion,
+              "Update WebSerializedScriptValueVersion.h.");
 
 }  // namespace blink

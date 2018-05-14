@@ -91,7 +91,9 @@ void GridPainter::PaintChildren(const PaintInfo& paint_info,
   }
 
   for (auto* item : layout_grid_.ItemsOverflowingGridArea()) {
-    if (item->FrameRect().Intersects(local_visual_rect))
+    LayoutRect item_overflow_rect = item->FrameRect();
+    item_overflow_rect.SetSize(item->VisualOverflowRect().Size());
+    if (item_overflow_rect.Intersects(local_visual_rect))
       grid_items_to_be_painted.push_back(
           std::make_pair(item, layout_grid_.PaintIndexForGridItem(item)));
   }
@@ -100,7 +102,7 @@ void GridPainter::PaintChildren(const PaintInfo& paint_info,
                    grid_items_to_be_painted.end(),
                    CompareOrderModifiedDocumentOrder);
 
-  LayoutBox* previous = 0;
+  LayoutBox* previous = nullptr;
   for (const auto& grid_item_and_paint_index : grid_items_to_be_painted) {
     // We might have duplicates because of spanning children are included in all
     // cells they span.  Skip them here to avoid painting items several times.

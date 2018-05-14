@@ -26,6 +26,7 @@
 #ifndef ContentSecurityPolicyResponseHeaders_h
 #define ContentSecurityPolicyResponseHeaders_h
 
+#include "platform/CrossThreadCopier.h"
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/WTFString.h"
@@ -33,13 +34,15 @@
 namespace blink {
 
 class ResourceResponse;
+class HTTPHeaderMap;
 
 class PLATFORM_EXPORT ContentSecurityPolicyResponseHeaders final {
-  STACK_ALLOCATED();
-
  public:
-  ContentSecurityPolicyResponseHeaders() {}
+  ContentSecurityPolicyResponseHeaders() = default;
   explicit ContentSecurityPolicyResponseHeaders(const ResourceResponse&);
+  explicit ContentSecurityPolicyResponseHeaders(
+      const HTTPHeaderMap&,
+      bool should_parse_wasm_eval = false);
 
   const String& ContentSecurityPolicy() const {
     return content_security_policy_;
@@ -48,9 +51,25 @@ class PLATFORM_EXPORT ContentSecurityPolicyResponseHeaders final {
     return content_security_policy_report_only_;
   }
 
+  ContentSecurityPolicyResponseHeaders IsolatedCopy() const;
+
+  bool ShouldParseWasmEval() const { return should_parse_wasm_eval_; }
+
  private:
   String content_security_policy_;
   String content_security_policy_report_only_;
+
+  const bool should_parse_wasm_eval_ = false;
+};
+
+template <>
+struct CrossThreadCopier<ContentSecurityPolicyResponseHeaders> {
+  STATIC_ONLY(CrossThreadCopier);
+  using Type = ContentSecurityPolicyResponseHeaders;
+  PLATFORM_EXPORT static Type Copy(
+      const ContentSecurityPolicyResponseHeaders& headers) {
+    return headers.IsolatedCopy();
+  }
 };
 
 }  // namespace blink

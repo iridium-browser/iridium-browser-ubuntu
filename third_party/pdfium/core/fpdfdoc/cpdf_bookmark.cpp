@@ -40,25 +40,25 @@ uint32_t CPDF_Bookmark::GetFontStyle() const {
   return m_pDict ? m_pDict->GetIntegerFor("F") : 0;
 }
 
-CFX_WideString CPDF_Bookmark::GetTitle() const {
+WideString CPDF_Bookmark::GetTitle() const {
   if (!m_pDict)
-    return CFX_WideString();
+    return WideString();
 
   CPDF_String* pString = ToString(m_pDict->GetDirectObjectFor("Title"));
   if (!pString)
-    return CFX_WideString();
+    return WideString();
 
-  CFX_WideString title = pString->GetUnicodeText();
+  WideString title = pString->GetUnicodeText();
   int len = title.GetLength();
   if (!len)
-    return CFX_WideString();
+    return WideString();
 
   std::vector<wchar_t> buf(len);
   for (int i = 0; i < len; i++) {
     wchar_t w = title[i];
     buf[i] = w > 0x20 ? w : 0x20;
   }
-  return CFX_WideString(buf.data(), len);
+  return WideString(buf.data(), len);
 }
 
 CPDF_Dest CPDF_Bookmark::GetDest(CPDF_Document* pDocument) const {
@@ -79,5 +79,5 @@ CPDF_Dest CPDF_Bookmark::GetDest(CPDF_Document* pDocument) const {
 }
 
 CPDF_Action CPDF_Bookmark::GetAction() const {
-  return m_pDict ? CPDF_Action(m_pDict->GetDictFor("A")) : CPDF_Action();
+  return CPDF_Action(m_pDict ? m_pDict->GetDictFor("A") : nullptr);
 }

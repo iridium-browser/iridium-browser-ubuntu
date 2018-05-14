@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/callback.h"
-#include "base/memory/ptr_util.h"
+#include "base/run_loop.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
@@ -27,19 +27,10 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/user_activity/user_activity_detector.h"
-#include "ui/events/platform/platform_event_source.h"
-#include "ui/events/platform/platform_event_types.h"
-
-#if defined(USE_X11)
-#include "ui/events/devices/x11/device_data_manager_x11.h"
-#include "ui/events/devices/x11/touch_factory_x11.h"
-#include "ui/events/test/events_test_utils_x11.h"
-#endif
-
-#if defined(USE_OZONE)
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#endif
+#include "ui/events/platform/platform_event_source.h"
+#include "ui/events/platform/platform_event_types.h"
 
 using ::testing::_;
 using ::testing::Invoke;
@@ -71,7 +62,7 @@ class MockDeviceStatusCollector : public policy::DeviceStatusCollector {
   // handle returning non-moveable types like scoped_ptr.
   std::unique_ptr<policy::DeviceLocalAccount> GetAutoLaunchedKioskSessionInfo()
       override {
-    return base::MakeUnique<policy::DeviceLocalAccount>(
+    return std::make_unique<policy::DeviceLocalAccount>(
         policy::DeviceLocalAccount::TYPE_KIOSK_APP, "account_id", "app_id",
         "update_url");
   }
@@ -87,9 +78,6 @@ class StatusUploaderTest : public testing::Test {
   }
 
   void SetUp() override {
-#if defined(USE_X11)
-    ui::DeviceDataManagerX11::CreateInstance();
-#endif
     chromeos::DBusThreadManager::Initialize();
     client_.SetDMToken("dm_token");
     collector_.reset(new MockDeviceStatusCollector(&prefs_));
@@ -101,7 +89,7 @@ class StatusUploaderTest : public testing::Test {
   }
 
   void TearDown() override {
-    content::RunAllBlockingPoolTasksUntilIdle();
+    content::RunAllTasksUntilIdle();
     chromeos::DBusThreadManager::Shutdown();
   }
 
@@ -137,9 +125,9 @@ class StatusUploaderTest : public testing::Test {
     // Send some "valid" (read: non-nullptr) device/session data to the
     // callback in order to simulate valid status data.
     std::unique_ptr<em::DeviceStatusReportRequest> device_status =
-        base::MakeUnique<em::DeviceStatusReportRequest>();
+        std::make_unique<em::DeviceStatusReportRequest>();
     std::unique_ptr<em::SessionStatusReportRequest> session_status =
-        base::MakeUnique<em::SessionStatusReportRequest>();
+        std::make_unique<em::SessionStatusReportRequest>();
     status_callback.Run(std::move(device_status), std::move(session_status));
 
     testing::Mock::VerifyAndClearExpectations(&device_management_service_);
@@ -285,9 +273,9 @@ TEST_F(StatusUploaderTest, ResetTimerAfterUnregisteredClient) {
   // StatusUploader should not try to upload using an unregistered client
   EXPECT_CALL(client_, UploadDeviceStatus(_, _, _)).Times(0);
   std::unique_ptr<em::DeviceStatusReportRequest> device_status =
-      base::MakeUnique<em::DeviceStatusReportRequest>();
+      std::make_unique<em::DeviceStatusReportRequest>();
   std::unique_ptr<em::SessionStatusReportRequest> session_status =
-      base::MakeUnique<em::SessionStatusReportRequest>();
+      std::make_unique<em::SessionStatusReportRequest>();
   status_callback.Run(std::move(device_status), std::move(session_status));
 
   // A task to try again should be queued.
@@ -310,31 +298,18 @@ TEST_F(StatusUploaderTest, ChangeFrequency) {
                                    true /* upload_success */);
 }
 
-#if defined(USE_X11) || defined(USE_OZONE)
 TEST_F(StatusUploaderTest, NoUploadAfterUserInput) {
   StatusUploader uploader(&client_, std::move(collector_), task_runner_);
   // Should allow data upload before there is user input.
   EXPECT_TRUE(uploader.IsSessionDataUploadAllowed());
 
-// Now mock user input, and no session data should be allowed.
-#if defined(USE_X11)
-  ui::ScopedXI2Event native_event;
-  const int kPointerDeviceId = 10;
-  std::vector<int> device_list;
-  device_list.push_back(kPointerDeviceId);
-  ui::TouchFactory::GetInstance()->SetPointerDeviceForTest(device_list);
-  native_event.InitGenericButtonEvent(
-      kPointerDeviceId, ui::ET_MOUSE_PRESSED, gfx::Point(),
-      ui::EF_LEFT_MOUSE_BUTTON | ui::EF_CONTROL_DOWN);
-#elif defined(USE_OZONE)
+  // Now mock user input, and no session data should be allowed.
   ui::MouseEvent e(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                    ui::EventTimeForNow(), 0, 0);
   const ui::PlatformEvent& native_event = &e;
-#endif
   ui::UserActivityDetector::Get()->DidProcessEvent(native_event);
   EXPECT_FALSE(uploader.IsSessionDataUploadAllowed());
 }
-#endif
 
 TEST_F(StatusUploaderTest, NoUploadAfterVideoCapture) {
   StatusUploader uploader(&client_, std::move(collector_), task_runner_);

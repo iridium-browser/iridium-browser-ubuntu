@@ -5,10 +5,10 @@
 #ifndef DocumentParserTiming_h
 #define DocumentParserTiming_h
 
+#include "base/macros.h"
 #include "core/dom/Document.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
-#include "platform/wtf/Noncopyable.h"
 
 namespace blink {
 
@@ -17,11 +17,12 @@ namespace blink {
 class DocumentParserTiming final
     : public GarbageCollectedFinalized<DocumentParserTiming>,
       public Supplement<Document> {
-  WTF_MAKE_NONCOPYABLE(DocumentParserTiming);
   USING_GARBAGE_COLLECTED_MIXIN(DocumentParserTiming);
 
  public:
-  virtual ~DocumentParserTiming() {}
+  static const char kSupplementName[];
+
+  virtual ~DocumentParserTiming() = default;
 
   static DocumentParserTiming& From(Document&);
 
@@ -62,10 +63,10 @@ class DocumentParserTiming final
 
   // The getters below return monotonically-increasing seconds, or zero if the
   // given parser event has not yet occurred.  See the comments for
-  // monotonicallyIncreasingTime in wtf/CurrentTime.h for additional details.
+  // monotonicallyIncreasingTime in wtf/Time.h for additional details.
 
-  double ParserStart() const { return parser_start_; }
-  double ParserStop() const { return parser_stop_; }
+  TimeTicks ParserStart() const { return parser_start_; }
+  TimeTicks ParserStop() const { return parser_stop_; }
 
   // Returns the sum of all blocking script load durations reported via
   // recordParseBlockedOnScriptLoadDuration.
@@ -95,19 +96,20 @@ class DocumentParserTiming final
     return parser_blocked_on_script_execution_from_document_write_duration_;
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit DocumentParserTiming(Document&);
   void NotifyDocumentParserTimingChanged();
 
-  double parser_start_ = 0.0;
-  double parser_stop_ = 0.0;
+  TimeTicks parser_start_;
+  TimeTicks parser_stop_;
   double parser_blocked_on_script_load_duration_ = 0.0;
   double parser_blocked_on_script_load_from_document_write_duration_ = 0.0;
   double parser_blocked_on_script_execution_duration_ = 0.0;
   double parser_blocked_on_script_execution_from_document_write_duration_ = 0.0;
   bool parser_detached_ = false;
+  DISALLOW_COPY_AND_ASSIGN(DocumentParserTiming);
 };
 
 }  // namespace blink

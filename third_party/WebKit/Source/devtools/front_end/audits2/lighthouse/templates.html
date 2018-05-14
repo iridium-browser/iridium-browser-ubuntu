@@ -1,3 +1,11 @@
+<!-- Lighthouse run warnings -->
+<template id="tmpl-lh-run-warnings">
+  <div class="lh-run-warnings lh-debug">
+    <strong>There were issues affecting this run of Lighthouse:</strong>
+    <ul></ul>
+  </div>
+</template>
+
 <!-- Lighthouse category score -->
 <template id="tmpl-lh-category-score">
   <div class="lh-score">
@@ -343,7 +351,8 @@
     <div class="lh-export">
       <button class="report-icon report-icon--share lh-export__button" title="Export report"></button>
       <div class="lh-export__dropdown">
-        <a href="#" class="report-icon report-icon--print" data-action="print">Print...</a>
+        <a href="#" class="report-icon report-icon--print" data-action="print-summary">Print Summary</a>
+        <a href="#" class="report-icon report-icon--print" data-action="print-expanded">Print Expanded</a>
         <a href="#" class="report-icon report-icon--copy" data-action="copy">Copy JSON</a>
         <a href="#" class="report-icon report-icon--download" data-action="save-html">Save as HTML</a>
         <a href="#" class="report-icon report-icon--download" data-action="save-json">Save as JSON</a>
@@ -454,6 +463,7 @@
       font-size: var(--body-font-size);
       line-height: var(--body-line-height);
       margin-top: calc(0.5 * var(--body-line-height));
+      text-align: center;
     }
   </style>
   <a href="#" class="lh-gauge__wrapper">
@@ -484,19 +494,19 @@
       background-position: top left;
     }
     .lh-crc .horiz-down {
-      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><g fill="#D8D8D8" fill-rule="evenodd"><path d="M16 12v2H-2v-2z"/><path d="M9 12v14H7V12z"/></g></svg>');
+      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><g fill="%23D8D8D8" fill-rule="evenodd"><path d="M16 12v2H-2v-2z"/><path d="M9 12v14H7V12z"/></g></svg>');
     }
     .lh-crc .right {
-      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M16 12v2H0v-2z" fill="#D8D8D8" fill-rule="evenodd"/></svg>');
+      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M16 12v2H0v-2z" fill="%23D8D8D8" fill-rule="evenodd"/></svg>');
     }
     .lh-crc .up-right {
-      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v14H7zm2 12h7v2H9z" fill="#D8D8D8" fill-rule="evenodd"/></svg>');
+      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v14H7zm2 12h7v2H9z" fill="%23D8D8D8" fill-rule="evenodd"/></svg>');
     }
     .lh-crc .vert-right {
-      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v27H7zm2 12h7v2H9z" fill="#D8D8D8" fill-rule="evenodd"/></svg>');
+      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v27H7zm2 12h7v2H9z" fill="%23D8D8D8" fill-rule="evenodd"/></svg>');
     }
     .lh-crc .vert {
-      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v26H7z" fill="#D8D8D8" fill-rule="evenodd"/></svg>');
+      background: url('data:image/svg+xml;utf8,<svg width="16" height="26" viewBox="0 0 16 26" xmlns="http://www.w3.org/2000/svg"><path d="M7 0h2v26H7z" fill="%23D8D8D8" fill-rule="evenodd"/></svg>');
     }
     .lh-crc .crc-tree {
       font-size: 14px;

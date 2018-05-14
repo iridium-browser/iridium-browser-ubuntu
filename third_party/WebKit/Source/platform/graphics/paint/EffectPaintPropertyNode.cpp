@@ -4,8 +4,6 @@
 
 #include "platform/graphics/paint/EffectPaintPropertyNode.h"
 
-#include "platform/graphics/paint/PropertyTreeState.h"
-
 namespace blink {
 
 EffectPaintPropertyNode* EffectPaintPropertyNode::Root() {
@@ -26,32 +24,32 @@ FloatRect EffectPaintPropertyNode::MapRect(const FloatRect& input_rect) const {
   return result;
 }
 
-cc::Layer* EffectPaintPropertyNode::EnsureDummyLayer() const {
-  if (dummy_layer_)
-    return dummy_layer_.get();
-  dummy_layer_ = cc::Layer::Create();
-  return dummy_layer_.get();
+std::unique_ptr<JSONObject> EffectPaintPropertyNode::ToJSON() const {
+  auto json = JSONObject::Create();
+  if (Parent())
+    json->SetString("parent", String::Format("%p", Parent()));
+  json->SetString("localTransformSpace",
+                  String::Format("%p", local_transform_space_.get()));
+  json->SetString("outputClip", String::Format("%p", output_clip_.get()));
+  if (color_filter_ != kColorFilterNone)
+    json->SetInteger("colorFilter", color_filter_);
+  if (!filter_.IsEmpty())
+    json->SetString("filter", filter_.ToString());
+  if (opacity_ != 1.0f)
+    json->SetDouble("opacity", opacity_);
+  if (blend_mode_ != SkBlendMode::kSrcOver)
+    json->SetString("blendMode", SkBlendMode_Name(blend_mode_));
+  if (direct_compositing_reasons_ != CompositingReason::kNone) {
+    json->SetString("directCompositingReasons",
+                    CompositingReason::ToString(direct_compositing_reasons_));
+  }
+  if (compositor_element_id_) {
+    json->SetString("compositorElementId",
+                    compositor_element_id_.ToString().c_str());
+  }
+  if (paint_offset_ != FloatPoint())
+    json->SetString("paintOffset", paint_offset_.ToString());
+  return json;
 }
-
-String EffectPaintPropertyNode::ToString() const {
-  return String::Format(
-      "parent=%p localTransformSpace=%p outputClip=%p opacity=%f filter=%s "
-      "blendMode=%s directCompositingReasons=%s compositorElementId=%lu "
-      "paintOffset=%s",
-      Parent(), local_transform_space_.Get(), output_clip_.Get(), opacity_,
-      filter_.ToString().Ascii().data(), SkBlendMode_Name(blend_mode_),
-      CompositingReasonsAsString(direct_compositing_reasons_).Ascii().data(),
-      static_cast<unsigned long>(compositor_element_id_.id_),
-      paint_offset_.ToString().Ascii().data());
-}
-
-#if DCHECK_IS_ON()
-
-String EffectPaintPropertyNode::ToTreeString() const {
-  return blink::PropertyTreeStatePrinter<blink::EffectPaintPropertyNode>()
-      .PathAsString(this);
-}
-
-#endif
 
 }  // namespace blink

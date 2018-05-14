@@ -450,9 +450,14 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, MAYBE_SubresourceCookieIsolation) {
 #define MAYBE_IsolatedAppProcessModel IsolatedAppProcessModel
 #endif  // defined(OS_WIN)
 
-// Tests that isolated apps processes do not render top-level non-app pages.
-// This is true even in the case of the OAuth workaround for hosted apps,
-// where non-app popups may be kept in the hosted app process.
+// This test used to check that isolated apps processes do not render top-level
+// non-app pages, and that this is true even in the case of the OAuth
+// workaround for hosted apps, where non-app popups may be kept in the hosted
+// app process.  After fixing https://crbug.com/828720, this workaround will
+// apply to all SiteInstances that utilize effective URLs, which includes
+// isolated apps.  Therefore, this test is now checking that when an isolated
+// app window.opens a non-app same-site URL, the popup does stay in the
+// isolated app process.
 IN_PROC_BROWSER_TEST_F(IsolatedAppTest, MAYBE_IsolatedAppProcessModel) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
@@ -473,36 +478,61 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, MAYBE_IsolatedAppProcessModel) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   // For the third tab, use window.open to keep it in process with an opener.
   OpenWindow(browser()->tab_strip_model()->GetWebContentsAt(0),
-             base_url.Resolve("app1/main.html"), true, NULL);
+             base_url.Resolve("app1/main.html"), true, true, nullptr);
 
-  // In a fourth tab, use window.open to a non-app URL.  It should open in a
-  // separate process, even though this would trigger the OAuth workaround
-  // for hosted apps (from http://crbug.com/59285).
+  // In a fourth tab, use window.open to a non-app same-site URL.  It should
+  // stay in the app process and SiteInstance, due to the workaround in
+  // https://crbug.com/828720 which keeps same-site non-app popups in the app
+  // process.
+  //
+  // TODO(alexmos,creis): the workaround for https://crbug.com/828720 could be
+  // restricted to hosted apps only, allowing this to go to a separate non-app
+  // process.  We would need to consider this if isolated apps are ever
+  // shipped.
   OpenWindow(browser()->tab_strip_model()->GetWebContentsAt(0),
-             base_url.Resolve("non_app/main.html"), false, NULL);
+             base_url.Resolve("non_app/main.html"),
+             true /* newtab_process_should_equal_opener */,
+             true /* should_succeed */, nullptr);
 
   // We should now have four tabs, the first and third sharing a process.
   // The second one is an independent instance in a separate process.
   ASSERT_EQ(4, browser()->tab_strip_model()->count());
-  int process_id_0 = browser()->tab_strip_model()->GetWebContentsAt(0)->
-      GetRenderProcessHost()->GetID();
-  int process_id_1 = browser()->tab_strip_model()->GetWebContentsAt(1)->
-      GetRenderProcessHost()->GetID();
+  int process_id_0 = browser()
+                         ->tab_strip_model()
+                         ->GetWebContentsAt(0)
+                         ->GetMainFrame()
+                         ->GetProcess()
+                         ->GetID();
+  int process_id_1 = browser()
+                         ->tab_strip_model()
+                         ->GetWebContentsAt(1)
+                         ->GetMainFrame()
+                         ->GetProcess()
+                         ->GetID();
   EXPECT_NE(process_id_0, process_id_1);
-  EXPECT_EQ(process_id_0,
-            browser()->tab_strip_model()->GetWebContentsAt(2)->
-                GetRenderProcessHost()->GetID());
-  EXPECT_NE(process_id_0,
-            browser()->tab_strip_model()->GetWebContentsAt(3)->
-                GetRenderProcessHost()->GetID());
+  EXPECT_EQ(process_id_0, browser()
+                              ->tab_strip_model()
+                              ->GetWebContentsAt(2)
+                              ->GetMainFrame()
+                              ->GetProcess()
+                              ->GetID());
+  EXPECT_EQ(process_id_0, browser()
+                              ->tab_strip_model()
+                              ->GetWebContentsAt(3)
+                              ->GetMainFrame()
+                              ->GetProcess()
+                              ->GetID());
 
   // Navigating the second tab out of the app should cause a process swap.
   const GURL& non_app_url(base_url.Resolve("non_app/main.html"));
   NavigateInRenderer(browser()->tab_strip_model()->GetWebContentsAt(1),
                      non_app_url);
-  EXPECT_NE(process_id_1,
-            browser()->tab_strip_model()->GetWebContentsAt(1)->
-                GetRenderProcessHost()->GetID());
+  EXPECT_NE(process_id_1, browser()
+                              ->tab_strip_model()
+                              ->GetWebContentsAt(1)
+                              ->GetMainFrame()
+                              ->GetProcess()
+                              ->GetID());
 }
 
 // This test no longer passes, since we don't properly isolate sessionStorage

@@ -7,7 +7,7 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/Document.h"
 #include "core/dom/QualifiedName.h"
-#include "core/html/HTMLMediaElement.h"
+#include "core/html/media/HTMLMediaElement.h"
 #include "modules/remoteplayback/RemotePlayback.h"
 
 namespace blink {
@@ -38,11 +38,11 @@ void HTMLMediaElementRemotePlayback::SetBooleanAttribute(
 HTMLMediaElementRemotePlayback& HTMLMediaElementRemotePlayback::From(
     HTMLMediaElement& element) {
   HTMLMediaElementRemotePlayback* supplement =
-      static_cast<HTMLMediaElementRemotePlayback*>(
-          Supplement<HTMLMediaElement>::From(element, SupplementName()));
+      Supplement<HTMLMediaElement>::From<HTMLMediaElementRemotePlayback>(
+          element);
   if (!supplement) {
     supplement = new HTMLMediaElementRemotePlayback();
-    ProvideTo(element, SupplementName(), supplement);
+    ProvideTo(element, supplement);
   }
   return *supplement;
 }
@@ -63,11 +63,10 @@ RemotePlayback* HTMLMediaElementRemotePlayback::remote(
 }
 
 // static
-const char* HTMLMediaElementRemotePlayback::SupplementName() {
-  return "HTMLMediaElementRemotePlayback";
-}
+const char HTMLMediaElementRemotePlayback::kSupplementName[] =
+    "HTMLMediaElementRemotePlayback";
 
-DEFINE_TRACE(HTMLMediaElementRemotePlayback) {
+void HTMLMediaElementRemotePlayback::Trace(blink::Visitor* visitor) {
   visitor->Trace(remote_);
   Supplement<HTMLMediaElement>::Trace(visitor);
 }

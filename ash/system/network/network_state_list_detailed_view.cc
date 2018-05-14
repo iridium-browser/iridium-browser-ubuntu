@@ -25,12 +25,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
 #include "ui/views/controls/button/button.h"
-#include "ui/views/controls/button/custom_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/widget/widget.h"
-#include "ui/wm/core/shadow_types.h"
 
 using chromeos::DeviceState;
 using chromeos::NetworkHandler;
@@ -43,14 +41,17 @@ namespace tray {
 namespace {
 
 // Delay between scan requests.
-const int kRequestScanDelaySeconds = 10;
+constexpr int kRequestScanDelaySeconds = 10;
 
 // This margin value is used throughout the bubble:
 // - margins inside the border
 // - horizontal spacing between bubble border and parent bubble border
 // - distance between top of this bubble's border and the bottom of the anchor
 //   view (horizontal rule).
-const int kBubbleMargin = 8;
+constexpr int kBubbleMargin = 8;
+
+// Elevation used for the bubble shadow effect (tiny).
+constexpr int kBubbleShadowElevation = 2;
 
 }  // namespace
 
@@ -68,11 +69,18 @@ class NetworkStateListDetailedView::InfoBubble
     set_shadow(views::BubbleBorder::NO_ASSETS);
     set_anchor_view_insets(gfx::Insets(0, 0, kBubbleMargin, 0));
     set_notify_enter_exit_on_child(true);
-    SetLayoutManager(new views::FillLayout());
+    SetLayoutManager(std::make_unique<views::FillLayout>());
     AddChildView(content);
   }
 
-  ~InfoBubble() override { detailed_view_->OnInfoBubbleDestroyed(); }
+  ~InfoBubble() override {
+    // The detailed view can be destructed before info bubble is destructed.
+    // Call OnInfoBubbleDestroyed only if the detailed view is live.
+    if (detailed_view_)
+      detailed_view_->OnInfoBubbleDestroyed();
+  }
+
+  void OnNetworkStateListDetailedViewIsDeleting() { detailed_view_ = nullptr; }
 
  private:
   // View:
@@ -88,7 +96,8 @@ class NetworkStateListDetailedView::InfoBubble
   void OnMouseExited(const ui::MouseEvent& event) override {
     // Like the user switching bubble/menu, hide the bubble when the mouse
     // exits.
-    detailed_view_->ResetInfoBubble();
+    if (detailed_view_)
+      detailed_view_->ResetInfoBubble();
   }
 
   // BubbleDialogDelegateView:
@@ -97,7 +106,7 @@ class NetworkStateListDetailedView::InfoBubble
   void OnBeforeBubbleWidgetInit(views::Widget::InitParams* params,
                                 views::Widget* widget) const override {
     params->shadow_type = views::Widget::InitParams::SHADOW_TYPE_DROP;
-    params->shadow_elevation = ::wm::ShadowElevation::TINY;
+    params->shadow_elevation = kBubbleShadowElevation;
     params->name = "NetworkStateListDetailedView::InfoBubble";
   }
 
@@ -112,8 +121,8 @@ class NetworkStateListDetailedView::InfoBubble
 // Special layout to overlap the scanning throbber and the info button.
 class InfoThrobberLayout : public views::LayoutManager {
  public:
-  InfoThrobberLayout() {}
-  ~InfoThrobberLayout() override {}
+  InfoThrobberLayout() = default;
+  ~InfoThrobberLayout() override = default;
 
   // views::LayoutManager
   void Layout(views::View* host) override {
@@ -169,10 +178,11 @@ NetworkStateListDetailedView::NetworkStateListDetailedView(
       login_(login),
       info_button_(nullptr),
       settings_button_(nullptr),
-      proxy_settings_button_(nullptr),
       info_bubble_(nullptr) {}
 
 NetworkStateListDetailedView::~NetworkStateListDetailedView() {
+  if (info_bubble_)
+    info_bubble_->OnNetworkStateListDetailedViewIsDeleting();
   ResetInfoBubble();
 }
 
@@ -180,6 +190,10 @@ void NetworkStateListDetailedView::Update() {
   UpdateNetworkList();
   UpdateHeaderButtons();
   Layout();
+}
+
+void NetworkStateListDetailedView::ToggleInfoBubbleForTesting() {
+  ToggleInfoBubble();
 }
 
 void NetworkStateListDetailedView::Init() {
@@ -203,8 +217,6 @@ void NetworkStateListDetailedView::HandleButtonPressed(views::Button* sender,
 
   if (sender == settings_button_)
     ShowSettings();
-  else if (sender == proxy_settings_button_)
-    Shell::Get()->system_tray_controller()->ShowProxySettings();
 
   if (owner()->system_tray())
     owner()->system_tray()->CloseBubble();
@@ -221,7 +233,11 @@ void NetworkStateListDetailedView::HandleViewClicked(views::View* view) {
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->GetNetworkStateFromGuid(
           guid);
-  if (!network || network->IsConnectedState() || network->IsConnectingState()) {
+  // TODO(stevenjb): Test network->connectable() here instead of
+  // IsDefaultCellular once network configuration is integrated into Settings.
+  // crbug.com/380937.
+  if (!network || network->IsConnectingOrConnected() ||
+      network->IsDefaultCellular()) {
     Shell::Get()->metrics()->RecordUserMetricsAction(
         list_type_ == LIST_TYPE_VPN
             ? UMA_STATUS_AREA_SHOW_VPN_CONNECTION_DETAILS
@@ -244,31 +260,14 @@ void NetworkStateListDetailedView::CreateExtraTitleRowButtons() {
   DCHECK(!info_button_);
   tri_view()->SetContainerVisible(TriView::Container::END, true);
 
-  info_button_ = new SystemMenuButton(
-      this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuInfoIcon,
-      IDS_ASH_STATUS_TRAY_NETWORK_INFO);
+  info_button_ = new SystemMenuButton(this, kSystemMenuInfoIcon,
+                                      IDS_ASH_STATUS_TRAY_NETWORK_INFO);
   tri_view()->AddView(TriView::Container::END, info_button_);
 
-  if (login_ != LoginStatus::NOT_LOGGED_IN) {
-    DCHECK(!settings_button_);
-    settings_button_ = new SystemMenuButton(
-        this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuSettingsIcon,
-        IDS_ASH_STATUS_TRAY_NETWORK_SETTINGS);
-
-    // Allow the user to access settings only if user is logged in
-    // and showing settings is allowed. There are situations (supervised user
-    // creation flow) when session is started but UI flow continues within
-    // login UI, i.e., no browser window is yet available.
-    if (!Shell::Get()->session_controller()->ShouldEnableSettings())
-      settings_button_->SetEnabled(false);
-
-    tri_view()->AddView(TriView::Container::END, settings_button_);
-  } else {
-    proxy_settings_button_ = new SystemMenuButton(
-        this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuSettingsIcon,
-        IDS_ASH_STATUS_TRAY_NETWORK_PROXY_SETTINGS);
-    tri_view()->AddView(TriView::Container::END, proxy_settings_button_);
-  }
+  DCHECK(!settings_button_);
+  settings_button_ = new SystemMenuButton(this, kSystemMenuSettingsIcon,
+                                          IDS_ASH_STATUS_TRAY_NETWORK_SETTINGS);
+  tri_view()->AddView(TriView::Container::END, settings_button_);
 }
 
 void NetworkStateListDetailedView::ShowSettings() {
@@ -279,18 +278,25 @@ void NetworkStateListDetailedView::ShowSettings() {
 }
 
 void NetworkStateListDetailedView::UpdateHeaderButtons() {
-  if (proxy_settings_button_) {
-    proxy_settings_button_->SetEnabled(
-        NetworkHandler::Get()->network_state_handler()->DefaultNetwork() !=
-        nullptr);
+  if (settings_button_) {
+    if (login_ == LoginStatus::NOT_LOGGED_IN) {
+      // When not logged in, only enable the settings button if there is a
+      // default (i.e. connected or connecting) network to show settings for.
+      settings_button_->SetEnabled(
+          !!NetworkHandler::Get()->network_state_handler()->DefaultNetwork());
+    } else {
+      // Otherwise, enable if showing settings is allowed. There are situations
+      // (supervised user creation flow) when the session is started but UI flow
+      // continues within login UI, i.e., no browser window is yet available.
+      settings_button_->SetEnabled(
+          Shell::Get()->session_controller()->ShouldEnableSettings());
+    }
   }
   if (list_type_ == LIST_TYPE_NETWORK) {
     NetworkStateHandler* network_state_handler =
         NetworkHandler::Get()->network_state_handler();
-    // TODO(crbug.com/756092): Add | operator to NetworkTypePattern.
-    const bool scanning =
-        network_state_handler->GetScanningByType(NetworkTypePattern::WiFi()) ||
-        network_state_handler->GetScanningByType(NetworkTypePattern::Tether());
+    const bool scanning = network_state_handler->GetScanningByType(
+        NetworkTypePattern::WiFi() | NetworkTypePattern::Tether());
     ShowProgress(-1, scanning);
   }
 }
@@ -301,7 +307,7 @@ void NetworkStateListDetailedView::ToggleInfoBubble() {
 
   info_bubble_ = new InfoBubble(tri_view(), CreateNetworkInfoView(), this);
   views::BubbleDialogDelegateView::CreateBubble(info_bubble_)->Show();
-  info_bubble_->NotifyAccessibilityEvent(ui::AX_EVENT_ALERT, false);
+  info_bubble_->NotifyAccessibilityEvent(ax::mojom::Event::kAlert, false);
 }
 
 bool NetworkStateListDetailedView::ResetInfoBubble() {
@@ -314,6 +320,10 @@ bool NetworkStateListDetailedView::ResetInfoBubble() {
 
 void NetworkStateListDetailedView::OnInfoBubbleDestroyed() {
   info_bubble_ = nullptr;
+
+  // Widget of info bubble is activated while info bubble is shown. To move
+  // focus back to the widget of this view, activate it again here.
+  GetWidget()->Activate();
 }
 
 views::View* NetworkStateListDetailedView::CreateNetworkInfoView() {
@@ -322,7 +332,7 @@ views::View* NetworkStateListDetailedView::CreateNetworkInfoView() {
   std::string ip_address, ipv6_address;
   const NetworkState* network = handler->DefaultNetwork();
   if (network) {
-    ip_address = network->ip_address();
+    ip_address = network->GetIpAddress();
     const DeviceState* device = handler->GetDeviceState(network->device_path());
     if (device)
       ipv6_address = device->GetIpAddressByType(shill::kTypeIPv6);
@@ -366,7 +376,8 @@ views::View* NetworkStateListDetailedView::CreateNetworkInfoView() {
 
 void NetworkStateListDetailedView::CallRequestScan() {
   VLOG(1) << "Requesting Network Scan.";
-  NetworkHandler::Get()->network_state_handler()->RequestScan();
+  NetworkHandler::Get()->network_state_handler()->RequestScan(
+      NetworkTypePattern::WiFi());
   // Periodically request a scan while this UI is open.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,

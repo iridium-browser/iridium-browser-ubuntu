@@ -16,8 +16,7 @@ from telemetry.internal.platform.profiler import profiler_finder
 from telemetry.internal.util import file_handle
 from telemetry.page import cache_temperature
 from telemetry.page import traffic_setting
-from telemetry.page import legacy_page_test
-from telemetry import story
+from telemetry import story as story_module
 from telemetry.util import screenshot
 from telemetry.util import wpr_modes
 from telemetry.web_perf import timeline_based_measurement
@@ -35,7 +34,7 @@ def _PrepareFinderOptions(finder_options, test, device_type):
                                            finder_options)
 
 
-class SharedPageState(story.SharedState):
+class SharedPageState(story_module.SharedState):
   """
   This class contains all specific logic necessary to run a Chrome browser
   benchmark.
@@ -51,12 +50,17 @@ class SharedPageState(story.SharedState):
             'This is a Timeline Based Measurement benchmark. You cannot run it '
             'with trace profiler enabled. If you need trace data, tracing is '
             'always enabled in Timeline Based Measurement benchmarks and you '
-            'can get the trace data by adding --output-format=json.')
+            'can get the trace data with the default --output-format=html.')
       # This is to avoid the cyclic-import caused by timeline_based_page_test.
       from telemetry.web_perf import timeline_based_page_test
       self._test = timeline_based_page_test.TimelineBasedPageTest(test)
     else:
       self._test = test
+
+    if (self._device_type == 'desktop' and
+        platform_module.GetHostPlatform().GetOSName() == 'chromeos'):
+      self._device_type = 'chromeos'
+
     _PrepareFinderOptions(finder_options, self._test, self._device_type)
     self._browser = None
     self._finder_options = finder_options
@@ -64,7 +68,6 @@ class SharedPageState(story.SharedState):
         self._test, finder_options)
 
     self._first_browser = True
-    self._did_login_for_current_page = False
     self._previous_page = None
     self._current_page = None
     self._current_tab = None
@@ -80,24 +83,11 @@ class SharedPageState(story.SharedState):
       wpr_mode = wpr_modes.WPR_RECORD
     else:
       wpr_mode = wpr_modes.WPR_REPLAY
+    self._extra_wpr_args = browser_options.extra_wpr_args
 
-    use_live_traffic = wpr_mode == wpr_modes.WPR_OFF
-
-    if self.platform.network_controller.is_open:
-      self.platform.network_controller.Close()
-    self.platform.network_controller.InitializeIfNeeded(
-        use_live_traffic=use_live_traffic)
-    use_wpr_go = False
-    if wpr_mode == wpr_modes.WPR_RECORD:
-      use_wpr_go = self._finder_options.use_wpr_go
-    elif self._finder_options.use_wpr_go:
-      raise ValueError('Cannot set --use-wpr-go for non recording mode')
-    elif wpr_mode == wpr_modes.WPR_REPLAY:
-      use_wpr_go = (story_set.wpr_archive_info and
-                    story_set.wpr_archive_info.is_using_wpr_go_archives)
-    self.platform.network_controller.Open(wpr_mode,
-                                          browser_options.extra_wpr_args,
-                                          use_wpr_go=use_wpr_go)
+    self.platform.SetFullPerformanceModeEnabled(
+        finder_options.full_performance_mode)
+    self.platform.network_controller.Open(wpr_mode)
     self.platform.Initialize()
 
   @property
@@ -143,7 +133,7 @@ class SharedPageState(story.SharedState):
     if self._finder_options.browser_options.take_screenshot_for_failed_page:
       fh = screenshot.TryCaptureScreenShot(self.platform, self._current_tab)
       if fh is not None:
-        results.AddProfilingFile(page, fh)
+        results.AddArtifact(page.name, 'screenshot', fh)
     else:
       logging.warning('Taking screenshots upon failures disabled.')
 
@@ -151,23 +141,38 @@ class SharedPageState(story.SharedState):
     if self._finder_options.profiler:
       self._StopProfiling(results)
     self._AllowInteractionForStage('after-run-story')
-    # We might hang while trying to close the connection, and need to guarantee
-    # the page will get cleaned up to avoid future tests failing in weird ways.
     try:
-      if self._current_tab and self._current_tab.IsAlive():
-        self._current_tab.CloseConnections()
-      self._previous_page = self._current_page
-    except Exception:
-      if self._current_tab:
-        self._current_tab.Close()
-    finally:
-      if self._current_page.credentials and self._did_login_for_current_page:
-        self.browser.credentials.LoginNoLongerNeeded(
-            self._current_tab, self._current_page.credentials)
-      if self._test.StopBrowserAfterPage(self.browser, self._current_page):
+      self._previous_page = None
+      if self.ShouldStopBrowserAfterStoryRun(self._current_page):
         self._StopBrowser()
+      elif self._current_tab:
+        # We might hang while trying to close the connection, and need to
+        # guarantee the page will get cleaned up to avoid future tests failing
+        # in weird ways.
+        try:
+          if self._current_tab.IsAlive():
+            self._current_tab.CloseConnections()
+          self._previous_page = self._current_page
+        except Exception as exc: # pylint: disable=broad-except
+          logging.warning(
+              '%s raised while closing tab connections; tab will be closed.',
+              type(exc).__name__)
+          self._current_tab.Close()
+    finally:
       self._current_page = None
       self._current_tab = None
+
+  def ShouldStopBrowserAfterStoryRun(self, story):
+    """Specify whether the browser should be closed after running a story.
+
+    Defaults to always closing the browser on all platforms to help keeping
+    story runs independent of each other; except on ChromeOS where restarting
+    the browser is expensive.
+
+    Subclasses may override this method to change this behavior.
+    """
+    del story
+    return self.platform.GetOSName() != 'chromeos'
 
   @property
   def platform(self):
@@ -181,17 +186,20 @@ class SharedPageState(story.SharedState):
   def _StartBrowser(self, page):
     assert self._browser is None
     self._AllowInteractionForStage('before-start-browser')
-    self._possible_browser.SetCredentialsPath(page.credentials_path)
 
     self._test.WillStartBrowser(self.platform)
+    # Create a deep copy of browser_options so that we can add page-level
+    # arguments and url to it without polluting the run for the next page.
+    browser_options = self._finder_options.browser_options.Copy()
     if page.startup_url:
-      self._finder_options.browser_options.startup_url = page.startup_url
-    self._browser = self._possible_browser.Create(self._finder_options)
+      browser_options.startup_url = page.startup_url
+    browser_options.AppendExtraBrowserArgs(page.extra_browser_args)
+    self._possible_browser.SetUpEnvironment(browser_options)
+    self._browser = self._possible_browser.Create()
     self._test.DidStartBrowser(self.browser)
 
     if self._first_browser:
       self._first_browser = False
-      self.browser.credentials.WarnIfMissingCredentials(page)
     self._AllowInteractionForStage('after-start-browser')
 
   def WillRunStory(self, page):
@@ -204,13 +212,12 @@ class SharedPageState(story.SharedState):
 
     page_set = page.page_set
     self._current_page = page
-    if self._browser and (self._test.RestartBrowserBeforeEachPage()
-                          or page.startup_url):
+
+    if self._browser and page.startup_url:
       assert not self.platform.tracing_controller.is_tracing_running, (
           'Should not restart browser when tracing is already running. For '
           'TimelineBasedMeasurement (TBM) benchmarks, you should not use '
-          'startup_url. Use benchmark.ShouldTearDownStateAfterEachStoryRun '
-          'instead.')
+          'startup_url.')
       self._StopBrowser()
     started_browser = not self.browser
 
@@ -221,12 +228,9 @@ class SharedPageState(story.SharedState):
       logging.warning('WPR archive missing: %s', archive_path)
       archive_path = None
     self.platform.network_controller.StartReplay(
-        archive_path, page.make_javascript_deterministic)
+        archive_path, page.make_javascript_deterministic, self._extra_wpr_args)
 
-    if self.browser:
-      # Set new credential path for browser.
-      self.browser.credentials.credentials_path = page.credentials_path
-    else:
+    if not self.browser:
       self._StartBrowser(page)
     if self.browser.supports_tab_control and self._test.close_tabs_before_run:
       # Create a tab if there's none.
@@ -287,13 +291,6 @@ class SharedPageState(story.SharedState):
           self._current_page.page_set.serving_dirs |
           set([self._current_page.serving_dir]))
 
-    if self._current_page.credentials:
-      if not self.browser.credentials.LoginNeeded(
-          self._current_tab, self._current_page.credentials):
-        raise legacy_page_test.Failure(
-            'Login as ' + self._current_page.credentials + ' failed')
-      self._did_login_for_current_page = True
-
     if self._test.clear_cache_before_each_run:
       self._current_tab.ClearCache(force=True)
 
@@ -319,11 +316,14 @@ class SharedPageState(story.SharedState):
     self._StopBrowser()
     self.platform.StopAllLocalServers()
     self.platform.network_controller.Close()
+    self.platform.SetFullPerformanceModeEnabled(False)
 
   def _StopBrowser(self):
     if self._browser:
       self._browser.Close()
       self._browser = None
+    if self._possible_browser:
+      self._possible_browser.CleanUpEnvironment()
 
   def _StartProfiling(self, page):
     output_file = os.path.join(self._finder_options.output_dir,
@@ -347,10 +347,7 @@ class SharedMobilePageState(SharedPageState):
 
 
 class SharedDesktopPageState(SharedPageState):
-  if platform_module.GetHostPlatform().GetOSName() == 'chromeos':
-    _device_type = 'chromeos'
-  else:
-    _device_type = 'desktop'
+  _device_type = 'desktop'
 
 
 class SharedTabletPageState(SharedPageState):

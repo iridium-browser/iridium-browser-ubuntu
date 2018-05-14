@@ -7,6 +7,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "extensions/common/api/storage.h"
+#include "extensions/renderer/bindings/api_binding_util.h"
 #include "extensions/renderer/bindings/api_request_handler.h"
 #include "extensions/renderer/bindings/api_signature.h"
 #include "extensions/renderer/bindings/api_type_reference_map.h"
@@ -192,6 +193,11 @@ void StorageArea::HandleFunctionCall(const std::string& method_name,
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::Context> context = arguments->GetHolderCreationContext();
 
+  // The context may have been invalidated, as in the case where this could be
+  // a reference to an object from a removed frame.
+  if (!binding::IsContextValidOrThrowError(context))
+    return;
+
   std::string full_method_name = "storage." + method_name;
   if (!access_checker_->HasAccessOrThrowError(context, full_method_name))
     return;
@@ -211,7 +217,7 @@ void StorageArea::HandleFunctionCall(const std::string& method_name,
     return;
   }
 
-  converted_arguments->Insert(0u, base::MakeUnique<base::Value>(name_));
+  converted_arguments->Insert(0u, std::make_unique<base::Value>(name_));
   request_handler_->StartRequest(
       context, full_method_name, std::move(converted_arguments), callback,
       v8::Local<v8::Function>(), binding::RequestThread::UI);

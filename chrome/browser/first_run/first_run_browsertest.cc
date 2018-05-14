@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -34,39 +35,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 typedef InProcessBrowserTest FirstRunBrowserTest;
-
-IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowFirstRunBubblePref) {
-  EXPECT_TRUE(g_browser_process->local_state()->FindPreference(
-      prefs::kShowFirstRunBubbleOption));
-  EXPECT_EQ(first_run::FIRST_RUN_BUBBLE_DONT_SHOW,
-            g_browser_process->local_state()->GetInteger(
-                prefs::kShowFirstRunBubbleOption));
-  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(
-      first_run::FIRST_RUN_BUBBLE_SHOW));
-  ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
-      prefs::kShowFirstRunBubbleOption));
-  EXPECT_EQ(first_run::FIRST_RUN_BUBBLE_SHOW,
-            g_browser_process->local_state()->GetInteger(
-                prefs::kShowFirstRunBubbleOption));
-  // Test that toggling the value works in either direction after it's been set.
-  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(
-      first_run::FIRST_RUN_BUBBLE_DONT_SHOW));
-  EXPECT_EQ(first_run::FIRST_RUN_BUBBLE_DONT_SHOW,
-            g_browser_process->local_state()->GetInteger(
-                prefs::kShowFirstRunBubbleOption));
-  // Test that the value can't be set to FIRST_RUN_BUBBLE_SHOW after it has been
-  // set to FIRST_RUN_BUBBLE_SUPPRESS.
-  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(
-      first_run::FIRST_RUN_BUBBLE_SUPPRESS));
-  EXPECT_EQ(first_run::FIRST_RUN_BUBBLE_SUPPRESS,
-            g_browser_process->local_state()->GetInteger(
-                prefs::kShowFirstRunBubbleOption));
-  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(
-      first_run::FIRST_RUN_BUBBLE_SHOW));
-  EXPECT_EQ(first_run::FIRST_RUN_BUBBLE_SUPPRESS,
-            g_browser_process->local_state()->GetInteger(
-                prefs::kShowFirstRunBubbleOption));
-}
 
 IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShouldShowWelcomePage) {
   EXPECT_FALSE(first_run::ShouldShowWelcomePage());
@@ -316,7 +284,6 @@ IN_PROC_BROWSER_TEST_P(FirstRunMasterPrefsWithTrackedPreferences,
   // true.
   const base::Value* default_homepage_is_ntp_value =
       user_prefs->GetDefaultPrefValue(prefs::kHomePageIsNewTabPage);
-  ASSERT_TRUE(default_homepage_is_ntp_value != NULL);
   bool default_homepage_is_ntp = false;
   EXPECT_TRUE(
       default_homepage_is_ntp_value->GetAsBoolean(&default_homepage_is_ntp));

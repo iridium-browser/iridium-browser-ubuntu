@@ -6,6 +6,7 @@ import("//build/buildflag_header.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
+import("//ui/gl/features.gni")
 import("//ui/ozone/ozone.gni")
 import("//testing/test.gni")
 
@@ -15,7 +16,6 @@ declare_args() {
                        (target_cpu == "x86" || target_cpu == "x64")
 }
 
-use_egl = is_win || is_android || is_linux || is_fuchsia
 use_glx = use_x11 || ozone_platform_x11
 
 if (is_android) {
@@ -25,7 +25,11 @@ if (is_android) {
 
 buildflag_header("gl_features") {
   header = "gl_features.h"
-  flags = [ "ENABLE_SWIFTSHADER=$enable_swiftshader" ]
+  flags = [
+    "ENABLE_SWIFTSHADER=$enable_swiftshader",
+    "USE_EGL_ON_MAC=$use_egl_on_mac",
+    "USE_STATIC_ANGLE=$use_static_angle",
+  ]
 }
 
 config("gl_config") {
@@ -45,8 +49,6 @@ component("gl") {
   output_name = "gl_wrapper"  # Avoid colliding with OS X"s libGL.dylib.
 
   sources = [
-    "android/gl_jni_registrar.cc",
-    "android/gl_jni_registrar.h",
     "android/scoped_java_surface.cc",
     "android/scoped_java_surface.h",
     "android/surface_texture.cc",
@@ -57,6 +59,8 @@ component("gl") {
     "ca_renderer_layer_params.h",
     "dc_renderer_layer_params.cc",
     "dc_renderer_layer_params.h",
+    "extension_set.cc",
+    "extension_set.h",
     "gl_bindings.cc",
     "gl_bindings.h",
     "gl_bindings_autogen_gl.cc",
@@ -114,10 +118,14 @@ component("gl") {
     "gl_surface_osmesa.h",
     "gl_surface_overlay.cc",
     "gl_surface_overlay.h",
+    "gl_surface_presentation_helper.cc",
+    "gl_surface_presentation_helper.h",
     "gl_surface_stub.cc",
     "gl_surface_stub.h",
     "gl_switches.cc",
     "gl_switches.h",
+    "gl_switches_util.cc",
+    "gl_switches_util.h",
     "gl_utils.cc",
     "gl_utils.h",
     "gl_version_info.cc",
@@ -147,7 +155,14 @@ component("gl") {
   public_configs = [ "//third_party/khronos:khronos_headers" ]
 
   deps = [
+    ":gl_features",
     "//base/third_party/dynamic_annotations",
+
+    # Remove after fixing crbug.com/724999.
+    "//components/crash/core/common:crash_key",
+
+    # ANGLE includes are used cross-platform.
+    "//third_party/angle:includes",
   ]
   public_deps = [
     "//base",
@@ -187,8 +202,27 @@ component("gl") {
         "gl_image_native_pixmap.h",
       ]
     }
+
+    if (is_android) {
+      sources += [
+        "gl_image_ahardwarebuffer.cc",
+        "gl_image_ahardwarebuffer.h",
+      ]
+
+      if (use_static_angle) {
+        deps += [ "//third_party/angle:libEGL_static" ]
+      }
+    }
+
+    if (is_posix) {
+      # Windows has USE_EGL but doesn't support base::FileDescriptor
+      sources += [
+        "gl_fence_android_native_fence_sync.cc",
+        "gl_fence_android_native_fence_sync.h",
+      ]
+    }
   }
-  if (is_android || is_linux) {
+  if (is_android || is_linux || is_fuchsia) {
     sources += [
       "gl_implementation_osmesa.cc",
       "gl_implementation_osmesa.h",
@@ -206,6 +240,7 @@ component("gl") {
 
     deps += [ "//ui/base/x" ]
 
+    assert(use_egl)
     data_deps += [
       "//third_party/angle:libEGL",
       "//third_party/angle:libGLESv2",
@@ -258,13 +293,13 @@ component("gl") {
     libs = [ "dwmapi.lib" ]
     ldflags = [ "/DELAYLOAD:dwmapi.dll" ]
 
+    assert(use_egl)
     data_deps += [
       "//third_party/angle:libEGL",
       "//third_party/angle:libGLESv2",
       "//third_party/mesa:osmesa",
+      "//third_party/swiftshader",
     ]
-
-    deps += [ "//third_party/angle:includes" ]
   }
   if (is_mac) {
     sources += [
@@ -286,6 +321,18 @@ component("gl") {
       "OpenGL.framework",
       "Quartz.framework",
     ]
+
+    if (use_egl) {
+      sources += [
+        "gl_image_io_surface_egl.h",
+        "gl_image_io_surface_egl.mm",
+      ]
+
+      data_deps += [
+        "//third_party/angle:libEGL",
+        "//third_party/angle:libGLESv2",
+      ]
+    }
   }
   if (is_android) {
     sources += [
@@ -307,10 +354,15 @@ component("gl") {
 static_library("gl_unittest_utils") {
   testonly = true
   sources = [
+    "egl_bindings_autogen_mock.cc",
+    "egl_bindings_autogen_mock.h",
+    "egl_mock.cc",
+    "egl_mock.h",
     "gl_bindings_autogen_mock.cc",
     "gl_bindings_autogen_mock.h",
     "gl_mock.cc",
     "gl_mock.h",
+    "gl_mock_autogen_egl.h",
     "gl_mock_autogen_gl.h",
     "gpu_timing_fake.cc",
     "gpu_timing_fake.h",
@@ -330,6 +382,7 @@ static_library("test_support") {
   sources = [
     "test/gl_image_test_support.cc",
     "test/gl_image_test_support.h",
+    "test/gl_image_test_template.cc",
     "test/gl_image_test_template.h",
     "test/gl_surface_test_support.cc",
     "test/gl_surface_test_support.h",
@@ -375,7 +428,11 @@ source_set("run_all_unittests") {
   ]
 
   if (use_ozone) {
-    deps += [ "//ui/ozone" ]
+    deps += [
+      "//mojo/edk/system",
+      "//services/service_manager/public/cpp/test:test_support",
+      "//ui/ozone",
+    ]
   }
 }
 
@@ -410,7 +467,18 @@ test("gl_unittests") {
   }
 
   if (is_win) {
-    sources += [ "wgl_api_unittest.cc" ]
+    sources += [
+      "gl_image_dxgi_unittest.cc",
+      "wgl_api_unittest.cc",
+    ]
+  }
+
+  if (is_android) {
+    sources += [ "gl_image_ahardwarebuffer_unittest.cc" ]
+  }
+
+  if (is_desktop_linux) {
+    sources += [ "gl_image_native_pixmap_unittest.cc" ]
   }
 
   include_dirs = [ "//third_party/khronos" ]
@@ -434,6 +502,12 @@ test("gl_unittests") {
   data_deps = [
     "//third_party/mesa:osmesa",
   ]
+
+  if (use_x11) {
+    sources += [ "gl_context_glx_unittest.cc" ]
+    deps += [ "//ui/gfx/x" ]
+    configs += [ "//build/config/linux:x11" ]
+  }
 }
 
 # We can't run this test on real Chrome OS hardware for Ozone, so new target.

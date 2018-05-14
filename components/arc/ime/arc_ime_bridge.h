@@ -30,14 +30,16 @@ class ArcImeBridge {
   class Delegate {
    public:
     virtual void OnTextInputTypeChanged(ui::TextInputType type) = 0;
-    virtual void OnCursorRectChanged(const gfx::Rect& rect) = 0;
+    virtual void OnCursorRectChanged(const gfx::Rect& rect,
+                                     bool is_screen_cooridnates) = 0;
     virtual void OnCancelComposition() = 0;
     virtual void ShowImeIfNeeded() = 0;
     virtual void OnCursorRectChangedWithSurroundingText(
         const gfx::Rect& rect,
         const gfx::Range& text_range,
         const base::string16& text_in_range,
-        const gfx::Range& selection_range) = 0;
+        const gfx::Range& selection_range,
+        bool is_screen_coordinates) = 0;
   };
 
   // Serializes and sends IME related requests through IPCs.
@@ -45,8 +47,9 @@ class ArcImeBridge {
       const ui::CompositionText& composition) = 0;
   virtual void SendConfirmCompositionText() = 0;
   virtual void SendInsertText(const base::string16& text) = 0;
-  virtual void SendOnKeyboardBoundsChanging(const gfx::Rect& new_bounds) = 0;
   virtual void SendExtendSelectionAndDelete(size_t before, size_t after) = 0;
+  virtual void SendOnKeyboardAppearanceChanging(const gfx::Rect& new_bounds,
+                                                bool is_available) = 0;
 
  protected:
   ArcImeBridge() {}

@@ -9,11 +9,14 @@ import android.support.v7.widget.RecyclerView;
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.FaviconFetchResult;
 import org.chromium.chrome.browser.ntp.snippets.SnippetArticle;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
+import org.chromium.chrome.browser.preferences.Pref;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.tab.Tab;
 
 import java.util.concurrent.TimeUnit;
@@ -51,6 +54,14 @@ public abstract class SuggestionsMetrics {
         RecordUserAction.record("Suggestions.Tile.Tapped");
     }
 
+    public static void recordExpandableHeaderTapped(boolean expanded) {
+        if (expanded) {
+            RecordUserAction.record("Suggestions.ExpandableHeader.Expanded");
+        } else {
+            RecordUserAction.record("Suggestions.ExpandableHeader.Collapsed");
+        }
+    }
+
     public static void recordCardTapped() {
         RecordUserAction.record("Suggestions.Card.Tapped");
     }
@@ -61,6 +72,18 @@ public abstract class SuggestionsMetrics {
 
     public static void recordCardSwipedAway() {
         RecordUserAction.record("Suggestions.Card.SwipedAway");
+    }
+
+    public static void recordContextualSuggestionOpened() {
+        RecordUserAction.record("Suggestions.ContextualSuggestion.Open");
+    }
+
+    public static void recordContextualSuggestionsCarouselShown() {
+        RecordUserAction.record("Suggestions.Contextual.Carousel.Shown");
+    }
+
+    public static void recordContextualSuggestionsCarouselScrolled() {
+        RecordUserAction.record("Suggestions.Contextual.Carousel.Scrolled");
     }
 
     // Effect/Purpose of the interactions. Most are recorded in |content_suggestions_metrics.h|
@@ -78,19 +101,29 @@ public abstract class SuggestionsMetrics {
     public static void recordVisit(Tab tab, SnippetArticle suggestion) {
         @CategoryInt
         final int category = suggestion.mCategory;
-        NavigationRecorder.record(tab, new Callback<NavigationRecorder.VisitData>() {
-            @Override
-            public void onResult(NavigationRecorder.VisitData visit) {
-                if (NewTabPage.isNTPUrl(visit.endUrl)) {
-                    RecordUserAction.record("MobileNTP.Snippets.VisitEndBackInNTP");
-                }
-                RecordUserAction.record("MobileNTP.Snippets.VisitEnd");
-                SuggestionsEventReporterBridge.onSuggestionTargetVisited(category, visit.duration);
+        NavigationRecorder.record(tab, visit -> {
+            if (NewTabPage.isNTPUrl(visit.endUrl)) {
+                RecordUserAction.record("MobileNTP.Snippets.VisitEndBackInNTP");
             }
+            RecordUserAction.record("MobileNTP.Snippets.VisitEnd");
+            SuggestionsEventReporterBridge.onSuggestionTargetVisited(category, visit.duration);
         });
     }
 
     // Histogram recordings
+
+    /**
+     * Records whether article suggestions are set visible by user.
+     */
+    public static void recordArticlesListVisible() {
+        if (!ChromeFeatureList.isEnabled(
+                    ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)) {
+            return;
+        }
+
+        RecordHistogram.recordBooleanHistogram("NewTabPage.ContentSuggestions.ArticlesListVisible",
+                PrefServiceBridge.getInstance().getBoolean(Pref.NTP_ARTICLES_LIST_VISIBLE));
+    }
 
     /**
      * Records the time it took to fetch a favicon for an article.
@@ -124,6 +157,18 @@ public abstract class SuggestionsMetrics {
     }
 
     /**
+     * @return A {@link DurationTracker} to notify to report how long the spinner is visible
+     * for.
+     */
+    public static DurationTracker getSpinnerVisibilityReporter() {
+        return new DurationTracker((duration) -> {
+            RecordHistogram.recordTimesHistogram(
+                    "ContentSuggestions.FetchPendingSpinner.VisibleDuration", duration,
+                    TimeUnit.MILLISECONDS);
+        });
+    }
+
+    /**
      * Measures the amount of time it takes for date formatting in order to track StrictMode
      * violations.
      * See https://crbug.com/639877
@@ -151,6 +196,35 @@ public abstract class SuggestionsMetrics {
 
         public void reset() {
             mFired = false;
+        }
+    }
+
+    /**
+     * Utility class to track the duration of an event. Call {@link #startTracking()} and
+     * {@link #endTracking()} to notify about the key moments. These methods are no-ops when called
+     * while tracking is not in the expected state.
+     */
+    public static class DurationTracker {
+        private long mTrackingStartTimeMs;
+        private final Callback<Long> mTrackingCompleteCallback;
+
+        private DurationTracker(Callback<Long> trackingCompleteCallback) {
+            mTrackingCompleteCallback = trackingCompleteCallback;
+        }
+
+        public void startTracking() {
+            if (isTracking()) return;
+            mTrackingStartTimeMs = System.currentTimeMillis();
+        }
+
+        public void endTracking() {
+            if (!isTracking()) return;
+            mTrackingCompleteCallback.onResult(System.currentTimeMillis() - mTrackingStartTimeMs);
+            mTrackingStartTimeMs = 0;
+        }
+
+        private boolean isTracking() {
+            return mTrackingStartTimeMs > 0;
         }
     }
 }

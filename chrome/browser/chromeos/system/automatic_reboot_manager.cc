@@ -40,6 +40,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 
 namespace chromeos {
@@ -53,7 +54,7 @@ const int kGracePeriodMs = 24 * 60 * 60 * 1000;    // 24 hours.
 const int kOneKilobyte = 1 << 10;                  // 1 kB in bytes.
 
 base::TimeDelta ReadTimeDeltaFromFile(const base::FilePath& path) {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   base::ScopedFD fd(
       HANDLE_EINTR(open(path.value().c_str(), O_RDONLY | O_NOFOLLOW)));
   if (!fd.is_valid())
@@ -85,7 +86,7 @@ AutomaticRebootManager::SystemEventTimes GetSystemEventTimes() {
 }
 
 void SaveUpdateRebootNeededUptime() {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
   const base::TimeDelta kZeroTimeDelta;
 
   base::FilePath update_reboot_needed_uptime_file;
@@ -110,7 +111,7 @@ void SaveUpdateRebootNeededUptime() {
     return;
 
   std::string update_reboot_needed_uptime =
-      base::DoubleToString(uptime.InSecondsF());
+      base::NumberToString(uptime.InSecondsF());
   base::WriteFileDescriptor(fd.get(), update_reboot_needed_uptime.c_str(),
                             update_reboot_needed_uptime.size());
 }
@@ -306,6 +307,7 @@ void AutomaticRebootManager::Init(const SystemEventTimes& system_event_times) {
 }
 
 void AutomaticRebootManager::Reschedule() {
+  VLOG(1) << "Rescheduling reboot";
   // Safeguard against reboot loops under error conditions: If the boot time is
   // unavailable because /proc/uptime could not be read, do nothing.
   if (!have_boot_time_)
@@ -333,6 +335,7 @@ void AutomaticRebootManager::Reschedule() {
       local_state_registrar_.prefs()->GetBoolean(prefs::kRebootAfterUpdate) &&
       (!have_reboot_request_time ||
        update_reboot_needed_time_ < reboot_request_time)) {
+    VLOG(1) << "Scheduling reboot because of OS update";
     reboot_request_time = update_reboot_needed_time_;
     have_reboot_request_time = true;
     reboot_reason_ = AutomaticRebootManagerObserver::REBOOT_REASON_OS_UPDATE;
@@ -356,6 +359,7 @@ void AutomaticRebootManager::Reschedule() {
   // started in the past, the timer is still used with its delay set to zero.
   if (!grace_start_timer_)
     grace_start_timer_.reset(new base::OneShotTimer);
+  VLOG(1) << "Scheduling reboot attempt in " << (grace_start_time - now);
   grace_start_timer_->Start(FROM_HERE,
                             std::max(grace_start_time - now, kZeroTimeDelta),
                             base::Bind(&AutomaticRebootManager::RequestReboot,
@@ -367,6 +371,7 @@ void AutomaticRebootManager::Reschedule() {
   // in the past, the timer is still used with its delay set to zero.
   if (!grace_end_timer_)
     grace_end_timer_.reset(new base::OneShotTimer);
+  VLOG(1) << "Scheduling unconditional reboot in " << (grace_end_time - now);
   grace_end_timer_->Start(FROM_HERE,
                           std::max(grace_end_time - now, kZeroTimeDelta),
                           base::Bind(&AutomaticRebootManager::Reboot,
@@ -374,6 +379,7 @@ void AutomaticRebootManager::Reschedule() {
 }
 
 void AutomaticRebootManager::RequestReboot() {
+  VLOG(1) << "Reboot requested, reason: " << reboot_reason_;
   reboot_requested_ = true;
   DCHECK_NE(AutomaticRebootManagerObserver::REBOOT_REASON_UNKNOWN,
             reboot_reason_);
@@ -401,13 +407,16 @@ void AutomaticRebootManager::Reboot() {
   if (user_manager::UserManager::Get()->IsUserLoggedIn() &&
       !user_manager::UserManager::Get()->IsLoggedInAsKioskApp() &&
       !user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp()) {
+    VLOG(1) << "Skipping reboot because non-kiosk session is active";
     return;
   }
 
   login_screen_idle_timer_.reset();
   grace_start_timer_.reset();
   grace_end_timer_.reset();
-  DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
+  VLOG(1) << "Rebooting immediately.";
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart(
+      power_manager::REQUEST_RESTART_OTHER, "automatic reboot manager");
 }
 
 }  // namespace system

@@ -13,6 +13,7 @@
 #include "base/process/kill.h"
 #include "base/process/process.h"
 #include "base/process/process_iterator.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
@@ -20,7 +21,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/service_messages.h"
+#include "chrome/common/cloud_print.mojom.h"
 #include "chrome/common/service_process_util.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/version_info/version_info.h"
@@ -60,11 +61,12 @@ class ServiceProcessControlBrowserTest
   }
 
   static void QuitMessageLoop() {
-    base::MessageLoop::current()->QuitWhenIdle();
+    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
-  static void CloudPrintInfoCallback(
-      const cloud_print::CloudPrintProxyInfo& proxy_info) {
+  static void CloudPrintInfoCallback(bool enabled,
+                                     const std::string& email,
+                                     const std::string& proxy_id) {
     QuitMessageLoop();
   }
 
@@ -101,7 +103,7 @@ class ServiceProcessControlBrowserTest
   }
 
   void ProcessControlLaunched() {
-    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     base::ProcessId service_pid;
     EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
     EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
@@ -155,8 +157,11 @@ IN_PROC_BROWSER_TEST_F(RealServiceProcessControlBrowserTest,
 
   // Make sure we are connected to the service process.
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
-  ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
-        base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
+  cloud_print::mojom::CloudPrintPtr cloud_print_proxy;
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
+      base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
 
   // And then shutdown the service process.
@@ -168,8 +173,11 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndIPC) {
 
   // Make sure we are connected to the service process.
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
-  ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
-        base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
+  cloud_print::mojom::CloudPrintPtr cloud_print_proxy;
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
+      base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
 
   // And then shutdown the service process.
@@ -182,10 +190,15 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndReconnect) {
   // Make sure we are connected to the service process.
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   // Send an IPC that will keep the service process alive after we disconnect.
-  ServiceProcessControl::GetInstance()->Send(
-      new ServiceMsg_EnableCloudPrintProxyWithRobot(
-          "", "", "", base::DictionaryValue()));
-  ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
+  cloud_print::mojom::CloudPrintPtr cloud_print_proxy;
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->EnableCloudPrintProxyWithRobot(
+      "", "", "", std::make_unique<base::DictionaryValue>());
+
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
       base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
   Disconnect();
@@ -195,7 +208,9 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchAndReconnect) {
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   content::RunMessageLoop();
 
-  ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
       base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
 
@@ -217,15 +232,20 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_LaunchTwice) {
 
   // Make sure we are connected to the service process.
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
-  EXPECT_TRUE(ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
-        base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback)));
+  cloud_print::mojom::CloudPrintPtr cloud_print_proxy;
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
+      base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
 
   // Launch the service process again.
   LaunchServiceProcessControl(true);
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
-  EXPECT_TRUE(ServiceProcessControl::GetInstance()->GetCloudPrintProxyInfo(
-        base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback)));
+  ServiceProcessControl::GetInstance()->remote_interfaces().GetInterface(
+      &cloud_print_proxy);
+  cloud_print_proxy->GetCloudPrintProxyInfo(
+      base::Bind(&ServiceProcessControlBrowserTest::CloudPrintInfoCallback));
   content::RunMessageLoop();
 }
 
@@ -307,7 +327,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_ForceShutdown) {
   // Make sure we are connected to the service process.
   ASSERT_TRUE(ServiceProcessControl::GetInstance()->IsConnected());
   base::ProcessId service_pid;
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_TRUE(GetServiceProcessData(NULL, &service_pid));
   EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
   ForceServiceProcessShutdown(version_info::GetVersionNumber(), service_pid);
@@ -321,7 +341,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_ForceShutdown) {
 #endif
 IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, MAYBE_CheckPid) {
   base::ProcessId service_pid;
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   EXPECT_FALSE(GetServiceProcessData(NULL, &service_pid));
   // Launch the service process.
   LaunchServiceProcessControl(true);

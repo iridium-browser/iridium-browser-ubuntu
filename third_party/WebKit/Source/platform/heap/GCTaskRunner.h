@@ -32,12 +32,11 @@
 #define GCTaskRunner_h
 
 #include <memory>
+#include "base/location.h"
 #include "platform/CrossThreadFunctional.h"
-#include "platform/WebTaskRunner.h"
 #include "platform/heap/ThreadState.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebThread.h"
-#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 

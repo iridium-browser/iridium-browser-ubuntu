@@ -9,13 +9,12 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/output/managed_memory_policy.h"
 #include "components/viz/common/gpu/context_cache_controller.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
-#include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/gles2_trace_implementation.h"
 #include "gpu/command_buffer/client/gpu_switches.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/gl_in_process_context.h"
 #include "gpu/skia_bindings/gl_bindings_skia_cmd_buffer.h"
 #include "third_party/skia/include/gpu/GrContext.h"
@@ -40,7 +39,7 @@ AwRenderThreadContextProvider::AwRenderThreadContextProvider(
   // the Android OS. The widget we pass here will be ignored since we're
   // providing the GLSurface to the context already.
   DCHECK(!surface->IsOffscreen());
-  gpu::gles2::ContextCreationAttribHelper attributes;
+  gpu::ContextCreationAttribs attributes;
   // The context is wrapping an already allocated surface, so we can't control
   // what buffers it has from these attributes. We do expect an alpha and
   // stencil buffer to exist for webview, as the display compositor requires
@@ -64,10 +63,10 @@ AwRenderThreadContextProvider::AwRenderThreadContextProvider(
   limits.start_transfer_buffer_size = 64 * 1024;
   limits.min_transfer_buffer_size = 64 * 1024;
 
-  context_.reset(gpu::GLInProcessContext::Create(
-      service, surface, surface->IsOffscreen(), gpu::kNullSurfaceHandle,
-      nullptr /* share_context */, attributes, limits, nullptr, nullptr,
-      nullptr));
+  context_ = gpu::GLInProcessContext::CreateWithoutInit();
+  context_->Initialize(service, surface, surface->IsOffscreen(),
+                       gpu::kNullSurfaceHandle, nullptr /* share_context */,
+                       attributes, limits, nullptr, nullptr, nullptr, nullptr);
 
   context_->GetImplementation()->SetLostContextCallback(base::Bind(
       &AwRenderThreadContextProvider::OnLostContext, base::Unretained(this)));
@@ -76,12 +75,12 @@ AwRenderThreadContextProvider::AwRenderThreadContextProvider(
           switches::kEnableGpuClientTracing)) {
     // This wraps the real GLES2Implementation and we should always use this
     // instead when it's present.
-    trace_impl_.reset(new gpu::gles2::GLES2TraceImplementation(
-        context_->GetImplementation()));
+    trace_impl_ = std::make_unique<gpu::gles2::GLES2TraceImplementation>(
+        context_->GetImplementation());
   }
 
-  cache_controller_.reset(
-      new viz::ContextCacheController(context_->GetImplementation(), nullptr));
+  cache_controller_ = std::make_unique<viz::ContextCacheController>(
+      context_->GetImplementation(), nullptr);
 }
 
 AwRenderThreadContextProvider::~AwRenderThreadContextProvider() {
@@ -95,16 +94,31 @@ uint32_t AwRenderThreadContextProvider::GetCopyTextureInternalFormat() {
   return GL_RGBA;
 }
 
-bool AwRenderThreadContextProvider::BindToCurrentThread() {
+void AwRenderThreadContextProvider::AddRef() const {
+  base::RefCountedThreadSafe<AwRenderThreadContextProvider>::AddRef();
+}
+
+void AwRenderThreadContextProvider::Release() const {
+  base::RefCountedThreadSafe<AwRenderThreadContextProvider>::Release();
+}
+
+gpu::ContextResult AwRenderThreadContextProvider::BindToCurrentThread() {
   // This is called on the thread the context will be used.
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
-  return true;
+  return gpu::ContextResult::kSuccess;
 }
 
-gpu::Capabilities AwRenderThreadContextProvider::ContextCapabilities() {
+const gpu::Capabilities& AwRenderThreadContextProvider::ContextCapabilities()
+    const {
   DCHECK(main_thread_checker_.CalledOnValidThread());
   return context_->GetImplementation()->capabilities();
+}
+
+const gpu::GpuFeatureInfo& AwRenderThreadContextProvider::GetGpuFeatureInfo()
+    const {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+  return context_->GetGpuFeatureInfo();
 }
 
 gpu::gles2::GLES2Interface* AwRenderThreadContextProvider::ContextGL() {
@@ -128,9 +142,7 @@ class GrContext* AwRenderThreadContextProvider::GrContext() {
 
   sk_sp<GrGLInterface> interface(
       skia_bindings::CreateGLES2InterfaceBindings(ContextGL()));
-  gr_context_ = sk_sp<::GrContext>(GrContext::Create(
-      // GrContext takes ownership of |interface|.
-      kOpenGL_GrBackend, reinterpret_cast<GrBackendContext>(interface.get())));
+  gr_context_ = GrContext::MakeGL(std::move(interface));
   cache_controller_->SetGrContext(gr_context_.get());
   return gr_context_.get();
 }
@@ -153,16 +165,20 @@ base::Lock* AwRenderThreadContextProvider::GetLock() {
   return nullptr;
 }
 
-void AwRenderThreadContextProvider::SetLostContextCallback(
-    const LostContextCallback& lost_context_callback) {
-  lost_context_callback_ = lost_context_callback;
+void AwRenderThreadContextProvider::AddObserver(viz::ContextLostObserver* obs) {
+  observers_.AddObserver(obs);
+}
+
+void AwRenderThreadContextProvider::RemoveObserver(
+    viz::ContextLostObserver* obs) {
+  observers_.RemoveObserver(obs);
 }
 
 void AwRenderThreadContextProvider::OnLostContext() {
   DCHECK(main_thread_checker_.CalledOnValidThread());
 
-  if (!lost_context_callback_.is_null())
-    lost_context_callback_.Run();
+  for (auto& observer : observers_)
+    observer.OnContextLost();
   if (gr_context_)
     gr_context_->abandonContext();
 }

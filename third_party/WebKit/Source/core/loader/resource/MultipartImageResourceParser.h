@@ -41,6 +41,7 @@
 #ifndef MultipartImageResourceParser_h
 #define MultipartImageResourceParser_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/loader/fetch/ResourceResponse.h"
@@ -51,15 +52,13 @@ namespace blink {
 // A parser parsing mlutipart/x-mixed-replace resource.
 class CORE_EXPORT MultipartImageResourceParser final
     : public GarbageCollectedFinalized<MultipartImageResourceParser> {
-  WTF_MAKE_NONCOPYABLE(MultipartImageResourceParser);
-
  public:
   class CORE_EXPORT Client : public GarbageCollectedMixin {
    public:
     virtual ~Client() = default;
     virtual void OnePartInMultipartReceived(const ResourceResponse&) = 0;
     virtual void MultipartDataReceived(const char* bytes, size_t) = 0;
-    DEFINE_INLINE_VIRTUAL_TRACE() {}
+    void Trace(blink::Visitor* visitor) override {}
   };
 
   MultipartImageResourceParser(const ResourceResponse&,
@@ -69,7 +68,7 @@ class CORE_EXPORT MultipartImageResourceParser final
   void Finish();
   void Cancel() { is_cancelled_ = true; }
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   static size_t SkippableLengthForTest(const Vector<char>& data, size_t size) {
     return SkippableLength(data, size);
@@ -95,6 +94,8 @@ class CORE_EXPORT MultipartImageResourceParser final
   bool is_parsing_headers_ = false;
   bool saw_last_boundary_ = false;
   bool is_cancelled_ = false;
+
+  DISALLOW_COPY_AND_ASSIGN(MultipartImageResourceParser);
 };
 
 }  // namespace blink

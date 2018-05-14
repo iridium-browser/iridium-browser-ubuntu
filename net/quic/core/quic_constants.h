@@ -98,8 +98,10 @@ const QuicStreamId kHeadersStreamId = 3;
 // trailing headers over QUIC.
 QUIC_EXPORT_PRIVATE extern const char* const kFinalOffsetHeaderKey;
 
-// Maximum delayed ack time, in ms.
-const int64_t kMaxDelayedAckTimeMs = 25;
+// Default maximum delayed ack time, in ms.
+// Uses a 25ms delayed ack timer. Helps with better signaling
+// in low-bandwidth (< ~384 kbps), where an ack is sent per packet.
+const int64_t kDefaultDelayedAckTimeMs = 25;
 
 // Minimum tail loss probe time in ms.
 static const int64_t kMinTailLossProbeTimeoutMs = 10;
@@ -112,6 +114,14 @@ const int64_t kDefaultIdleTimeoutSecs = 30;
 const int64_t kMaximumIdleTimeoutSecs = 60 * 10;  // 10 minutes.
 // The default timeout for a connection until the crypto handshake succeeds.
 const int64_t kMaxTimeForCryptoHandshakeSecs = 10;  // 10 secs.
+
+// The default maximum time QUIC session could be on non-default network before
+// migrate back to default network.
+const int64_t kMaxTimeOnNonDefaultNetworkSecs = 128;
+
+// The default maximum number of migrations to non default network on path
+// degrading per network.
+const int64_t kMaxMigrationsToNonDefaultNetworkOnPathDegrading = 5;
 
 // Default limit on the number of undecryptable packets the connection buffers
 // before the CHLO/SHLO arrive.
@@ -153,6 +163,9 @@ const int kMaxPromisedStreamsMultiplier = kMaxAvailableStreamsMultiplier - 1;
 // define the minimum RTO to 200ms, we will use the same until we have data to
 // support a higher or lower value.
 static const int64_t kMinRetransmissionTimeMs = 200;
+// The delayed ack time must not be greater than half the min RTO.
+static_assert(kDefaultDelayedAckTimeMs <= kMinRetransmissionTimeMs / 2,
+              "Delayed ack time must be less than or equal half the MinRTO");
 
 // We define an unsigned 16-bit floating point value, inspired by IEEE floats
 // (http://en.wikipedia.org/wiki/Half_precision_floating-point_format),
@@ -183,6 +196,23 @@ const QuicPacketNumber kMaxPacketGap = 5000;
 // The maximum number of random padding bytes to add.
 const QuicByteCount kMaxNumRandomPaddingBytes = 256;
 
+// The size of stream send buffer data slice size in bytes. A data slice is
+// piece of stream data stored in contiguous memory, and a stream frame can
+// contain data from multiple data slices.
+const QuicByteCount kQuicStreamSendBufferSliceSize = 4 * 1024;
+
+// For When using Random Initial Packet Numbers, they can start
+// anyplace in the range 1...((2^31)-1) or 0x7fffffff
+const QuicPacketNumber kMaxRandomInitialPacketNumber = 0x7fffffff;
+
+// Used to represent an invalid or no control frame id.
+const QuicControlFrameId kInvalidControlFrameId = 0;
+
+// The max length a stream can have.
+const QuicByteCount kMaxStreamLength = (UINT64_C(1) << 62) - 1;
+
+// The max value that can be encoded using IETF Var Ints.
+const uint64_t kMaxIetfVarInt = UINT64_C(0x3fffffffffffffff);
 }  // namespace net
 
 #endif  // NET_QUIC_CORE_QUIC_CONSTANTS_H_

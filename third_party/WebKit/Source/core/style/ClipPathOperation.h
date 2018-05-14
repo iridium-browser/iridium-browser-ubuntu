@@ -48,7 +48,7 @@ class ClipPathOperation : public RefCounted<ClipPathOperation> {
  public:
   enum OperationType { REFERENCE, SHAPE };
 
-  virtual ~ClipPathOperation() {}
+  virtual ~ClipPathOperation() = default;
 
   virtual bool operator==(const ClipPathOperation&) const = 0;
   bool operator!=(const ClipPathOperation& o) const { return !(*this == o); }
@@ -59,18 +59,18 @@ class ClipPathOperation : public RefCounted<ClipPathOperation> {
   }
 
  protected:
-  ClipPathOperation() {}
+  ClipPathOperation() = default;
 };
 
 class ReferenceClipPathOperation final : public ClipPathOperation {
  public:
-  static PassRefPtr<ReferenceClipPathOperation> Create(
+  static scoped_refptr<ReferenceClipPathOperation> Create(
       const String& url,
       SVGElementProxy& element_proxy) {
-    return AdoptRef(new ReferenceClipPathOperation(url, element_proxy));
+    return base::AdoptRef(new ReferenceClipPathOperation(url, element_proxy));
   }
 
-  void AddClient(SVGResourceClient*);
+  void AddClient(SVGResourceClient*, base::SingleThreadTaskRunner*);
   void RemoveClient(SVGResourceClient*);
 
   SVGElement* FindElement(TreeScope&) const;
@@ -96,31 +96,29 @@ DEFINE_TYPE_CASTS(ReferenceClipPathOperation,
 
 class ShapeClipPathOperation final : public ClipPathOperation {
  public:
-  static PassRefPtr<ShapeClipPathOperation> Create(
-      PassRefPtr<BasicShape> shape) {
-    return AdoptRef(new ShapeClipPathOperation(std::move(shape)));
+  static scoped_refptr<ShapeClipPathOperation> Create(
+      scoped_refptr<BasicShape> shape) {
+    return base::AdoptRef(new ShapeClipPathOperation(std::move(shape)));
   }
 
-  const BasicShape* GetBasicShape() const { return shape_.Get(); }
-  bool IsValid() const { return shape_.Get(); }
-  const Path& GetPath(const FloatRect& bounding_rect) {
+  const BasicShape* GetBasicShape() const { return shape_.get(); }
+  bool IsValid() const { return shape_.get(); }
+  Path GetPath(const FloatRect& bounding_rect) const {
     DCHECK(shape_);
-    path_.reset();
-    path_ = WTF::WrapUnique(new Path);
-    shape_->GetPath(*path_, bounding_rect);
-    path_->SetWindRule(shape_->GetWindRule());
-    return *path_;
+    Path path;
+    shape_->GetPath(path, bounding_rect);
+    path.SetWindRule(shape_->GetWindRule());
+    return path;
   }
 
  private:
   bool operator==(const ClipPathOperation&) const override;
   OperationType GetType() const override { return SHAPE; }
 
-  ShapeClipPathOperation(PassRefPtr<BasicShape> shape)
+  ShapeClipPathOperation(scoped_refptr<BasicShape> shape)
       : shape_(std::move(shape)) {}
 
-  RefPtr<BasicShape> shape_;
-  std::unique_ptr<Path> path_;
+  scoped_refptr<BasicShape> shape_;
 };
 
 DEFINE_TYPE_CASTS(ShapeClipPathOperation,
@@ -133,9 +131,9 @@ inline bool ShapeClipPathOperation::operator==(
     const ClipPathOperation& o) const {
   if (!IsSameType(o))
     return false;
-  BasicShape* other_shape = ToShapeClipPathOperation(o).shape_.Get();
-  if (!shape_.Get() || !other_shape)
-    return static_cast<bool>(shape_.Get()) == static_cast<bool>(other_shape);
+  BasicShape* other_shape = ToShapeClipPathOperation(o).shape_.get();
+  if (!shape_.get() || !other_shape)
+    return static_cast<bool>(shape_.get()) == static_cast<bool>(other_shape);
   return *shape_ == *other_shape;
 }
 

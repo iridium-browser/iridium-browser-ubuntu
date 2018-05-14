@@ -63,7 +63,7 @@ std::unique_ptr<base::DictionaryValue> ReadTestDictionary(
   dict = base::DictionaryValue::From(std::move(content));
   CHECK(dict) << "File '" << filename
               << "' does not contain a dictionary as expected, but type "
-              << content->GetType();
+              << content->type();
   return dict;
 }
 
@@ -73,7 +73,7 @@ std::unique_ptr<base::DictionaryValue> ReadTestDictionary(
   if (actual == NULL)
     return ::testing::AssertionFailure() << "Actual value pointer is NULL";
 
-  if (expected->Equals(actual))
+  if (*expected == *actual)
     return ::testing::AssertionSuccess() << "Values are equal";
 
   return ::testing::AssertionFailure() << "Values are unequal.\n"

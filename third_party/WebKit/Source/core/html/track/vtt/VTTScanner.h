@@ -30,6 +30,7 @@
 #ifndef VTTScanner_h
 #define VTTScanner_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/text/ParsingUtilities.h"
@@ -50,7 +51,6 @@ namespace blink {
 // advance the input pointer past the matched sequence.
 class CORE_EXPORT VTTScanner {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(VTTScanner);
 
  public:
   explicit VTTScanner(const String& line);
@@ -131,15 +131,15 @@ class CORE_EXPORT VTTScanner {
 
   // Scan a set of ASCII digits from the input. Return the number of digits
   // scanned, and set |number| to the computed value. If the digits make up a
-  // number that does not fit the 'int' type, |number| is set to INT_MAX.
+  // number that does not fit the 'unsigned' type, |number| is set to UINT_MAX.
   // Note: Does not handle sign.
-  unsigned ScanDigits(int& number);
+  unsigned ScanDigits(unsigned& number);
 
   // Scan a floating point value on one of the forms: \d+\.? \d+\.\d+ \.\d+
-  bool ScanFloat(float& number);
+  bool ScanDouble(double& number);
 
-  // Scan a floating point value (per scanFloat) followed by a '%'.
-  bool ScanPercentage(float& percentage);
+  // Scan a floating point value (per ScanDouble) followed by a '%'.
+  bool ScanPercentage(double& percentage);
 
  protected:
   Position GetPosition() const { return data_.characters8; }
@@ -162,6 +162,8 @@ class CORE_EXPORT VTTScanner {
     const UChar* characters16;
   } end_;
   bool is8_bit_;
+
+  DISALLOW_COPY_AND_ASSIGN(VTTScanner);
 };
 
 inline size_t VTTScanner::Run::length() const {
@@ -179,33 +181,33 @@ inline bool VTTScanner::Scan(const char (&characters)[charactersCount]) {
 template <bool characterPredicate(UChar)>
 inline void VTTScanner::SkipWhile() {
   if (is8_bit_)
-    ::skipWhile<LChar, LCharPredicateAdapter<characterPredicate>>(
+    WTF::SkipWhile<LChar, LCharPredicateAdapter<characterPredicate>>(
         data_.characters8, end_.characters8);
   else
-    ::skipWhile<UChar, characterPredicate>(data_.characters16,
-                                           end_.characters16);
+    WTF::SkipWhile<UChar, characterPredicate>(data_.characters16,
+                                              end_.characters16);
 }
 
 template <bool characterPredicate(UChar)>
 inline void VTTScanner::SkipUntil() {
   if (is8_bit_)
-    ::skipUntil<LChar, LCharPredicateAdapter<characterPredicate>>(
+    WTF::SkipUntil<LChar, LCharPredicateAdapter<characterPredicate>>(
         data_.characters8, end_.characters8);
   else
-    ::skipUntil<UChar, characterPredicate>(data_.characters16,
-                                           end_.characters16);
+    WTF::SkipUntil<UChar, characterPredicate>(data_.characters16,
+                                              end_.characters16);
 }
 
 template <bool characterPredicate(UChar)>
 inline VTTScanner::Run VTTScanner::CollectWhile() {
   if (is8_bit_) {
     const LChar* current = data_.characters8;
-    ::skipWhile<LChar, LCharPredicateAdapter<characterPredicate>>(
+    WTF::SkipWhile<LChar, LCharPredicateAdapter<characterPredicate>>(
         current, end_.characters8);
     return Run(GetPosition(), current, is8_bit_);
   }
   const UChar* current = data_.characters16;
-  ::skipWhile<UChar, characterPredicate>(current, end_.characters16);
+  WTF::SkipWhile<UChar, characterPredicate>(current, end_.characters16);
   return Run(GetPosition(), reinterpret_cast<Position>(current), is8_bit_);
 }
 
@@ -213,12 +215,12 @@ template <bool characterPredicate(UChar)>
 inline VTTScanner::Run VTTScanner::CollectUntil() {
   if (is8_bit_) {
     const LChar* current = data_.characters8;
-    ::skipUntil<LChar, LCharPredicateAdapter<characterPredicate>>(
+    WTF::SkipUntil<LChar, LCharPredicateAdapter<characterPredicate>>(
         current, end_.characters8);
     return Run(GetPosition(), current, is8_bit_);
   }
   const UChar* current = data_.characters16;
-  ::skipUntil<UChar, characterPredicate>(current, end_.characters16);
+  WTF::SkipUntil<UChar, characterPredicate>(current, end_.characters16);
   return Run(GetPosition(), reinterpret_cast<Position>(current), is8_bit_);
 }
 

@@ -4,13 +4,18 @@
 
 #include "core/inspector/InspectorHighlight.h"
 
+#include "base/macros.h"
 #include "core/dom/PseudoElement.h"
 #include "core/frame/LocalFrameView.h"
+#include "core/frame/VisualViewport.h"
 #include "core/geometry/DOMRect.h"
+#include "core/layout/AdjustForAbsoluteZoom.h"
 #include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutGrid.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/shapes/ShapeOutsideInfo.h"
+#include "core/page/Page.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/PlatformChromeClient.h"
 #include "platform/graphics/Path.h"
@@ -21,11 +26,10 @@ namespace {
 
 class PathBuilder {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(PathBuilder);
 
  public:
   PathBuilder() : path_(protocol::ListValue::create()) {}
-  virtual ~PathBuilder() {}
+  virtual ~PathBuilder() = default;
 
   std::unique_ptr<protocol::ListValue> Release() { return std::move(path_); }
 
@@ -50,6 +54,7 @@ class PathBuilder {
                                   size_t length);
 
   std::unique_ptr<protocol::ListValue> path_;
+  DISALLOW_COPY_AND_ASSIGN(PathBuilder);
 };
 
 void PathBuilder::AppendPathCommandAndPoints(const char* command,
@@ -83,7 +88,7 @@ void PathBuilder::AppendPathElement(const PathElement* path_element) {
       break;
     // The points member will contain no values.
     case kPathElementCloseSubpath:
-      AppendPathCommandAndPoints("Z", 0, 0);
+      AppendPathCommandAndPoints("Z", nullptr, 0);
       break;
   }
 }
@@ -109,7 +114,7 @@ class ShapePathBuilder : public PathBuilder {
   }
 
  protected:
-  virtual FloatPoint TranslatePoint(const FloatPoint& point) {
+  FloatPoint TranslatePoint(const FloatPoint& point) override {
     FloatPoint layout_object_point =
         shape_outside_info_.ShapeToLayoutObjectPoint(point);
     return view_->ContentsToViewport(
@@ -147,11 +152,21 @@ Path QuadToPath(const FloatQuad& quad) {
   return quad_path;
 }
 
+FloatPoint ContentsPointToViewport(const LocalFrameView* view,
+                                   FloatPoint point_in_contents) {
+  LayoutPoint point_in_frame =
+      view->ContentsToFrame(LayoutPoint(point_in_contents));
+  FloatPoint point_in_root_frame =
+      FloatPoint(view->ConvertToRootFrame(point_in_frame));
+  return FloatPoint(view->GetPage()->GetVisualViewport().RootFrameToViewport(
+      point_in_root_frame));
+}
+
 void ContentsQuadToViewport(const LocalFrameView* view, FloatQuad& quad) {
-  quad.SetP1(view->ContentsToViewport(RoundedIntPoint(quad.P1())));
-  quad.SetP2(view->ContentsToViewport(RoundedIntPoint(quad.P2())));
-  quad.SetP3(view->ContentsToViewport(RoundedIntPoint(quad.P3())));
-  quad.SetP4(view->ContentsToViewport(RoundedIntPoint(quad.P4())));
+  quad.SetP1(ContentsPointToViewport(view, quad.P1()));
+  quad.SetP2(ContentsPointToViewport(view, quad.P2()));
+  quad.SetP3(ContentsPointToViewport(view, quad.P3()));
+  quad.SetP4(ContentsPointToViewport(view, quad.P4()));
 }
 
 const ShapeOutsideInfo* ShapeOutsideInfoForNode(Node* node,
@@ -227,6 +242,51 @@ std::unique_ptr<protocol::DictionaryValue> BuildElementInfo(Element* element) {
   return element_info;
 }
 
+std::unique_ptr<protocol::Value> BuildGapAndPositions(
+    double origin,
+    LayoutUnit gap,
+    const Vector<LayoutUnit>& positions,
+    float scale) {
+  std::unique_ptr<protocol::DictionaryValue> result =
+      protocol::DictionaryValue::create();
+  result->setDouble("origin", floor(origin * scale));
+  result->setDouble("gap", round(gap * scale));
+
+  std::unique_ptr<protocol::ListValue> spans = protocol::ListValue::create();
+  for (const LayoutUnit& position : positions) {
+    spans->pushValue(
+        protocol::FundamentalValue::create(round(position * scale)));
+  }
+  result->setValue("positions", std::move(spans));
+
+  return result;
+}
+
+std::unique_ptr<protocol::DictionaryValue> BuildGridInfo(
+    LayoutGrid* layout_grid,
+    FloatPoint origin,
+    Color color,
+    float scale,
+    bool isPrimary) {
+  std::unique_ptr<protocol::DictionaryValue> grid_info =
+      protocol::DictionaryValue::create();
+
+  grid_info->setValue(
+      "rows", BuildGapAndPositions(origin.Y(),
+                                   layout_grid->GridGap(kForRows) +
+                                       layout_grid->GridItemOffset(kForRows),
+                                   layout_grid->RowPositions(), scale));
+  grid_info->setValue(
+      "columns",
+      BuildGapAndPositions(origin.X(),
+                           layout_grid->GridGap(kForColumns) +
+                               layout_grid->GridItemOffset(kForColumns),
+                           layout_grid->ColumnPositions(), scale));
+  grid_info->setString("color", color.Serialized());
+  grid_info->setBoolean("isPrimaryGrid", isPrimary);
+  return grid_info;
+}
+
 }  // namespace
 
 InspectorHighlight::InspectorHighlight(float scale)
@@ -260,7 +320,7 @@ InspectorHighlight::InspectorHighlight(
     element_info_ = BuildElementInfo(ToElement(node));
 }
 
-InspectorHighlight::~InspectorHighlight() {}
+InspectorHighlight::~InspectorHighlight() = default;
 
 void InspectorHighlight::AppendQuad(const FloatQuad& quad,
                                     const Color& fill_color,
@@ -355,6 +415,23 @@ void InspectorHighlight::AppendNodeHighlight(
   AppendQuad(padding, highlight_config.padding, Color::kTransparent, "padding");
   AppendQuad(border, highlight_config.border, Color::kTransparent, "border");
   AppendQuad(margin, highlight_config.margin, Color::kTransparent, "margin");
+
+  if (highlight_config.css_grid == Color::kTransparent)
+    return;
+  grid_info_ = protocol::ListValue::create();
+  if (layout_object->IsLayoutGrid()) {
+    grid_info_->pushValue(BuildGridInfo(ToLayoutGrid(layout_object),
+                                        border.P1(), highlight_config.css_grid,
+                                        scale_, true));
+  }
+  LayoutObject* parent = layout_object->Parent();
+  if (!parent || !parent->IsLayoutGrid())
+    return;
+  if (!BuildNodeQuads(parent->GetNode(), &content, &padding, &border, &margin))
+    return;
+  grid_info_->pushValue(BuildGridInfo(ToLayoutGrid(parent), border.P1(),
+                                      highlight_config.css_grid, scale_,
+                                      false));
 }
 
 std::unique_ptr<protocol::DictionaryValue> InspectorHighlight::AsProtocolValue()
@@ -367,6 +444,8 @@ std::unique_ptr<protocol::DictionaryValue> InspectorHighlight::AsProtocolValue()
   if (element_info_)
     object->setValue("elementInfo", element_info_->clone());
   object->setBoolean("displayAsMaterial", display_as_material_);
+  if (grid_info_ && grid_info_->size() > 0)
+    object->setValue("gridInfo", grid_info_->clone());
   return object;
 }
 
@@ -383,6 +462,17 @@ bool InspectorHighlight::GetBoxModel(
   if (!BuildNodeQuads(node, &content, &padding, &border, &margin))
     return false;
 
+  AdjustForAbsoluteZoom::AdjustFloatQuad(content, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(padding, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(border, *layout_object);
+  AdjustForAbsoluteZoom::AdjustFloatQuad(margin, *layout_object);
+
+  float scale = 1 / view->GetPage()->GetVisualViewport().Scale();
+  content.Scale(scale, scale);
+  padding.Scale(scale, scale);
+  border.Scale(scale, scale);
+  margin.Scale(scale, scale);
+
   IntRect bounding_box =
       view->ContentsToRootFrame(layout_object->AbsoluteBoundingBoxRect());
   LayoutBoxModelObject* model_object =
@@ -395,12 +485,12 @@ bool InspectorHighlight::GetBoxModel(
           .setPadding(BuildArrayForQuad(padding))
           .setBorder(BuildArrayForQuad(border))
           .setMargin(BuildArrayForQuad(margin))
-          .setWidth(model_object ? AdjustForAbsoluteZoom(
+          .setWidth(model_object ? AdjustForAbsoluteZoom::AdjustInt(
                                        model_object->PixelSnappedOffsetWidth(
                                            model_object->OffsetParent()),
                                        model_object)
                                  : bounding_box.Width())
-          .setHeight(model_object ? AdjustForAbsoluteZoom(
+          .setHeight(model_object ? AdjustForAbsoluteZoom::AdjustInt(
                                         model_object->PixelSnappedOffsetHeight(
                                             model_object->OffsetParent()),
                                         model_object)
@@ -529,6 +619,7 @@ InspectorHighlightConfig InspectorHighlight::DefaultConfig() {
   config.show_rulers = true;
   config.show_extension_lines = true;
   config.display_as_material = false;
+  config.css_grid = Color(128, 128, 128, 0);
   return config;
 }
 

@@ -58,7 +58,7 @@ void DecryptingDemuxerStream::Initialize(DemuxerStream* stream,
   InitializeDecoderConfig();
 
   if (!cdm_context->GetDecryptor()) {
-    MEDIA_LOG(DEBUG, media_log_) << GetDisplayName() << ": no decryptor";
+    DVLOG(2) << __func__ << ": no decryptor";
     state_ = kUninitialized;
     base::ResetAndReturn(&init_cb_).Run(DECODER_ERROR_NOT_SUPPORTED);
     return;
@@ -147,10 +147,6 @@ bool DecryptingDemuxerStream::SupportsConfigChanges() {
   return demuxer_stream_->SupportsConfigChanges();
 }
 
-VideoRotation DecryptingDemuxerStream::video_rotation() {
-  return demuxer_stream_->video_rotation();
-}
-
 DecryptingDemuxerStream::~DecryptingDemuxerStream() {
   DVLOG(2) << __func__ << " : state_ = " << state_;
   DCHECK(task_runner_->BelongsToCurrentThread());
@@ -174,7 +170,7 @@ DecryptingDemuxerStream::~DecryptingDemuxerStream() {
 void DecryptingDemuxerStream::DecryptBuffer(
     DemuxerStream::Status status,
     const scoped_refptr<DecoderBuffer>& buffer) {
-  DVLOG(3) << __func__;
+  DVLOG(3) << __func__ << ": status = " << status;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, kPendingDemuxerRead) << state_;
   DCHECK(!read_cb_.is_null());
@@ -204,10 +200,13 @@ void DecryptingDemuxerStream::DecryptBuffer(
     return;
   }
 
-  if (status == kAborted) {
-    DVLOG(2) << "DoDecryptBuffer() - kAborted.";
+  if (status == kAborted || status == kError) {
+    if (status == kError) {
+      MEDIA_LOG(ERROR, media_log_)
+          << GetDisplayName() << ": demuxer stream read error.";
+    }
     state_ = kIdle;
-    base::ResetAndReturn(&read_cb_).Run(kAborted, NULL);
+    base::ResetAndReturn(&read_cb_).Run(status, nullptr);
     return;
   }
 
@@ -285,7 +284,7 @@ void DecryptingDemuxerStream::DeliverBuffer(
     MEDIA_LOG(ERROR, media_log_) << GetDisplayName() << ": decrypt error";
     pending_buffer_to_decrypt_ = NULL;
     state_ = kIdle;
-    base::ResetAndReturn(&read_cb_).Run(kAborted, NULL);
+    base::ResetAndReturn(&read_cb_).Run(kError, nullptr);
     return;
   }
 
@@ -330,8 +329,8 @@ void DecryptingDemuxerStream::OnKeyAdded() {
   }
 
   if (state_ == kWaitingForKey) {
-    MEDIA_LOG(INFO, media_log_) << GetDisplayName()
-                                << ": key added, resuming decrypt";
+    MEDIA_LOG(INFO, media_log_)
+        << GetDisplayName() << ": key was added, resuming decrypt";
     state_ = kPendingDecrypt;
     DecryptPendingBuffer();
   }

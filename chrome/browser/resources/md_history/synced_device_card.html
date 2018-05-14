@@ -1,6 +1,7 @@
+<link rel="import" href="chrome://resources/html/polymer.html">
+
 <link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/html/cr/ui/focus_row.html">
-<link rel="import" href="chrome://resources/html/polymer.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-collapse/iron-collapse.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
@@ -15,7 +16,7 @@
   <template>
     <style include="shared-style">
       :host {
-        @apply(--card-sizing);
+        @apply --card-sizing;
         -webkit-tap-highlight-color: transparent;
         display: block;
         padding-bottom: var(--card-padding-between);
@@ -47,12 +48,8 @@
       }
 
       #right-buttons {
-        -webkit-margin-end: 4px;
+        -webkit-margin-end: 12px;
         color: var(--secondary-text-color);
-      }
-
-      #menu-button {
-        -webkit-margin-end: 8px;
       }
 
       #collapse {
@@ -60,7 +57,7 @@
       }
 
       #history-item-container {
-        @apply(--shadow-elevation-2dp);
+        @apply --shadow-elevation-2dp;
         background: #fff;
         border-radius: 2px;
       }
@@ -96,7 +93,7 @@
             <div></div>
             <div></div>
           </button>
-          <button is="paper-icon-button-light" class="icon-button"
+          <button is="paper-icon-button-light"
               id="collapse-button" title$="[[getCollapseTitle_(opened)]]">
             <iron-icon icon="[[getCollapseIcon_(opened)]]"
                 id="dropdown-indicator">

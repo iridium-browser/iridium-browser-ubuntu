@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.contextualsearch;
 
 import android.annotation.SuppressLint;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,8 +30,10 @@ import org.chromium.chrome.browser.contextualsearch.ContextualSearchSelectionCon
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationParams;
+import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.gsa.GSAContextDisplaySelection;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabRedirectHandler;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelObserver;
@@ -42,12 +45,16 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabObserver;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarManager;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarObserver;
+import org.chromium.components.feature_engagement.EventConstants;
+import org.chromium.components.feature_engagement.FeatureConstants;
+import org.chromium.components.feature_engagement.Tracker;
+import org.chromium.components.feature_engagement.TriggerState;
 import org.chromium.components.navigation_interception.NavigationParams;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.SelectionClient;
+import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationEntry;
+import org.chromium.content_public.browser.SelectionClient;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
 import org.chromium.content_public.common.ContentUrlConstants;
@@ -57,16 +64,13 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
-
 /**
  * Manager for the Contextual Search feature. This class keeps track of the status of Contextual
  * Search and coordinates the control with the layout.
  */
-public class ContextualSearchManager implements ContextualSearchManagementDelegate,
-                                                ContextualSearchTranslateInterface,
-                                                ContextualSearchNetworkCommunicator,
-                                                ContextualSearchSelectionHandler, SelectionClient {
+public class ContextualSearchManager
+        implements ContextualSearchManagementDelegate, ContextualSearchTranslateInterface,
+                   ContextualSearchNetworkCommunicator, ContextualSearchSelectionHandler {
     // TODO(donnd): provide an inner class that implements some of these interfaces (like the
     // ContextualSearchTranslateInterface) rather than having the manager itself implement the
     // interface because that exposes all the public methods of that interface at the manager level.
@@ -111,6 +115,8 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
     // The Ranker logger to use to write Tap Suppression Ranker logs to UMA.
     private final ContextualSearchRankerLogger mTapSuppressionRankerLogger;
 
+    private final ContextualSearchSelectionClient mContextualSearchSelectionClient;
+
     private ContextualSearchSelectionController mSelectionController;
     private ContextualSearchNetworkCommunicator mNetworkCommunicator;
     private ContextualSearchPolicy mPolicy;
@@ -131,6 +137,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
     private TabModelSelectorTabObserver mTabModelSelectorTabObserver;
     private FindToolbarManager mFindToolbarManager;
     private FindToolbarObserver mFindToolbarObserver;
+    private ContextualSearchIPH mInProductHelp;
 
     private boolean mDidStartLoadingResolvedSearchRequest;
     private long mLoadedSearchUrlTimeMs;
@@ -141,6 +148,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     private boolean mWasActivatedByTap;
     private boolean mIsInitialized;
+    private boolean mReceivedContextualCardsEntityData;
 
     // The current search context, or null.
     private ContextualSearchContext mContext;
@@ -151,8 +159,6 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      */
     private boolean mShouldLoadDelayedSearch;
 
-    private boolean mIsShowingPeekPromo;
-    private boolean mWouldShowPeekPromo;
     private boolean mIsShowingPromo;
     private boolean mIsMandatoryPromo;
     private boolean mDidLogPromoOutcome;
@@ -173,12 +179,14 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
     private boolean mIsAccessibilityModeEnabled;
 
     /** Tap Experiments and other variable behavior. */
-    private ContextualSearchHeuristics mHeuristics;
     private QuickAnswersHeuristic mQuickAnswersHeuristic;
 
     // Counter for how many times we've called SelectWordAroundCaret without an ACK returned.
     // TODO(donnd): replace with a more systematic approach using the InternalStateController.
     private int mSelectWordAroundCaretCounter;
+
+    /** Whether ContextualSearch UI is suppressed for Smart Selection. */
+    private boolean mDoSuppressContextualSearchForSmartSelection;
 
     /**
      * The delegate that is responsible for promoting a {@link ContentViewCore} to a {@link Tab}
@@ -196,7 +204,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      * Constructs the manager for the given activity, and will attach views to the given parent.
      * @param activity The {@code ChromeActivity} in use.
      * @param tabPromotionDelegate The {@link ContextualSearchTabPromotionDelegate} that is
-     *     responsible for building tabs from contextual search {@link ContentViewCore}s.
+     *        responsible for building tabs from contextual search {@link ContentViewCore}s.
      */
     public ContextualSearchManager(
             ChromeActivity activity, ContextualSearchTabPromotionDelegate tabPromotionDelegate) {
@@ -216,7 +224,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         mTabModelObserver = new EmptyTabModelObserver() {
             @Override
             public void didSelectTab(Tab tab, TabSelectionType type, int lastId) {
-                if (!mIsPromotingToTab && tab.getId() != lastId
+                if ((!mIsPromotingToTab && tab.getId() != lastId)
                         || mActivity.getTabModelSelector().isIncognitoSelected()) {
                     hideContextualSearch(StateChangeReason.UNKNOWN);
                     mSelectionController.onTabSelected();
@@ -227,7 +235,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             public void didAddTab(Tab tab, TabLaunchType type) {
                 // If we're in the process of promoting this tab, just return and don't mess with
                 // this state.
-                if (tab.getContentViewCore() == mSearchPanel.getContentViewCore()) return;
+                if (tab.getContentViewCore() == getSearchPanelContentViewCore()) return;
                 hideContextualSearch(StateChangeReason.UNKNOWN);
             }
         };
@@ -239,6 +247,8 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         mInternalStateController = new ContextualSearchInternalStateController(
                 mPolicy, getContextualSearchInternalStateHandler());
         mTapSuppressionRankerLogger = new ContextualSearchRankerLoggerImpl();
+        mContextualSearchSelectionClient = new ContextualSearchSelectionClient();
+        mInProductHelp = new ContextualSearchIPH();
     }
 
     /**
@@ -250,6 +260,8 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         mParentView = parentView;
         mParentView.getViewTreeObserver().addOnGlobalFocusChangeListener(mOnFocusChangeListener);
+
+        mInProductHelp.setParentView(parentView);
 
         mTabRedirectHandler = new TabRedirectHandler(mActivity);
 
@@ -310,8 +322,10 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     @Override
     public void setContextualSearchPanel(ContextualSearchPanel panel) {
+        assert panel != null;
         mSearchPanel = panel;
         mPolicy.setContextualSearchPanel(panel);
+        mInProductHelp.setSearchPanel(panel);
     }
 
     @Override
@@ -321,13 +335,47 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     /** @return Whether the Search Panel is opened. That is, whether it is EXPANDED or MAXIMIZED. */
     public boolean isSearchPanelOpened() {
-        return mSearchPanel.isPanelOpened();
+        return mSearchPanel != null && mSearchPanel.isPanelOpened();
     }
 
-    /** @return The Base Page's {@link ContentViewCore}. */
+    /** @return Whether the {@code mSearchPanel} is not {@code null} and is showing. */
+    private boolean isSearchPanelShowing() {
+        return mSearchPanel != null && mSearchPanel.isShowing();
+    }
+
+    /**
+     * @return the {@link ContentViewCore} of the {@code mSearchPanel} or {@code null} if
+     *         {@code mSearchPanel} is null or the search panel doesn't currently hold a CVC.
+     */
+    private @Nullable ContentViewCore getSearchPanelContentViewCore() {
+        return mSearchPanel == null ? null : mSearchPanel.getContentViewCore();
+    }
+
+    /**
+     * @return the {@link WebContents} of the {@code mSearchPanel} or {@code null}.
+     */
+    private @Nullable WebContents getSearchPanelWebContents() {
+        return getSearchPanelContentViewCore() == null
+                ? null
+                : getSearchPanelContentViewCore().getWebContents();
+    }
+
+    /** @return The Base Page's {@link WebContents}. */
     @Nullable
     private WebContents getBaseWebContents() {
         return mSelectionController.getBaseWebContents();
+    }
+
+    /** @return The Base Page's {@link URL}. */
+    @Nullable
+    private URL getBasePageURL() {
+        WebContents baseWebContents = mSelectionController.getBaseWebContents();
+        if (baseWebContents == null) return null;
+        try {
+            return new URL(baseWebContents.getVisibleUrl());
+        } catch (MalformedURLException e) {
+            return null;
+        }
     }
 
     /** Notifies that the base page has started loading a page. */
@@ -359,7 +407,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             mWereInfoBarsHidden = false;
             InfoBarContainer container = getInfoBarContainer();
             if (container != null) {
-                container.setIsObscuredByOtherView(false);
+                container.setHidden(false);
             }
         }
 
@@ -374,9 +422,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         mSearchRequest = null;
 
-        if (mIsShowingPeekPromo || mWouldShowPeekPromo) {
-            mPolicy.logPeekPromoMetrics(mIsShowingPeekPromo, mWouldShowPeekPromo);
-        }
+        mInProductHelp.dismiss();
 
         if (mIsShowingPromo && !mDidLogPromoOutcome && mSearchPanel.wasPromoInteractive()) {
             ContextualSearchUma.logPromoOutcome(mWasActivatedByTap, mIsMandatoryPromo);
@@ -390,7 +436,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     /** Called when the system back button is pressed. Will hide the layout. */
     public boolean onBackPressed() {
-        if (!mIsInitialized || !mSearchPanel.isShowing()) return false;
+        if (!mIsInitialized || !isSearchPanelShowing()) return false;
         hideContextualSearch(StateChangeReason.BACK_PRESS);
         return true;
     }
@@ -400,6 +446,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      * @param stateChangeReason The reason explaining the change of state.
      */
     private void showContextualSearch(StateChangeReason stateChangeReason) {
+        assert mSearchPanel != null;
         if (mFindToolbarManager != null) {
             mFindToolbarManager.hideToolbar(false);
         }
@@ -412,7 +459,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             InfoBarContainer container = getInfoBarContainer();
             if (container != null && container.getVisibility() == View.VISIBLE) {
                 mWereInfoBarsHidden = true;
-                container.setIsObscuredByOtherView(true);
+                container.setHidden(true);
             }
         }
 
@@ -425,6 +472,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         }
 
         mSearchPanel.destroyContent();
+        mReceivedContextualCardsEntityData = false;
 
         String selection = mSelectionController.getSelectedText();
         boolean isTap = mSelectionController.getSelectionType() == SelectionType.TAP;
@@ -458,17 +506,6 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         }
         mWereSearchResultsSeen = false;
 
-        // Show the Peek Promo only when the Panel wasn't previously visible, provided
-        // the policy allows it.
-        if (!mSearchPanel.isShowing()) {
-            mWouldShowPeekPromo = mPolicy.isPeekPromoConditionSatisfied();
-            mIsShowingPeekPromo = mPolicy.isPeekPromoAvailable();
-            if (mIsShowingPeekPromo) {
-                mSearchPanel.showPeekPromo();
-                mPolicy.registerPeekPromoSeen();
-            }
-        }
-
         // Note: now that the contextual search has properly started, set the promo involvement.
         if (mPolicy.isPromoAvailable()) {
             mIsShowingPromo = true;
@@ -484,6 +521,19 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         assert mSelectionController.getSelectionType() != SelectionType.UNDETERMINED;
         mWasActivatedByTap = mSelectionController.getSelectionType() == SelectionType.TAP;
+
+        Tracker tracker =
+                TrackerFactory.getTrackerForProfile(mActivity.getActivityTab().getProfile());
+        tracker.notifyEvent(mWasActivatedByTap
+                        ? EventConstants.CONTEXTUAL_SEARCH_TRIGGERED_BY_TAP
+                        : EventConstants.CONTEXTUAL_SEARCH_TRIGGERED_BY_LONGPRESS);
+
+        // Log whether IPH for tapping has been shown before.
+        if (mWasActivatedByTap) {
+            ContextualSearchUma.logTapIPH(
+                    tracker.getTriggerState(FeatureConstants.CONTEXTUAL_SEARCH_PROMOTE_TAP_FEATURE)
+                    == TriggerState.HAS_BEEN_DISPLAYED);
+        }
     }
 
     @Override
@@ -670,6 +720,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         boolean receivedCaptionOrThumbnail = !TextUtils.isEmpty(caption)
                 || !TextUtils.isEmpty(thumbnailUrl);
 
+        assert mSearchPanel != null;
         mSearchPanel.onSearchTermResolved(message, thumbnailUrl, quickActionUri,
                 quickActionCategory);
         if (!TextUtils.isEmpty(caption)) {
@@ -682,17 +733,22 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         boolean quickActionShown =
                 mSearchPanel.getSearchBarControl().getQuickActionControl().hasQuickAction();
-        boolean receivedContextualCardsEntityData = !quickActionShown && receivedCaptionOrThumbnail;
+        mReceivedContextualCardsEntityData = !quickActionShown && receivedCaptionOrThumbnail;
 
-        ContextualSearchUma.logContextualCardsDataShown(receivedContextualCardsEntityData);
-        mSearchPanel.getPanelMetrics().setWasContextualCardsDataShown(
-                receivedContextualCardsEntityData);
-
-        if (ContextualSearchFieldTrial.isContextualSearchSingleActionsEnabled()) {
-            ContextualSearchUma.logQuickActionShown(quickActionShown, quickActionCategory);
-            mSearchPanel.getPanelMetrics().setWasQuickActionShown(quickActionShown,
-                    quickActionCategory);
+        if (mReceivedContextualCardsEntityData) {
+            Tracker tracker = TrackerFactory.getTrackerForProfile(
+                    Profile.getLastUsedProfile().getOriginalProfile());
+            tracker.notifyEvent(EventConstants.CONTEXTUAL_SEARCH_ENTITY_RESULT);
+            mInProductHelp.onEntityDataReceived(
+                    mWasActivatedByTap, Profile.getLastUsedProfile().getOriginalProfile());
         }
+
+        ContextualSearchUma.logContextualCardsDataShown(mReceivedContextualCardsEntityData);
+        mSearchPanel.getPanelMetrics().setWasContextualCardsDataShown(
+                mReceivedContextualCardsEntityData);
+        ContextualSearchUma.logQuickActionShown(quickActionShown, quickActionCategory);
+        mSearchPanel.getPanelMetrics().setWasQuickActionShown(
+                quickActionShown, quickActionCategory);
 
         // If there was an error, fall back onto a literal search for the selection.
         // Since we're showing the panel, there must be a selection.
@@ -751,9 +807,12 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     /** Loads a Search Request in the Contextual Search's Content View. */
     private void loadSearchUrl() {
+        assert mSearchPanel != null;
         mLoadedSearchUrlTimeMs = System.currentTimeMillis();
         mLastSearchRequestLoaded = mSearchRequest;
-        mSearchPanel.loadUrlInPanel(mSearchRequest.getSearchUrl());
+        String searchUrl = mSearchRequest.getSearchUrl();
+        nativeWhitelistContextualSearchJsApiUrl(mNativeContextualSearchManagerPtr, searchUrl);
+        mSearchPanel.loadUrlInPanel(searchUrl);
         mDidStartLoadingResolvedSearchRequest = true;
 
         // TODO(pedrosimonetti): If the user taps on a word and quickly after that taps on the
@@ -762,8 +821,8 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         // to coordinate with Chrome-Android folks to come up with a proper fix for this.
         // For now, we force the ContentView to be displayed by calling onShow() again
         // when a URL is being loaded. See: crbug.com/398206
-        if (mSearchPanel.isContentShowing() && mSearchPanel.getContentViewCore() != null) {
-            mSearchPanel.getContentViewCore().onShow();
+        if (mSearchPanel.isContentShowing() && getSearchPanelContentViewCore() != null) {
+            getSearchPanelContentViewCore().onShow();
         }
     }
 
@@ -778,7 +837,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      */
     @CalledByNative
     private void onSetCaption(String caption, boolean doesAnswer) {
-        if (TextUtils.isEmpty(caption)) return;
+        if (TextUtils.isEmpty(caption) || mSearchPanel == null) return;
 
         // Notify the UI of the caption.
         mSearchPanel.setCaption(caption);
@@ -798,6 +857,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      */
     public void onAccessibilityModeChanged(boolean enabled) {
         mIsAccessibilityModeEnabled = enabled;
+        if (enabled) hideContextualSearch(StateChangeReason.UNKNOWN);
     }
 
     /**
@@ -812,7 +872,9 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     @Override
     public void stopPanelContentsNavigation() {
-        mSearchPanel.getContentViewCore().getWebContents().stop();
+        if (getSearchPanelWebContents() == null) return;
+
+        getSearchPanelWebContents().stop();
     }
 
     // ============================================================================================
@@ -906,6 +968,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         @Override
         public void onMainFrameLoadStarted(String url, boolean isExternalUrl) {
+            assert mSearchPanel != null;
             mSearchPanel.updateBrowserControlsState();
 
             if (isExternalUrl) {
@@ -915,6 +978,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
         @Override
         public void onMainFrameNavigation(String url, boolean isExternalUrl, boolean isFailure) {
+            assert mSearchPanel != null;
             if (isExternalUrl) {
                 if (!ContextualSearchFieldTrial.isAmpAsSeparateTabDisabled()
                         && mPolicy.isAmpUrl(url) && mSearchPanel.didTouchContent()) {
@@ -964,31 +1028,29 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         }
 
         @Override
-        public void onContentViewCreated(ContentViewCore contentViewCore) {
-            // TODO(donnd): Consider moving to OverlayPanelContent.
-            // Enable the Contextual Search JavaScript API between our service and the new view.
-            nativeEnableContextualSearchJsApiForOverlay(
-                    mNativeContextualSearchManagerPtr, contentViewCore.getWebContents());
-
+        public void onContentViewCreated() {
             // TODO(mdjones): Move SearchContentViewDelegate ownership to panel.
-            mSearchContentViewDelegate.setOverlayPanelContentViewCore(contentViewCore);
+            nativeEnableContextualSearchJsApiForWebContents(
+                    mNativeContextualSearchManagerPtr, getSearchPanelWebContents());
         }
 
         @Override
         public void onContentViewDestroyed() {
             if (mSearchContentViewDelegate != null) {
-                mSearchContentViewDelegate.releaseOverlayPanelContentViewCore();
+                mSearchContentViewDelegate.releaseOverlayPanelContent();
             }
         }
 
         @Override
         public void onContentViewSeen() {
+            assert mSearchPanel != null;
             mSearchPanel.setWasSearchContentViewSeen();
         }
 
         @Override
         public boolean shouldInterceptNavigation(
                 ExternalNavigationHandler externalNavHandler, NavigationParams navigationParams) {
+            assert mSearchPanel != null;
             mTabRedirectHandler.updateNewUrlLoading(navigationParams.pageTransitionType,
                     navigationParams.isRedirect,
                     navigationParams.hasUserGesture || navigationParams.hasUserGestureCarryover,
@@ -1029,6 +1091,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     /** Removes the last resolved search URL from the Chrome history. */
     private void removeLastSearchVisit() {
+        assert mSearchPanel != null;
         if (mLastSearchRequestLoaded != null) {
             // TODO(pedrosimonetti): Consider having this feature builtin into OverlayPanelContent.
             mSearchPanel.removeLastHistoryEntry(
@@ -1057,14 +1120,14 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         if (isFailure && mSearchRequest.isUsingLowPriority()) {
             // We're navigating to an error page, so we want to stop and retry.
             // Stop loading the page that displays the error to the user.
-            if (mSearchPanel.getContentViewCore() != null) {
+            if (getSearchPanelContentViewCore() != null) {
                 // When running tests the Content View might not exist.
                 mNetworkCommunicator.stopPanelContentsNavigation();
             }
             mSearchRequest.setHasFailed();
             mSearchRequest.setNormalPriority();
             // If the content view is showing, load at normal priority now.
-            if (mSearchPanel.isContentShowing()) {
+            if (mSearchPanel != null && mSearchPanel.isContentShowing()) {
                 // NOTE: we must reuse the existing content view because we're called from within
                 // a WebContentsObserver.  If we don't reuse the content view then the WebContents
                 // being observed will be deleted.  We notify of the failure to trigger the reuse.
@@ -1094,6 +1157,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         // A navigation can be due to us loading a URL, or a touch in the search content view.
         // Require a touch, but no recent loading, in order to promote to a separate tab.
         // Note that tapping the opt-in button requires checking for recent loading.
+        assert mSearchPanel != null;
         return mSearchPanel.didTouchContent() && !mSearchPanel.isProcessingPendingNavigation();
     }
 
@@ -1103,10 +1167,9 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
      * @param url The URL we are navigating to.
      */
     public void onExternalNavigation(String url) {
-        if (!mDidPromoteSearchNavigation
-                && !BLACKLISTED_URL.equals(url)
-                && !url.startsWith(INTENT_URL_PREFIX)
-                && shouldPromoteSearchNavigation()) {
+        if (!mDidPromoteSearchNavigation && !BLACKLISTED_URL.equals(url)
+                && !url.startsWith(INTENT_URL_PREFIX) && shouldPromoteSearchNavigation()
+                && mSearchPanel != null) {
             // Do not promote to a regular tab if we're loading our Resolved Search
             // URL, otherwise we'll promote it when prefetching the Serp.
             // Don't promote URLs when they are navigating to an intent - this is
@@ -1136,6 +1199,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     @Override
     public void promoteToTab() {
+        assert mSearchPanel != null;
         // TODO(pedrosimonetti): Consider removing this member.
         mIsPromotingToTab = true;
 
@@ -1144,10 +1208,9 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         // the Panel to a Tab will result in creating a new tab with URL about:blank. To prevent
         // this problem, we are ignoring tap gestures in the Search Bar if we don't know what
         // to search for.
-        if (mSearchRequest != null
-                && mSearchPanel.getContentViewCore() != null
-                && mSearchPanel.getContentViewCore().getWebContents() != null) {
-            String url = getContentViewUrl(mSearchPanel.getContentViewCore());
+        if (mSearchRequest != null && getSearchPanelContentViewCore() != null
+                && getSearchPanelContentViewCore().getWebContents() != null) {
+            String url = getContentViewUrl(getSearchPanelContentViewCore());
 
             // If it's a search URL, format it so the SearchBox becomes visible.
             if (mSearchRequest.isContextualSearchUrl(url)) {
@@ -1183,69 +1246,85 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         hideContextualSearch(StateChangeReason.UNKNOWN);
     }
 
-    // ============================================================================================
-    // SelectionClient -- interface used by ContentViewCore.
-    // ============================================================================================
+    @Override
+    public void onPanelFinishedShowing() {
+        mInProductHelp.onPanelFinishedShowing(
+                mWasActivatedByTap, Profile.getLastUsedProfile().getOriginalProfile());
+    }
 
     @Override
-    public void onSelectionChanged(String selection) {
-        if (!isOverlayVideoMode()) {
-            mSelectionController.handleSelectionChanged(selection);
-            mSearchPanel.updateBrowserControlsState(BrowserControlsState.BOTH, true);
+    public void onPanelResized() {
+        mInProductHelp.updateBubblePosition();
+    }
+
+    /**
+     * @return The {@link SelectionClient} used by Contextual Search.
+     */
+    SelectionClient getContextualSearchSelectionClient() {
+        return mContextualSearchSelectionClient;
+    }
+
+    /**
+     * Notifies Contextual Search whether the UI should be suppressed for Smart Selection.
+     */
+    void suppressContextualSearchForSmartSelection(boolean isSmartSelectionEnabled) {
+        mDoSuppressContextualSearchForSmartSelection = isSmartSelectionEnabled;
+    }
+
+    /**
+     * Implements the {@link SelectionClient} interface for Contextual Search.
+     * Handles messages from Content about selection changes.  These are the key drivers of
+     * Contextual Search logic.
+     */
+    private class ContextualSearchSelectionClient implements SelectionClient {
+        @Override
+        public void onSelectionChanged(String selection) {
+            if (!isOverlayVideoMode() && mSearchPanel != null) {
+                mSelectionController.handleSelectionChanged(selection);
+                mSearchPanel.updateBrowserControlsState(BrowserControlsState.BOTH, true);
+            }
         }
-    }
 
-    @Override
-    public void onSelectionEvent(int eventType, float posXPix, float posYPix) {
-        if (!isOverlayVideoMode()) {
-            mSelectionController.handleSelectionEvent(eventType, posXPix, posYPix);
-        }
-    }
-
-    @Override
-    public void showUnhandledTapUIIfNeeded(final int x, final int y) {
-        if (!isOverlayVideoMode()) {
-            mSelectionController.handleShowUnhandledTapUIIfNeeded(x, y);
-        }
-    }
-
-    @Override
-    public void selectWordAroundCaretAck(boolean didSelect, int startAdjust, int endAdjust) {
-        if (mSelectWordAroundCaretCounter > 0) mSelectWordAroundCaretCounter--;
-        if (mSelectWordAroundCaretCounter > 0
-                || !mInternalStateController.isStillWorkingOn(InternalState.START_SHOWING_TAP_UI)) {
-            return;
+        @Override
+        public void onSelectionEvent(int eventType, float posXPix, float posYPix) {
+            if (!isOverlayVideoMode()) {
+                mSelectionController.handleSelectionEvent(eventType, posXPix, posYPix);
+            }
         }
 
-        if (didSelect) {
-            assert mContext != null;
-            mContext.onSelectionAdjusted(startAdjust, endAdjust);
-            showSelectionAsSearchInBar(mSelectionController.getSelectedText());
-            mInternalStateController.notifyFinishedWorkOn(InternalState.START_SHOWING_TAP_UI);
-        } else {
-            hideContextualSearch(StateChangeReason.UNKNOWN);
+        @Override
+        public void showUnhandledTapUIIfNeeded(final int x, final int y) {
+            if (!isOverlayVideoMode()) {
+                mSelectionController.handleShowUnhandledTapUIIfNeeded(x, y);
+            }
         }
-    }
 
-    @Override
-    public boolean requestSelectionPopupUpdates(boolean shouldSuggest) {
-        return false;
-    }
+        @Override
+        public void selectWordAroundCaretAck(boolean didSelect, int startAdjust, int endAdjust) {
+            if (mSelectWordAroundCaretCounter > 0) mSelectWordAroundCaretCounter--;
+            if (mSelectWordAroundCaretCounter > 0
+                    || !mInternalStateController.isStillWorkingOn(
+                               InternalState.START_SHOWING_TAP_UI)) {
+                return;
+            }
 
-    @Override
-    public void cancelAllRequests() {}
+            if (didSelect) {
+                assert mContext != null;
+                mContext.onSelectionAdjusted(startAdjust, endAdjust);
+                showSelectionAsSearchInBar(mSelectionController.getSelectedText());
+                mInternalStateController.notifyFinishedWorkOn(InternalState.START_SHOWING_TAP_UI);
+            } else {
+                hideContextualSearch(StateChangeReason.UNKNOWN);
+            }
+        }
 
-    @Override
-    public void setTextClassifier(Object textClassifier) {}
+        @Override
+        public boolean requestSelectionPopupUpdates(boolean shouldSuggest) {
+            return false;
+        }
 
-    @Override
-    public Object getTextClassifier() {
-        return null;
-    }
-
-    @Override
-    public Object getCustomTextClassifier() {
-        return null;
+        @Override
+        public void cancelAllRequests() {}
     }
 
     /**
@@ -1287,7 +1366,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
     public void handleSuppressedTap() {
         if (mIsAccessibilityModeEnabled) return;
 
-        hideContextualSearch(StateChangeReason.BASE_PAGE_TAP);
+        hideContextualSearch(StateChangeReason.TAP_SUPPRESS);
     }
 
     @Override
@@ -1329,16 +1408,10 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
 
     @Override
     public void handleMetricsForWouldSuppressTap(ContextualSearchHeuristics tapHeuristics) {
-        mHeuristics = tapHeuristics;
-
-        // TODO(donnd): QuickAnswersHeuristic is getting added to TapSuppressionHeuristics and
-        // and getting considered in TapSuppressionHeuristics#shouldSuppressTap(). It should
-        // be a part of ContextualSearchHeuristics for logging purposes but not for suppression.
-        mQuickAnswersHeuristic = new QuickAnswersHeuristic();
-        mHeuristics.add(mQuickAnswersHeuristic);
-
-        mSearchPanel.getPanelMetrics().setResultsSeenExperiments(mHeuristics);
-        mSearchPanel.getPanelMetrics().setRankerLogger(mTapSuppressionRankerLogger);
+        mQuickAnswersHeuristic = tapHeuristics.getQuickAnswersHeuristic();
+        if (mSearchPanel != null) {
+            mSearchPanel.getPanelMetrics().setResultsSeenExperiments(tapHeuristics);
+        }
     }
 
     @Override
@@ -1381,7 +1454,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
     public void handleSelectionDismissal() {
         if (mIsAccessibilityModeEnabled) return;
 
-        if (mSearchPanel != null && mSearchPanel.isShowing()
+        if (isSearchPanelShowing()
                 && !mIsPromotingToTab
                 // If the selection is dismissed when the Panel is not peeking anymore,
                 // which means the Panel is at least partially expanded, then it means
@@ -1398,7 +1471,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             String selection, boolean selectionValid, float x, float y) {
         if (mIsAccessibilityModeEnabled) return;
 
-        if (mSearchPanel != null && mSearchPanel.isShowing()) {
+        if (isSearchPanelShowing()) {
             if (selectionValid) {
                 mSearchPanel.setSearchTerm(selection);
             } else {
@@ -1414,9 +1487,21 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
         mInternalStateController.enter(InternalState.SELECTION_CLEARED_RECOGNIZED);
     }
 
+    @Override
+    public void logNonHeuristicFeatures(ContextualSearchRankerLogger rankerLogger) {
+        boolean didOptIn = !mPolicy.isUserUndecided();
+        rankerLogger.logFeature(ContextualSearchRankerLogger.Feature.DID_OPT_IN, didOptIn);
+        boolean isHttp = mPolicy.isBasePageHTTP(getBasePageURL());
+        rankerLogger.logFeature(ContextualSearchRankerLogger.Feature.IS_HTTP, isHttp);
+        String contentLanguage = mContext.getDetectedLanguage();
+        boolean isLanguageMismatch = mTranslateController.needsTranslation(contentLanguage);
+        rankerLogger.logFeature(
+                ContextualSearchRankerLogger.Feature.IS_LANGUAGE_MISMATCH, isLanguageMismatch);
+    }
+
     /** Shows the given selection as the Search Term in the Bar. */
     private void showSelectionAsSearchInBar(String selection) {
-        if (mSearchPanel.isShowing()) mSearchPanel.setSearchTerm(selection);
+        if (isSearchPanelShowing()) mSearchPanel.setSearchTerm(selection);
     }
 
     // ============================================================================================
@@ -1433,7 +1518,10 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
                 mContext = null;
                 if (mSearchPanel == null) return;
 
-                if (mSearchPanel.isShowing()) {
+                // Make sure we write to Ranker and reset at the end of every search, even if the
+                // panel was not showing because it was a suppressed tap.
+                mSearchPanel.getPanelMetrics().writeRankerLoggerOutcomesAndReset();
+                if (isSearchPanelShowing()) {
                     mSearchPanel.closePanel(reason, false);
                 } else {
                     if (mSelectionController.getSelectionType() == SelectionType.TAP) {
@@ -1453,6 +1541,19 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
                 };
 
                 boolean isTap = mSelectionController.getSelectionType() == SelectionType.TAP;
+                if (!isTap && mDoSuppressContextualSearchForSmartSelection && mContext != null) {
+                    // If Smart Selection is active we need to work around a race
+                    // condition gathering surrounding text.  See issue 773330.
+                    // Instead we just return the selection which is good enough for the assistant.
+                    mInternalStateController.notifyStartingWorkOn(
+                            InternalState.GATHERING_SURROUNDINGS);
+                    String currentSelection = mSelectionController.getSelectedText();
+                    mContext.setSurroundingText(getBaseWebContents(), currentSelection);
+                    mInternalStateController.notifyFinishedWorkOn(
+                            InternalState.GATHERING_SURROUNDINGS);
+                    return;
+                }
+
                 if (isTap && mPolicy.shouldPreviousTapResolve()) {
                     mContext.setResolveProperties(
                             mPolicy.getHomeCountry(mActivity), mPolicy.maySendBasePageUrl());
@@ -1468,16 +1569,30 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
                 }
             }
 
+            /** First step where we're committed to processing the current Tap gesture. */
+            @Override
+            public void tapGestureCommit() {
+                mInternalStateController.notifyStartingWorkOn(InternalState.TAP_GESTURE_COMMIT);
+                if (!mPolicy.isTapSupported()) {
+                    hideContextualSearch(StateChangeReason.UNKNOWN);
+                    return;
+                }
+                // We may be processing a chained search (aka a retap -- a tap near a previous tap).
+                // If it's chained we need to log the outcomes and reset, because we won't be hiding
+                // the panel at the end of the previous search (we'll update it to the new Search).
+                if (isSearchPanelShowing()) {
+                    mSearchPanel.getPanelMetrics().writeRankerLoggerOutcomesAndReset();
+                }
+                // Set up the next batch of Ranker logging.
+                mTapSuppressionRankerLogger.setupLoggingForPage(getBaseWebContents());
+                mSearchPanel.getPanelMetrics().setRankerLogger(mTapSuppressionRankerLogger);
+                mInternalStateController.notifyFinishedWorkOn(InternalState.TAP_GESTURE_COMMIT);
+            }
+
             /** Starts the process of deciding if we'll suppress the current Tap gesture or not. */
             @Override
             public void decideSuppression() {
                 mInternalStateController.notifyStartingWorkOn(InternalState.DECIDING_SUPPRESSION);
-
-                // Ranker will handle the suppression, but our legacy implementation uses
-                // TapSuppressionHeuristics (run from the ContextualSearchSelectionConroller).
-                // Usage includes tap-far-from-previous suppression.
-                mTapSuppressionRankerLogger.setupLoggingForPage(getBasePageUrl());
-
                 // TODO(donnd): Move handleShouldSuppressTap out of the Selection Controller.
                 mSelectionController.handleShouldSuppressTap(mContext, mTapSuppressionRankerLogger);
             }
@@ -1486,11 +1601,7 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             @Override
             public void startShowingTapUi() {
                 WebContents baseWebContents = getBaseWebContents();
-                // TODO(donnd): Call isTapSupported earlier so we don't waste time gathering
-                // surrounding text and deciding suppression when unsupported, or remove the whole
-                // idea of unsupported taps in favor of deciding suppression better.
-                // Details in crbug.com/715297.
-                if (baseWebContents != null && mPolicy.isTapSupported()) {
+                if (baseWebContents != null) {
                     mInternalStateController.notifyStartingWorkOn(
                             InternalState.START_SHOWING_TAP_UI);
                     mSelectWordAroundCaretCounter++;
@@ -1552,10 +1663,9 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
                 mNetworkCommunicator.startSearchTermResolutionRequest(selection);
                 // If the we were unable to start the resolve, we've hidden the UI and set the
                 // context to null.
-                if (mContext == null) return;
+                if (mContext == null || mSearchPanel == null) return;
 
                 // Update the UI to show the resolve is in progress.
-                assert mContext.getTextContentFollowingSelection() != null;
                 mSearchPanel.setContextDetails(
                         selection, mContext.getTextContentFollowingSelection());
             }
@@ -1571,7 +1681,18 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             public void showContextualSearchLongpressUi() {
                 mInternalStateController.notifyStartingWorkOn(
                         InternalState.SHOWING_LONGPRESS_SEARCH);
-                showContextualSearch(StateChangeReason.TEXT_SELECT_LONG_PRESS);
+                boolean suppressForSmartSelection = mDoSuppressContextualSearchForSmartSelection
+                        && !ContextualSearchFieldTrial.isSuppressForSmartSelectionDisabled();
+                if (suppressForSmartSelection) {
+                    // Make sure we close any existing UX since Smart Select has taken this action.
+                    // Specifically, this happens when the user taps on an existing tap-selection
+                    // and the selection-pins show: The original tap processing may still be in
+                    // progress or may have completed and the Bar is being shown.
+                    hideContextualSearch(StateChangeReason.UNKNOWN);
+                    RecordUserAction.record("ContextualSearch.SmartSelectionSuppressed");
+                } else {
+                    showContextualSearch(StateChangeReason.TEXT_SELECT_LONG_PRESS);
+                }
                 mInternalStateController.notifyFinishedWorkOn(
                         InternalState.SHOWING_LONGPRESS_SEARCH);
             }
@@ -1659,7 +1780,9 @@ public class ContextualSearchManager implements ContextualSearchManagementDelega
             ContextualSearchContext contextualSearchContext, WebContents baseWebContents);
     protected native void nativeGatherSurroundingText(long nativeContextualSearchManager,
             ContextualSearchContext contextualSearchContext, WebContents baseWebContents);
-    private native void nativeEnableContextualSearchJsApiForOverlay(
+    private native void nativeWhitelistContextualSearchJsApiUrl(
+            long nativeContextualSearchManager, String url);
+    private native void nativeEnableContextualSearchJsApiForWebContents(
             long nativeContextualSearchManager, WebContents overlayWebContents);
     // Don't call these directly, instead call the private methods that cache the results.
     private native String nativeGetTargetLanguage(long nativeContextualSearchManager);

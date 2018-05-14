@@ -30,11 +30,12 @@
 
 #include "core/svg/SVGAnimatedEnumerationBase.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/svg/SVGElement.h"
 
 namespace blink {
 
-SVGAnimatedEnumerationBase::~SVGAnimatedEnumerationBase() {}
+SVGAnimatedEnumerationBase::~SVGAnimatedEnumerationBase() = default;
 
 void SVGAnimatedEnumerationBase::setBaseVal(unsigned short value,
                                             ExceptionState& exception_state) {

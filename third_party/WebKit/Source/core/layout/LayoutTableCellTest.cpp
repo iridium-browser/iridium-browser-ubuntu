@@ -32,12 +32,12 @@ namespace blink {
 
 class LayoutTableCellDeathTest : public RenderingTest {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     RenderingTest::SetUp();
     cell_ = LayoutTableCell::CreateAnonymous(&GetDocument());
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     cell_->Destroy();
     RenderingTest::TearDown();
   }
@@ -56,11 +56,8 @@ TEST_F(LayoutTableCellDeathTest, CanSetColumnToMaxColumnIndex) {
   EXPECT_EQ(kMaxColumnIndex, cell_->AbsoluteColumnIndex());
 }
 
-// FIXME: Re-enable these tests once ASSERT_DEATH is supported for Android.
-// See: https://bugs.webkit.org/show_bug.cgi?id=74089
-// TODO(dgrogan): These tests started flaking on Mac try bots around 2016-07-28.
-// https://crbug.com/632816
-#if !defined(OS_ANDROID) && !defined(OS_MACOSX)
+// Death tests don't work properly on Android.
+#if defined(GTEST_HAS_DEATH_TEST) && !defined(OS_ANDROID)
 
 TEST_F(LayoutTableCellDeathTest, CrashIfColumnOverflowOnSetting) {
   ASSERT_DEATH(cell_->SetAbsoluteColumnIndex(kMaxColumnIndex + 1), "");
@@ -101,22 +98,23 @@ TEST_F(LayoutTableCellTest, DoNotResetColspanJustBelowBoundary) {
 
 TEST_F(LayoutTableCellTest, ResetRowspanIfTooBig) {
   SetBodyInnerHTML("<table><td id='cell' rowspan='70000'></td></table>");
-  ASSERT_EQ(GetCellByElementId("cell")->RowSpan(), 65534U);
+  ASSERT_EQ(GetCellByElementId("cell")->ResolvedRowSpan(), 65534U);
 }
 
 TEST_F(LayoutTableCellTest, DoNotResetRowspanJustBelowBoundary) {
   SetBodyInnerHTML("<table><td id='cell' rowspan='65534'></td></table>");
-  ASSERT_EQ(GetCellByElementId("cell")->RowSpan(), 65534U);
+  ASSERT_EQ(GetCellByElementId("cell")->ResolvedRowSpan(), 65534U);
 }
 
 TEST_F(LayoutTableCellTest,
        BackgroundIsKnownToBeOpaqueWithLayerAndCollapsedBorder) {
-  SetBodyInnerHTML(
-      "<table style='border-collapse: collapse'>"
-      "  <td id='cell' style='will-change: transform; background-color: blue'>"
-      "    Cell"
-      "  </td>"
-      "</table>");
+  SetBodyInnerHTML(R"HTML(
+    <table style='border-collapse: collapse'>
+      <td id='cell' style='will-change: transform; background-color: blue'>
+        Cell
+      </td>
+    </table>
+  )HTML");
   EXPECT_FALSE(GetCellByElementId("cell")->BackgroundIsKnownToBeOpaqueInRect(
       LayoutRect(0, 0, 1, 1)));
 }
@@ -147,23 +145,24 @@ TEST_F(LayoutTableCellTest, RepaintContentInTableCell) {
 }
 
 TEST_F(LayoutTableCellTest, IsInStartAndEndColumn) {
-  SetBodyInnerHTML(
-      "<table id='table'>"
-      "  <tr>"
-      "    <td id='cell11' colspan='2000'></td>"
-      "    <td id='cell12'></td>"
-      "    <td id='cell13'></td>"
-      "  </tr>"
-      "  <tr>"
-      "    <td id='cell21' rowspan='2'></td>"
-      "    <td id='cell22'></td>"
-      "    <td id='cell23' colspan='2000'></td>"
-      "  </tr>"
-      "  <tr>"
-      "    <td id='cell31'></td>"
-      "    <td id='cell32'></td>"
-      "  </tr>"
-      "</table>");
+  SetBodyInnerHTML(R"HTML(
+    <table id='table'>
+      <tr>
+        <td id='cell11' colspan='2000'></td>
+        <td id='cell12'></td>
+        <td id='cell13'></td>
+      </tr>
+      <tr>
+        <td id='cell21' rowspan='2'></td>
+        <td id='cell22'></td>
+        <td id='cell23' colspan='2000'></td>
+      </tr>
+      <tr>
+        <td id='cell31'></td>
+        <td id='cell32'></td>
+      </tr>
+    </table>
+  )HTML");
 
   const auto* cell11 = GetCellByElementId("cell11");
   const auto* cell12 = GetCellByElementId("cell12");
@@ -195,27 +194,28 @@ TEST_F(LayoutTableCellTest, IsInStartAndEndColumn) {
 }
 
 TEST_F(LayoutTableCellTest, IsInStartAndEndColumnRTL) {
-  SetBodyInnerHTML(
-      "<style>"
-      "  table { direction: rtl }"
-      "  td { direction: ltr }"
-      "</style>"
-      "<table id='table'>"
-      "  <tr>"
-      "    <td id='cell11' colspan='2000'></td>"
-      "    <td id='cell12'></td>"
-      "    <td id='cell13'></td>"
-      "  </tr>"
-      "  <tr>"
-      "    <td id='cell21' rowspan='2'></td>"
-      "    <td id='cell22'></td>"
-      "    <td id='cell23' colspan='2000'></td>"
-      "  </tr>"
-      "  <tr>"
-      "    <td id='cell31'></td>"
-      "    <td id='cell32'></td>"
-      "  </tr>"
-      "</table>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      table { direction: rtl }
+      td { direction: ltr }
+    </style>
+    <table id='table'>
+      <tr>
+        <td id='cell11' colspan='2000'></td>
+        <td id='cell12'></td>
+        <td id='cell13'></td>
+      </tr>
+      <tr>
+        <td id='cell21' rowspan='2'></td>
+        <td id='cell22'></td>
+        <td id='cell23' colspan='2000'></td>
+      </tr>
+      <tr>
+        <td id='cell31'></td>
+        <td id='cell32'></td>
+      </tr>
+    </table>
+  )HTML");
 
   const auto* cell11 = GetCellByElementId("cell11");
   const auto* cell12 = GetCellByElementId("cell12");
@@ -247,19 +247,20 @@ TEST_F(LayoutTableCellTest, IsInStartAndEndColumnRTL) {
 }
 
 TEST_F(LayoutTableCellTest, BorderWidthsWithCollapsedBorders) {
-  SetBodyInnerHTML(
-      "<style>"
-      "  table { border-collapse: collapse }"
-      "  td { border: 0px solid blue; padding: 0 }"
-      "  div { width: 100px; height: 100px }"
-      "</style>"
-      "<table>"
-      "  <tr>"
-      "    <td id='cell1' style='border-bottom-width: 10px;"
-      "        outline: 3px solid blue'><div></div></td>"
-      "    <td id='cell2' style='border-width: 3px 15px'><div></div></td>"
-      "  </tr>"
-      "</table>");
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      table { border-collapse: collapse }
+      td { border: 0px solid blue; padding: 0 }
+      div { width: 100px; height: 100px }
+    </style>
+    <table>
+      <tr>
+        <td id='cell1' style='border-bottom-width: 10px;
+            outline: 3px solid blue'><div></div></td>
+        <td id='cell2' style='border-width: 3px 15px'><div></div></td>
+      </tr>
+    </table>
+  )HTML");
 
   auto* cell1 = GetCellByElementId("cell1");
   auto* cell2 = GetCellByElementId("cell2");

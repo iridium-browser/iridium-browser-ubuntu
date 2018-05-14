@@ -42,9 +42,22 @@ SourceFrame.ImageView = class extends UI.SimpleView {
     this._parsedURL = new Common.ParsedURL(this._url);
     this._mimeType = mimeType;
     this._contentProvider = contentProvider;
+    this._uiSourceCode = contentProvider instanceof Workspace.UISourceCode ?
+        /** @type {!Workspace.UISourceCode} */ (contentProvider) :
+        null;
+    if (this._uiSourceCode) {
+      this._uiSourceCode.addEventListener(
+          Workspace.UISourceCode.Events.WorkingCopyCommitted, this._workingCopyCommitted, this);
+      new UI.DropTarget(
+          this.element, [UI.DropTarget.Type.ImageFile, UI.DropTarget.Type.URI], Common.UIString('Drop image file here'),
+          this._handleDrop.bind(this));
+    }
     this._sizeLabel = new UI.ToolbarText();
     this._dimensionsLabel = new UI.ToolbarText();
     this._mimeTypeLabel = new UI.ToolbarText(mimeType);
+    this._container = this.element.createChild('div', 'image');
+    this._imagePreviewElement = this._container.createChild('img', 'resource-image-view');
+    this._imagePreviewElement.addEventListener('contextmenu', this._contextMenu.bind(this), true);
   }
 
   /**
@@ -61,33 +74,37 @@ SourceFrame.ImageView = class extends UI.SimpleView {
    * @override
    */
   wasShown() {
-    this._createContentIfNeeded();
+    this._updateContentIfNeeded();
   }
 
-  _createContentIfNeeded() {
-    if (this._container)
+  /**
+   * @override
+   */
+  disposeView() {
+    if (this._uiSourceCode) {
+      this._uiSourceCode.removeEventListener(
+          Workspace.UISourceCode.Events.WorkingCopyCommitted, this._workingCopyCommitted, this);
+    }
+  }
+
+  _workingCopyCommitted() {
+    this._updateContentIfNeeded();
+  }
+
+  async _updateContentIfNeeded() {
+    const content = await this._contentProvider.requestContent();
+    if (this._cachedContent === content)
       return;
 
-    this._container = this.element.createChild('div', 'image');
-    var imagePreviewElement = this._container.createChild('img', 'resource-image-view');
-    imagePreviewElement.addEventListener('contextmenu', this._contextMenu.bind(this), true);
-
-    this._contentProvider.requestContent().then(onContentAvailable.bind(this));
-
-    /**
-     * @param {?string} content
-     * @this {SourceFrame.ImageView}
-     */
-    function onContentAvailable(content) {
-      var imageSrc = Common.ContentProvider.contentAsDataURL(content, this._mimeType, true);
-      if (imageSrc === null)
-        imageSrc = this._url;
-      imagePreviewElement.src = imageSrc;
-      this._sizeLabel.setText(Number.bytesToString(this._base64ToSize(content)));
-      this._dimensionsLabel.setText(
-          Common.UIString('%d × %d', imagePreviewElement.naturalWidth, imagePreviewElement.naturalHeight));
-    }
-    this._imagePreviewElement = imagePreviewElement;
+    const contentEncoded = await this._contentProvider.contentEncoded();
+    this._cachedContent = content;
+    let imageSrc = 'data:' + this._mimeType + (contentEncoded ? ';base64,' : ',') + content;
+    if (imageSrc === null)
+      imageSrc = this._url;
+    this._imagePreviewElement.src = imageSrc;
+    this._sizeLabel.setText(Number.bytesToString(this._base64ToSize(content)));
+    this._dimensionsLabel.setText(
+        Common.UIString('%d × %d', this._imagePreviewElement.naturalWidth, this._imagePreviewElement.naturalHeight));
   }
 
   /**
@@ -97,7 +114,7 @@ SourceFrame.ImageView = class extends UI.SimpleView {
   _base64ToSize(content) {
     if (!content || !content.length)
       return 0;
-    var size = (content.length || 0) * 3 / 4;
+    let size = (content.length || 0) * 3 / 4;
     if (content.length > 0 && content[content.length - 1] === '=')
       size--;
     if (content.length > 1 && content[content.length - 2] === '=')
@@ -106,14 +123,16 @@ SourceFrame.ImageView = class extends UI.SimpleView {
   }
 
   _contextMenu(event) {
-    var contextMenu = new UI.ContextMenu(event);
+    const contextMenu = new UI.ContextMenu(event);
     if (!this._parsedURL.isDataURL())
-      contextMenu.appendItem(Common.UIString('Copy image URL'), this._copyImageURL.bind(this));
-    if (this._imagePreviewElement.src)
-      contextMenu.appendItem(Common.UIString('Copy image as data URI'), this._copyImageAsDataURL.bind(this));
+      contextMenu.clipboardSection().appendItem(Common.UIString('Copy image URL'), this._copyImageURL.bind(this));
+    if (this._imagePreviewElement.src) {
+      contextMenu.clipboardSection().appendItem(
+          Common.UIString('Copy image as data URI'), this._copyImageAsDataURL.bind(this));
+    }
 
-    contextMenu.appendItem(Common.UIString('Open image in new tab'), this._openInNewTab.bind(this));
-    contextMenu.appendItem(Common.UIString('Save\u2026'), this._saveImage.bind(this));
+    contextMenu.clipboardSection().appendItem(Common.UIString('Open image in new tab'), this._openInNewTab.bind(this));
+    contextMenu.clipboardSection().appendItem(Common.UIString('Save\u2026'), this._saveImage.bind(this));
     contextMenu.show();
   }
 
@@ -126,7 +145,7 @@ SourceFrame.ImageView = class extends UI.SimpleView {
   }
 
   _saveImage() {
-    var link = createElement('a');
+    const link = createElement('a');
     link.download = this._parsedURL.displayName;
     link.href = this._url;
     link.click();
@@ -134,5 +153,36 @@ SourceFrame.ImageView = class extends UI.SimpleView {
 
   _openInNewTab() {
     InspectorFrontendHost.openInNewTab(this._url);
+  }
+
+  /**
+   * @param {!DataTransfer} dataTransfer
+   */
+  async _handleDrop(dataTransfer) {
+    const items = dataTransfer.items;
+    if (!items.length || items[0].kind !== 'file')
+      return;
+
+    const entry = items[0].webkitGetAsEntry();
+    const encoded = !entry.name.endsWith('.svg');
+    entry.file(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        let result;
+        try {
+          result = /** @type {?string} */ (reader.result);
+        } catch (e) {
+          result = null;
+          console.error('Can\'t read file: ' + e);
+        }
+        if (typeof result !== 'string')
+          return;
+        this._uiSourceCode.setContent(encoded ? btoa(result) : result, encoded);
+      };
+      if (encoded)
+        reader.readAsBinaryString(file);
+      else
+        reader.readAsText(file);
+    });
   }
 };

@@ -10,8 +10,8 @@
 #include "core/frame/LocalFrame.h"
 #include "core/geometry/DOMRect.h"
 #include "core/html/HTMLImageElement.h"
-#include "core/html/HTMLVideoElement.h"
-#include "core/html/ImageData.h"
+#include "core/html/canvas/ImageData.h"
+#include "core/html/media/HTMLVideoElement.h"
 #include "core/imagebitmap/ImageBitmap.h"
 #include "core/loader/resource/ImageResourceContent.h"
 #include "platform/graphics/Image.h"
@@ -21,28 +21,6 @@
 
 namespace blink {
 
-namespace {
-
-skia::mojom::blink::BitmapPtr createBitmapFromData(int width,
-                                                   int height,
-                                                   Vector<uint8_t> bitmapData) {
-  skia::mojom::blink::BitmapPtr bitmap = skia::mojom::blink::Bitmap::New();
-
-  bitmap->color_type = (kN32_SkColorType == kRGBA_8888_SkColorType)
-                           ? skia::mojom::blink::ColorType::RGBA_8888
-                           : skia::mojom::blink::ColorType::BGRA_8888;
-  bitmap->alpha_type = skia::mojom::blink::AlphaType::ALPHA_TYPE_OPAQUE;
-  bitmap->profile_type = skia::mojom::blink::ColorProfileType::LINEAR;
-  bitmap->width = width;
-  bitmap->height = height;
-  bitmap->row_bytes = width * 4 /* bytes per pixel */;
-  bitmap->pixel_data = std::move(bitmapData);
-
-  return bitmap;
-}
-
-}  // anonymous namespace
-
 ScriptPromise ShapeDetector::detect(
     ScriptState* script_state,
     const ImageBitmapSourceUnion& image_source) {
@@ -50,20 +28,20 @@ ScriptPromise ShapeDetector::detect(
   ScriptPromise promise = resolver->Promise();
 
   // ImageDatas cannot be tainted by definition.
-  if (image_source.isImageData())
-    return DetectShapesOnImageData(resolver, image_source.getAsImageData());
+  if (image_source.IsImageData())
+    return DetectShapesOnImageData(resolver, image_source.GetAsImageData());
 
   CanvasImageSource* canvas_image_source;
-  if (image_source.isHTMLImageElement()) {
-    canvas_image_source = image_source.getAsHTMLImageElement();
-  } else if (image_source.isImageBitmap()) {
-    canvas_image_source = image_source.getAsImageBitmap();
-  } else if (image_source.isHTMLVideoElement()) {
-    canvas_image_source = image_source.getAsHTMLVideoElement();
-  } else if (image_source.isHTMLCanvasElement()) {
-    canvas_image_source = image_source.getAsHTMLCanvasElement();
-  } else if (image_source.isOffscreenCanvas()) {
-    canvas_image_source = image_source.getAsOffscreenCanvas();
+  if (image_source.IsHTMLImageElement()) {
+    canvas_image_source = image_source.GetAsHTMLImageElement();
+  } else if (image_source.IsImageBitmap()) {
+    canvas_image_source = image_source.GetAsImageBitmap();
+  } else if (image_source.IsHTMLVideoElement()) {
+    canvas_image_source = image_source.GetAsHTMLVideoElement();
+  } else if (image_source.IsHTMLCanvasElement()) {
+    canvas_image_source = image_source.GetAsHTMLCanvasElement();
+  } else if (image_source.IsOffscreenCanvas()) {
+    canvas_image_source = image_source.GetAsOffscreenCanvas();
   } else {
     NOTREACHED() << "Unsupported CanvasImageSource";
     resolver->Reject(
@@ -78,9 +56,9 @@ ScriptPromise ShapeDetector::detect(
     return promise;
   }
 
-  if (image_source.isHTMLImageElement()) {
+  if (image_source.IsHTMLImageElement()) {
     return DetectShapesOnImageElement(resolver,
-                                      image_source.getAsHTMLImageElement());
+                                      image_source.GetAsHTMLImageElement());
   }
 
   // TODO(mcasas): Check if |video| is actually playing a MediaStream by using
@@ -88,13 +66,11 @@ ScriptPromise ShapeDetector::detect(
   // there is a local WebCam associated, there might be sophisticated ways to
   // detect faces on it. Until then, treat as a normal <video> element.
 
-  const FloatSize size(canvas_image_source->SourceWidth(),
-                       canvas_image_source->SourceHeight());
+  const FloatSize size(canvas_image_source->ElementSize(FloatSize()));
 
   SourceImageStatus source_image_status = kInvalidSourceImageStatus;
-  RefPtr<Image> image = canvas_image_source->GetSourceImageForCanvas(
-      &source_image_status, kPreferNoAcceleration, kSnapshotReasonDrawImage,
-      size);
+  scoped_refptr<Image> image = canvas_image_source->GetSourceImageForCanvas(
+      &source_image_status, kPreferNoAcceleration, size);
   if (!image || source_image_status != kNormalSourceImageStatus) {
     resolver->Reject(
         DOMException::Create(kInvalidStateError, "Invalid element or state."));
@@ -105,19 +81,14 @@ ScriptPromise ShapeDetector::detect(
     return promise;
   }
 
-  SkPixmap pixmap;
-  RefPtr<Uint8Array> pixel_data;
-  uint8_t* pixel_data_ptr = nullptr;
-  WTF::CheckedNumeric<int> allocation_size = 0;
-
-  // makeNonTextureImage() will make a raster copy of ImageForCurrentFrame() if
-  // needed, otherwise returning the original SkImage.
+  // makeNonTextureImage() will make a raster copy of
+  // PaintImageForCurrentFrame() if needed, otherwise returning the original
+  // SkImage.
   const sk_sp<SkImage> sk_image =
-      image->ImageForCurrentFrame()->makeNonTextureImage();
-  if (sk_image && sk_image->peekPixels(&pixmap)) {
-    pixel_data_ptr = static_cast<uint8_t*>(pixmap.writable_addr());
-    allocation_size = pixmap.getSafeSize();
-  } else {
+      image->PaintImageForCurrentFrame().GetSkImage()->makeNonTextureImage();
+
+  SkBitmap sk_bitmap;
+  if (!sk_image->asLegacyBitmap(&sk_bitmap)) {
     // TODO(mcasas): retrieve the pixels from elsewhere.
     NOTREACHED();
     resolver->Reject(DOMException::Create(
@@ -125,13 +96,7 @@ ScriptPromise ShapeDetector::detect(
     return promise;
   }
 
-  WTF::Vector<uint8_t> bitmap_data;
-  bitmap_data.Append(pixel_data_ptr,
-                     static_cast<int>(allocation_size.ValueOrDefault(0)));
-
-  return DoDetect(resolver,
-                  createBitmapFromData(image->width(), image->height(),
-                                       std::move(bitmap_data)));
+  return DoDetect(resolver, std::move(sk_bitmap));
 }
 
 ScriptPromise ShapeDetector::DetectShapesOnImageData(
@@ -144,15 +109,23 @@ ScriptPromise ShapeDetector::DetectShapesOnImageData(
     return promise;
   }
 
-  uint8_t* const data = image_data->data()->Data();
+  SkBitmap sk_bitmap;
+  if (!sk_bitmap.tryAllocPixels(
+          SkImageInfo::Make(image_data->width(), image_data->height(),
+                            kN32_SkColorType, kOpaque_SkAlphaType),
+          image_data->width() * 4 /* bytes per pixel */)) {
+    resolver->Reject(DOMException::Create(
+        kInvalidStateError, "Failed to allocate pixels for current frame."));
+    return promise;
+  }
+
   WTF::CheckedNumeric<int> allocation_size = image_data->Size().Area() * 4;
+  CHECK_EQ(allocation_size.ValueOrDefault(0), sk_bitmap.computeByteSize());
 
-  WTF::Vector<uint8_t> bitmap_data;
-  bitmap_data.Append(data, static_cast<int>(allocation_size.ValueOrDefault(0)));
+  memcpy(sk_bitmap.getPixels(), image_data->data()->Data(),
+         sk_bitmap.computeByteSize());
 
-  return DoDetect(
-      resolver, createBitmapFromData(image_data->width(), image_data->height(),
-                                     std::move(bitmap_data)));
+  return DoDetect(resolver, std::move(sk_bitmap));
 }
 
 ScriptPromise ShapeDetector::DetectShapesOnImageElement(
@@ -179,33 +152,20 @@ ScriptPromise ShapeDetector::DetectShapesOnImageElement(
     return promise;
   }
 
-  const sk_sp<SkImage> image = blink_image->ImageForCurrentFrame();
-  DCHECK_EQ(img->naturalWidth(), static_cast<unsigned>(image->width()));
-  DCHECK_EQ(img->naturalHeight(), static_cast<unsigned>(image->height()));
+  const sk_sp<SkImage> sk_image =
+      blink_image->PaintImageForCurrentFrame().GetSkImage();
+  DCHECK_EQ(img->naturalWidth(), static_cast<unsigned>(sk_image->width()));
+  DCHECK_EQ(img->naturalHeight(), static_cast<unsigned>(sk_image->height()));
 
-  if (!image) {
+  SkBitmap sk_bitmap;
+
+  if (!sk_image || !sk_image->asLegacyBitmap(&sk_bitmap)) {
     resolver->Reject(DOMException::Create(
         kInvalidStateError, "Failed to get image from current frame."));
     return promise;
   }
 
-  const SkImageInfo skia_info =
-      SkImageInfo::MakeN32(image->width(), image->height(), image->alphaType());
-  size_t rowBytes = skia_info.minRowBytes();
-
-  Vector<uint8_t> bitmap_data(skia_info.getSafeSize(rowBytes));
-  const SkPixmap pixmap(skia_info, bitmap_data.data(), rowBytes);
-
-  if (!image->readPixels(pixmap, 0, 0)) {
-    resolver->Reject(DOMException::Create(
-        kInvalidStateError,
-        "Failed to read pixels: Unable to decompress or unsupported format."));
-    return promise;
-  }
-
-  return DoDetect(
-      resolver, createBitmapFromData(img->naturalWidth(), img->naturalHeight(),
-                                     std::move(bitmap_data)));
+  return DoDetect(resolver, std::move(sk_bitmap));
 }
 
 }  // namespace blink

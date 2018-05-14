@@ -4,6 +4,7 @@
 
 #include "android_webview/browser/test/rendering_test.h"
 
+#include <memory>
 #include <utility>
 
 #include "android_webview/browser/browser_view_renderer.h"
@@ -12,11 +13,10 @@
 #include "android_webview/common/aw_switches.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/compositor_frame.h"
-#include "cc/test/compositor_frame_helpers.h"
+#include "components/viz/common/quads/compositor_frame.h"
+#include "components/viz/test/compositor_frame_helpers.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/test/test_synchronous_compositor_android.h"
 
@@ -75,7 +75,7 @@ void RenderingTest::SetUpTestHarness() {
       new FakeWindow(browser_view_renderer_.get(), this, gfx::Rect(100, 100)));
   functor_.reset(new FakeFunctor);
   functor_->Init(window.get(),
-                 base::MakeUnique<RenderThreadManager>(
+                 std::make_unique<RenderThreadManager>(
                      functor_.get(), base::ThreadTaskRunnerHandle::Get()));
   browser_view_renderer_->SetCurrentCompositorFrameConsumer(
       functor_->GetCompositorFrameConsumer());
@@ -117,20 +117,16 @@ content::SynchronousCompositor* RenderingTest::ActiveCompositor() const {
   return browser_view_renderer_->GetActiveCompositorForTesting();
 }
 
-std::unique_ptr<cc::CompositorFrame> RenderingTest::ConstructEmptyFrame() {
-  auto compositor_frame = base::MakeUnique<cc::CompositorFrame>(
-      cc::test::MakeEmptyCompositorFrame());
-  std::unique_ptr<cc::RenderPass> root_pass(cc::RenderPass::Create());
+std::unique_ptr<viz::CompositorFrame> RenderingTest::ConstructEmptyFrame() {
   gfx::Rect viewport(browser_view_renderer_->size());
-  root_pass->SetNew(1, viewport, viewport, gfx::Transform());
-  compositor_frame->render_pass_list.push_back(std::move(root_pass));
-  return compositor_frame;
+  return std::make_unique<viz::CompositorFrame>(
+      viz::CompositorFrameBuilder().AddRenderPass(viewport, viewport).Build());
 }
 
-std::unique_ptr<cc::CompositorFrame> RenderingTest::ConstructFrame(
-    cc::ResourceId resource_id) {
-  std::unique_ptr<cc::CompositorFrame> compositor_frame(ConstructEmptyFrame());
-  cc::TransferableResource resource;
+std::unique_ptr<viz::CompositorFrame> RenderingTest::ConstructFrame(
+    viz::ResourceId resource_id) {
+  std::unique_ptr<viz::CompositorFrame> compositor_frame(ConstructEmptyFrame());
+  viz::TransferableResource resource;
   resource.id = resource_id;
   compositor_frame->resource_list.push_back(resource);
   return compositor_frame;

@@ -22,8 +22,12 @@
 @class RTCPeerConnectionFactory;
 @class RTCRtpReceiver;
 @class RTCRtpSender;
+@class RTCRtpTransceiver;
+@class RTCRtpTransceiverInit;
 @class RTCSessionDescription;
 @class RTCLegacyStatsReport;
+
+typedef NS_ENUM(NSInteger, RTCRtpMediaType);
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -79,7 +83,9 @@ RTC_EXPORT
 - (void)peerConnection:(RTCPeerConnection *)peerConnection
           didAddStream:(RTCMediaStream *)stream;
 
-/** Called when a remote peer closes a stream. */
+/** Called when a remote peer closes a stream.
+ *  This is not called when RTCSdpSemanticsUnifiedPlan is specified.
+ */
 - (void)peerConnection:(RTCPeerConnection *)peerConnection
        didRemoveStream:(RTCMediaStream *)stream;
 
@@ -106,6 +112,14 @@ RTC_EXPORT
 - (void)peerConnection:(RTCPeerConnection *)peerConnection
     didOpenDataChannel:(RTCDataChannel *)dataChannel;
 
+/** Called when signaling indicates a transceiver will be receiving media from
+ *  the remote endpoint.
+ *  This is only called with RTCSdpSemanticsUnifiedPlan specified.
+ */
+@optional
+- (void)peerConnection:(RTCPeerConnection *)peerConnection
+    didStartReceivingOnTransceiver:(RTCRtpTransceiver *)transceiver;
+
 @end
 
 RTC_EXPORT
@@ -115,6 +129,9 @@ RTC_EXPORT
  *  streams being added or removed.
  */
 @property(nonatomic, weak, nullable) id<RTCPeerConnectionDelegate> delegate;
+/** This property is not available with RTCSdpSemanticsUnifiedPlan. Please use
+ *  |senders| instead.
+ */
 @property(nonatomic, readonly) NSArray<RTCMediaStream *> *localStreams;
 @property(nonatomic, readonly, nullable)
     RTCSessionDescription *localDescription;
@@ -137,6 +154,14 @@ RTC_EXPORT
  */
 @property(nonatomic, readonly) NSArray<RTCRtpReceiver *> *receivers;
 
+/** Gets all RTCRtpTransceivers associated with this peer connection.
+ *  Note: reading this property returns different instances of
+ *  RTCRtpTransceiver. Use isEqual: instead of == to compare RTCRtpTransceiver
+ *  instances.
+ *  This is only available with RTCSdpSemanticsUnifiedPlan specified.
+ */
+@property(nonatomic, readonly) NSArray<RTCRtpTransceiver *> *transceivers;
+
 - (instancetype)init NS_UNAVAILABLE;
 
 /** Sets the PeerConnection's global configuration to |configuration|.
@@ -156,11 +181,69 @@ RTC_EXPORT
 /** Remove a group of remote candidates from the ICE Agent. */
 - (void)removeIceCandidates:(NSArray<RTCIceCandidate *> *)candidates;
 
-/** Add a new media stream to be sent on this peer connection. */
+/** Add a new media stream to be sent on this peer connection.
+ *  This method is not supported with RTCSdpSemanticsUnifiedPlan. Please use
+ *  addTrack instead.
+ */
 - (void)addStream:(RTCMediaStream *)stream;
 
-/** Remove the given media stream from this peer connection. */
+/** Remove the given media stream from this peer connection.
+ *  This method is not supported with RTCSdpSemanticsUnifiedPlan. Please use
+ *  removeTrack instead.
+ */
 - (void)removeStream:(RTCMediaStream *)stream;
+
+/** Add a new media stream track to be sent on this peer connection, and return
+ *  the newly created RTCRtpSender. The RTCRtpSender will be associated with
+ *  the streams specified in the |streamLabels| list.
+ *
+ *  Errors: If an error occurs, returns nil. An error can occur if:
+ *  - A sender already exists for the track.
+ *  - The peer connection is closed.
+ */
+- (RTCRtpSender *)addTrack:(RTCMediaStreamTrack *)track
+              streamLabels:(NSArray<NSString *> *)streamLabels;
+
+/** With PlanB semantics, removes an RTCRtpSender from this peer connection.
+ *
+ *  With UnifiedPlan semantics, sets sender's track to null and removes the
+ *  send component from the associated RTCRtpTransceiver's direction.
+ *
+ *  Returns YES on success.
+ */
+- (BOOL)removeTrack:(RTCRtpSender *)sender;
+
+/** addTransceiver creates a new RTCRtpTransceiver and adds it to the set of
+ *  transceivers. Adding a transceiver will cause future calls to CreateOffer
+ *  to add a media description for the corresponding transceiver.
+ *
+ *  The initial value of |mid| in the returned transceiver is nil. Setting a
+ *  new session description may change it to a non-nil value.
+ *
+ *  https://w3c.github.io/webrtc-pc/#dom-rtcpeerconnection-addtransceiver
+ *
+ *  Optionally, an RtpTransceiverInit structure can be specified to configure
+ *  the transceiver from construction. If not specified, the transceiver will
+ *  default to having a direction of kSendRecv and not be part of any streams.
+ *
+ *  These methods are only available when Unified Plan is enabled (see
+ *  RTCConfiguration).
+ */
+
+/** Adds a transceiver with a sender set to transmit the given track. The kind
+ *  of the transceiver (and sender/receiver) will be derived from the kind of
+ *  the track.
+ */
+- (RTCRtpTransceiver *)addTransceiverWithTrack:(RTCMediaStreamTrack *)track;
+- (RTCRtpTransceiver *)addTransceiverWithTrack:(RTCMediaStreamTrack *)track
+                                          init:(RTCRtpTransceiverInit *)init;
+
+/** Adds a transceiver with the given kind. Can either be RTCRtpMediaTypeAudio
+ *  or RTCRtpMediaTypeVideo.
+ */
+- (RTCRtpTransceiver *)addTransceiverOfType:(RTCRtpMediaType)mediaType;
+- (RTCRtpTransceiver *)addTransceiverOfType:(RTCRtpMediaType)mediaType
+                                       init:(RTCRtpTransceiverInit *)init;
 
 /** Generate an SDP offer. */
 - (void)offerForConstraints:(RTCMediaConstraints *)constraints
@@ -184,6 +267,15 @@ RTC_EXPORT
            completionHandler:
     (nullable void (^)(NSError * _Nullable error))completionHandler;
 
+/** Limits the bandwidth allocated for all RTP streams sent by this
+ *  PeerConnection. Nil parameters will be unchanged. Setting
+ * |currentBitrateBps| will force the available bitrate estimate to the given
+ *  value. Returns YES if the parameters were successfully updated.
+ */
+- (BOOL)setBweMinBitrateBps:(nullable NSNumber *)minBitrateBps
+          currentBitrateBps:(nullable NSNumber *)currentBitrateBps
+              maxBitrateBps:(nullable NSNumber *)maxBitrateBps;
+
 /** Start or stop recording an Rtc EventLog. */
 - (BOOL)startRtcEventLogWithFilePath:(NSString *)filePath
                       maxSizeInBytes:(int64_t)maxSizeInBytes;
@@ -193,9 +285,10 @@ RTC_EXPORT
 
 @interface RTCPeerConnection (Media)
 
-/**
- * Create an RTCRtpSender with the specified kind and media stream ID.
- * See RTCMediaStreamTrack.h for available kinds.
+/** Create an RTCRtpSender with the specified kind and media stream ID.
+ *  See RTCMediaStreamTrack.h for available kinds.
+ *  This method is not supported with RTCSdpSemanticsUnifiedPlan. Please use
+ *  addTransceiver instead.
  */
 - (RTCRtpSender *)senderWithKind:(NSString *)kind streamId:(NSString *)streamId;
 
@@ -204,8 +297,8 @@ RTC_EXPORT
 @interface RTCPeerConnection (DataChannel)
 
 /** Create a new data channel with the given label and configuration. */
-- (RTCDataChannel *)dataChannelForLabel:(NSString *)label
-    configuration:(RTCDataChannelConfiguration *)configuration;
+- (nullable RTCDataChannel *)dataChannelForLabel:(NSString *)label
+                                   configuration:(RTCDataChannelConfiguration *)configuration;
 
 @end
 

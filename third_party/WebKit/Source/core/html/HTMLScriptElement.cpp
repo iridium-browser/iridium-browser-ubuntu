@@ -24,39 +24,32 @@
 #include "core/html/HTMLScriptElement.h"
 
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/HTMLScriptElementOrSVGScriptElement.h"
 #include "bindings/core/v8/ScriptEventListener.h"
-#include "core/HTMLNames.h"
+#include "bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/Document.h"
-#include "core/dom/ScriptLoader.h"
-#include "core/dom/ScriptRunner.h"
 #include "core/dom/Text.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/html_names.h"
+#include "core/script/ScriptLoader.h"
+#include "core/script/ScriptRunner.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
 inline HTMLScriptElement::HTMLScriptElement(Document& document,
-                                            bool was_inserted_by_parser,
-                                            bool already_started,
-                                            bool created_during_document_write)
+                                            const CreateElementFlags flags)
     : HTMLElement(scriptTag, document),
-      loader_(this,
-              InitializeScriptLoader(was_inserted_by_parser,
-                                     already_started,
-                                     created_during_document_write)) {}
+      loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
+                                     flags.WasAlreadyStarted(),
+                                     flags.IsCreatedDuringDocumentWrite())) {}
 
-HTMLScriptElement* HTMLScriptElement::Create(
-    Document& document,
-    bool was_inserted_by_parser,
-    bool already_started,
-    bool created_during_document_write) {
-  return new HTMLScriptElement(document, was_inserted_by_parser,
-                               already_started, created_during_document_write);
+HTMLScriptElement* HTMLScriptElement::Create(Document& document,
+                                             const CreateElementFlags flags) {
+  return new HTMLScriptElement(document, flags);
 }
 
 bool HTMLScriptElement::IsURLAttribute(const Attribute& attribute) const {
@@ -206,10 +199,6 @@ bool HTMLScriptElement::AllowInlineScriptForCSP(
       inline_type);
 }
 
-AtomicString HTMLScriptElement::InitiatorName() const {
-  return Element::localName();
-}
-
 Document& HTMLScriptElement::GetDocument() const {
   return Node::GetDocument();
 }
@@ -226,21 +215,25 @@ void HTMLScriptElement::DispatchErrorEvent() {
 void HTMLScriptElement::SetScriptElementForBinding(
     HTMLScriptElementOrSVGScriptElement& element) {
   if (!IsInV1ShadowTree())
-    element.setHTMLScriptElement(this);
+    element.SetHTMLScriptElement(this);
 }
 
-Element* HTMLScriptElement::CloneElementWithoutAttributesAndChildren() {
-  return new HTMLScriptElement(GetDocument(), false, loader_->AlreadyStarted(),
-                               false);
+Element* HTMLScriptElement::CloneWithoutAttributesAndChildren(
+    Document& factory) const {
+  CreateElementFlags flags =
+      CreateElementFlags::ByCloneNode().SetAlreadyStarted(
+          loader_->AlreadyStarted());
+  return factory.CreateElement(TagQName(), flags, IsValue());
 }
 
-DEFINE_TRACE(HTMLScriptElement) {
+void HTMLScriptElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);
   HTMLElement::Trace(visitor);
   ScriptElementBase::Trace(visitor);
 }
 
-DEFINE_TRACE_WRAPPERS(HTMLScriptElement) {
+void HTMLScriptElement::TraceWrappers(
+    const ScriptWrappableVisitor* visitor) const {
   visitor->TraceWrappers(loader_);
   HTMLElement::TraceWrappers(visitor);
 }

@@ -9,13 +9,14 @@
 #include "base/metrics/user_metrics_action.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/toolbar/toolbar_model.h"
-#import "ios/chrome/browser/ui/commands/UIKit+ChromeExecuteCommand.h"
-#import "ios/chrome/browser/ui/commands/generic_chrome_command.h"
-#include "ios/chrome/browser/ui/commands/ios_command_ids.h"
-#import "ios/chrome/browser/ui/ntp/google_landing_data_source.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
+#import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/rtl_geometry.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller+protected.h"
+#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller_constants.h"
+#import "ios/chrome/browser/ui/toolbar/public/fakebox_focuser.h"
+#import "ios/chrome/browser/ui/toolbar/public/omnibox_focuser.h"
 #include "ios/chrome/browser/ui/toolbar/toolbar_resource_macros.h"
-#import "ios/chrome/browser/ui/toolbar/web_toolbar_controller.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -65,8 +66,9 @@ enum {
 - (instancetype)initWithDispatcher:(id<ApplicationCommands,
                                        BrowserCommands,
                                        OmniboxFocuser,
-                                       UrlLoader,
-                                       WebToolbarDelegate>)dispatcher {
+                                       FakeboxFocuser,
+                                       ToolbarCommands,
+                                       UrlLoader>)dispatcher {
   self = [super initWithStyle:ToolbarControllerStyleLightMode
                    dispatcher:dispatcher];
   if (self) {
@@ -95,14 +97,14 @@ enum {
 
     _omniboxFocuser.translatesAutoresizingMaskIntoConstraints = NO;
 
-    [self.view addSubview:_backButton];
-    [self.view addSubview:_forwardButton];
-    [self.view addSubview:_omniboxFocuser];
+    [self.contentView addSubview:_backButton];
+    [self.contentView addSubview:_forwardButton];
+    [self.contentView addSubview:_omniboxFocuser];
     [NSLayoutConstraint activateConstraints:@[
       [_omniboxFocuser.leadingAnchor
           constraintEqualToAnchor:_forwardButton.trailingAnchor],
       [_omniboxFocuser.trailingAnchor
-          constraintEqualToAnchor:self.view.trailingAnchor
+          constraintEqualToAnchor:self.contentView.trailingAnchor
                          constant:-kOmniboxFocuserTrailing],
       [_omniboxFocuser.topAnchor
           constraintEqualToAnchor:_forwardButton.topAnchor],
@@ -150,13 +152,15 @@ enum {
     SetA11yLabelAndUiAutomationName(_backButton, IDS_ACCNAME_BACK, @"Back");
     SetA11yLabelAndUiAutomationName(_forwardButton, IDS_ACCNAME_FORWARD,
                                     @"Forward");
+
+    [[self stackButton] addTarget:dispatcher
+                           action:@selector(displayTabSwitcher)
+                 forControlEvents:UIControlEventTouchUpInside];
   }
   return self;
 }
 
-- (CGFloat)statusBarOffset {
-  return 0;
-}
+#pragma mark - Overridden superclass public methods.
 
 - (BOOL)imageShouldFlipForRightToLeftLayoutDirection:(int)imageEnum {
   DCHECK(imageEnum < NumberOfNTPToolbarButtonNames);
@@ -167,6 +171,21 @@ enum {
     return YES;
   }
   return NO;
+}
+
+- (void)hideViewsForNewTabPage:(BOOL)hide {
+  [super hideViewsForNewTabPage:hide];
+  // Show the back/forward buttons if there is forward history.
+  BOOL forwardEnabled = self.canGoForward;
+  [_backButton setHidden:!forwardEnabled && hide];
+  [_backButton setEnabled:self.canGoBack];
+  [_forwardButton setHidden:!forwardEnabled && hide];
+}
+
+#pragma mark - Overridden superclass protected methods.
+
+- (CGFloat)statusBarOffset {
+  return 0;
 }
 
 - (int)imageEnumForButton:(UIButton*)button {
@@ -210,36 +229,21 @@ enum {
   }
 }
 
+#pragma mark - Private methods.
+
 - (void)handleLongPress:(UILongPressGestureRecognizer*)gesture {
   if (gesture.state != UIGestureRecognizerStateBegan)
     return;
 
   if (gesture.view == _backButton) {
-    GenericChromeCommand* command =
-        [[GenericChromeCommand alloc] initWithTag:IDC_SHOW_BACK_HISTORY];
-    [_backButton chromeExecuteCommand:command];
+    [self.dispatcher showTabHistoryPopupForBackwardHistory];
   } else if (gesture.view == _forwardButton) {
-    GenericChromeCommand* command =
-        [[GenericChromeCommand alloc] initWithTag:IDC_SHOW_FORWARD_HISTORY];
-    [_forwardButton chromeExecuteCommand:command];
+    [self.dispatcher showTabHistoryPopupForForwardHistory];
   }
-}
-
-- (void)hideViewsForNewTabPage:(BOOL)hide {
-  [super hideViewsForNewTabPage:hide];
-  // Show the back/forward buttons if there is forward history.
-  BOOL forwardEnabled = self.canGoForward;
-  [_backButton setHidden:!forwardEnabled && hide];
-  [_backButton setEnabled:self.canGoBack];
-  [_forwardButton setHidden:!forwardEnabled && hide];
 }
 
 - (void)focusOmnibox:(id)sender {
   [self.dispatcher focusFakebox];
-}
-
-- (IBAction)stackButtonTouchDown:(id)sender {
-  [self.dispatcher prepareToEnterTabSwitcher:self];
 }
 
 @end

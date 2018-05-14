@@ -38,7 +38,6 @@
 #include "modules/websockets/DocumentWebSocketChannel.h"
 #include "modules/websockets/WebPepperSocketChannelClientProxy.h"
 #include "modules/websockets/WebSocketChannel.h"
-#include "platform/wtf/PtrUtil.h"
 #include "platform/wtf/text/CString.h"
 #include "platform/wtf/text/WTFString.h"
 #include "public/platform/WebURL.h"
@@ -52,7 +51,7 @@ std::unique_ptr<WebPepperSocket> WebPepperSocket::Create(
     WebPepperSocketClient* client) {
   DCHECK(client);
 
-  return WTF::MakeUnique<WebPepperSocketImpl>(document, client);
+  return std::make_unique<WebPepperSocketImpl>(document, client);
 }
 
 WebPepperSocketImpl::WebPepperSocketImpl(const WebDocument& document,

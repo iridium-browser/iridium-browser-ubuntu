@@ -29,6 +29,7 @@
 #include "platform/mediastream/MediaStreamSource.h"
 #include "platform/wtf/PtrUtil.h"
 #include "public/platform/WebAudioSourceProvider.h"
+#include "public/platform/WebMediaConstraints.h"
 #include "public/platform/WebMediaStream.h"
 #include "public/platform/WebMediaStreamSource.h"
 #include "public/platform/WebString.h"
@@ -96,9 +97,25 @@ WebMediaStreamTrack::ContentHintType WebMediaStreamTrack::ContentHint() const {
   return private_->ContentHint();
 }
 
+WebMediaConstraints WebMediaStreamTrack::Constraints() const {
+  DCHECK(!private_.IsNull());
+  return private_->Constraints();
+}
+
+void WebMediaStreamTrack::SetConstraints(
+    const WebMediaConstraints& constraints) {
+  DCHECK(!private_.IsNull());
+  return private_->SetConstraints(constraints);
+}
+
 WebString WebMediaStreamTrack::Id() const {
   DCHECK(!private_.IsNull());
   return private_->Id();
+}
+
+int WebMediaStreamTrack::UniqueId() const {
+  DCHECK(!private_.IsNull());
+  return private_->UniqueId();
 }
 
 WebMediaStreamSource WebMediaStreamTrack::Source() const {
@@ -109,7 +126,7 @@ WebMediaStreamSource WebMediaStreamTrack::Source() const {
 WebMediaStreamTrack::TrackData* WebMediaStreamTrack::GetTrackData() const {
   MediaStreamComponent::TrackData* data = private_->GetTrackData();
   if (!data)
-    return 0;
+    return nullptr;
   return static_cast<TrackDataContainer*>(data)->GetTrackData();
 }
 

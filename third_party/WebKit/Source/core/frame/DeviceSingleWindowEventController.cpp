@@ -5,27 +5,28 @@
 #include "core/frame/DeviceSingleWindowEventController.h"
 
 #include "core/dom/Document.h"
-#include "core/events/Event.h"
+#include "core/dom/events/Event.h"
 #include "core/page/Page.h"
 
 namespace blink {
 
 DeviceSingleWindowEventController::DeviceSingleWindowEventController(
     Document& document)
-    : PlatformEventController(document.GetFrame()),
+    : PlatformEventController(&document),
       needs_checking_null_events_(true),
       document_(document) {
   document.domWindow()->RegisterEventListenerObserver(this);
 }
 
-DeviceSingleWindowEventController::~DeviceSingleWindowEventController() {}
+DeviceSingleWindowEventController::~DeviceSingleWindowEventController() =
+    default;
 
 void DeviceSingleWindowEventController::DidUpdateData() {
   DispatchDeviceEvent(LastEvent());
 }
 
 void DeviceSingleWindowEventController::DispatchDeviceEvent(Event* event) {
-  if (!GetDocument().domWindow() || GetDocument().IsContextSuspended() ||
+  if (!GetDocument().domWindow() || GetDocument().IsContextPaused() ||
       GetDocument().IsContextDestroyed())
     return;
 
@@ -76,11 +77,11 @@ bool DeviceSingleWindowEventController::IsSameSecurityOriginAsMainFrame()
   if (GetDocument().GetFrame()->IsMainFrame())
     return true;
 
-  SecurityOrigin* main_security_origin = GetDocument()
-                                             .GetPage()
-                                             ->MainFrame()
-                                             ->GetSecurityContext()
-                                             ->GetSecurityOrigin();
+  const SecurityOrigin* main_security_origin = GetDocument()
+                                                   .GetPage()
+                                                   ->MainFrame()
+                                                   ->GetSecurityContext()
+                                                   ->GetSecurityOrigin();
 
   if (main_security_origin &&
       GetDocument().GetSecurityOrigin()->CanAccess(main_security_origin))
@@ -89,7 +90,18 @@ bool DeviceSingleWindowEventController::IsSameSecurityOriginAsMainFrame()
   return false;
 }
 
-DEFINE_TRACE(DeviceSingleWindowEventController) {
+bool DeviceSingleWindowEventController::CheckPolicyFeatures(
+    const Vector<mojom::FeaturePolicyFeature>& features) const {
+  LocalFrame* frame = GetDocument().GetFrame();
+  if (!frame)
+    return false;
+  return std::all_of(features.begin(), features.end(),
+                     [frame](mojom::FeaturePolicyFeature feature) {
+                       return frame->IsFeatureEnabled(feature);
+                     });
+}
+
+void DeviceSingleWindowEventController::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   PlatformEventController::Trace(visitor);
 }

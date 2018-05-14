@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,6 +13,7 @@ import optparse  # pylint: disable=deprecated-module
 import os
 
 from chromite.cbuildbot import cbuildbot_run
+from chromite.lib import cgroups
 from chromite.cbuildbot import commands
 from chromite.lib import config_lib_unittest
 from chromite.lib import constants
@@ -91,7 +93,7 @@ class RunBuildStagesTest(cros_build_lib_unittest.RunCommandTempDirTestCase,
     self.parser = cbuildbot._CreateParser()
 
     argv = ['-r', self.buildroot, '--buildbot', '--debug', self.bot_id]
-    self.options, _ = cbuildbot.ParseCommandLine(self.parser, argv)
+    self.options = cbuildbot.ParseCommandLine(self.parser, argv)
     self.options.bootstrap = False
     self.options.clean = False
     self.options.resume = False
@@ -185,7 +187,7 @@ class LogTest(cros_test_lib.TempDirTestCase):
 class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
   """Test the command line interface."""
 
-  _X86_PREFLIGHT = 'x86-generic-paladin'
+  _GENERIC_PREFLIGHT = 'amd64-generic-paladin'
   _BUILD_ROOT = '/b/test_build1'
 
   def setUp(self):
@@ -213,64 +215,44 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
     cros_build_lib.RunCommand(
         [path, '--help'], cwd=constants.SOURCE_ROOT, capture_output=True)
 
-  def testDebugBuildBotSetByDefault(self):
-    """Test that debug and buildbot flags are set by default."""
-    args = ['--local', '-r', self._BUILD_ROOT, self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
-    self.assertTrue(options.debug)
-    self.assertFalse(options.buildbot)
-
   def testBuildBotOption(self):
     """Test that --buildbot option unsets debug flag."""
-    args = ['-r', self._BUILD_ROOT, '--buildbot', self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+    args = ['-r', self._BUILD_ROOT, '--buildbot', self._GENERIC_PREFLIGHT]
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertFalse(options.debug)
     self.assertTrue(options.buildbot)
 
   def testBuildBotWithDebugOption(self):
     """Test that --debug option overrides --buildbot option."""
     args = ['-r', self._BUILD_ROOT, '--buildbot', '--debug',
-            self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+            self._GENERIC_PREFLIGHT]
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertTrue(options.debug)
     self.assertTrue(options.buildbot)
-
-  def testLocalTrybotWithSpacesInPatches(self):
-    """Test that we handle spaces in patch arguments."""
-    args = ['-r', self._BUILD_ROOT, '--remote', '--local-patches',
-            ' proj:br \t  proj2:b2 ',
-            self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
-    self.assertEquals(options.local_patches, ['proj:br', 'proj2:b2'])
 
   def testBuildBotWithRemotePatches(self):
     """Test that --buildbot errors out with patches."""
     args = ['-r', self._BUILD_ROOT, '--buildbot', '-g', '1234',
-            self._X86_PREFLIGHT]
-    self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
-
-  def testRemoteBuildBotWithRemotePatches(self):
-    """Test that --buildbot and --remote errors out with patches."""
-    args = ['-r', self._BUILD_ROOT, '--buildbot', '--remote', '-g', '1234',
-            self._X86_PREFLIGHT]
+            self._GENERIC_PREFLIGHT]
     self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
 
   def testBuildbotDebugWithPatches(self):
     """Test we can test patches with --buildbot --debug."""
-    args = ['--remote', '-g', '1234', '--debug', '--buildbot',
-            self._X86_PREFLIGHT]
+    args = ['-r', self._BUILD_ROOT, '--buildbot', '--debug', '-g', '1234',
+            self._GENERIC_PREFLIGHT]
     cbuildbot.ParseCommandLine(self.parser, args)
 
   def testBuildBotWithoutProfileOption(self):
     """Test that no --profile option gets defaulted."""
-    args = ['--buildbot', self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+    args = ['-r', self._BUILD_ROOT, '--buildbot', self._GENERIC_PREFLIGHT]
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertEquals(options.profile, None)
 
   def testBuildBotWithProfileOption(self):
     """Test that --profile option gets parsed."""
-    args = ['--buildbot', '--profile', 'carp', self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+    args = ['-r', self._BUILD_ROOT, '--buildbot',
+            '--profile', 'carp', self._GENERIC_PREFLIGHT]
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertEquals(options.profile, 'carp')
 
   def testValidateClobberUserDeclines_1(self):
@@ -303,47 +285,47 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
         '--buildroot=/tmp',
         '--chrome_root=.',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
-        self._X86_PREFLIGHT,
+        self._GENERIC_PREFLIGHT,
     ]
     self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
 
   def testBuildBotWithBadChromeRootOption(self):
     """chrome_root can't get passed after non-local chrome_rev."""
     args = [
-        '--local',
+        '--buildbot',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
         '--chrome_root=.',
-        self._X86_PREFLIGHT,
+        self._GENERIC_PREFLIGHT,
     ]
     self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
 
   def testBuildBotWithBadChromeRevOptionLocal(self):
     """chrome_rev can't be local without chrome_root."""
     args = [
-        '--local',
+        '--buildbot',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_LOCAL,
-        self._X86_PREFLIGHT,
+        self._GENERIC_PREFLIGHT,
     ]
     self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
 
   def testBuildBotWithGoodChromeRootOption(self):
     """chrome_root can be set without chrome_rev."""
     args = [
-        '--local',
+        '--buildbot',
         '--buildroot=/tmp',
         '--chrome_root=.',
-        self._X86_PREFLIGHT,
+        self._GENERIC_PREFLIGHT,
     ]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertEquals(options.chrome_rev, constants.CHROME_REV_LOCAL)
     self.assertNotEquals(options.chrome_root, None)
 
   def testBuildBotWithGoodChromeRevAndRootOption(self):
     """chrome_rev can get reset around chrome_root."""
     args = [
-        '--local',
+        '--buildbot',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_LATEST,
         '--chrome_rev=%s' % constants.CHROME_REV_STICKY,
@@ -355,40 +337,29 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
         '--chrome_root=.',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
         '--chrome_rev=%s' % constants.CHROME_REV_LOCAL,
-        self._X86_PREFLIGHT,
+        self._GENERIC_PREFLIGHT,
     ]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
+    options = cbuildbot.ParseCommandLine(self.parser, args)
     self.assertEquals(options.chrome_rev, constants.CHROME_REV_LOCAL)
     self.assertNotEquals(options.chrome_root, None)
 
-  def testPassThroughOptions(self):
-    """Test we are building up pass-through list properly."""
-    args = ['--remote', '-g', '1234', self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
-
-    self.assertEquals(options.pass_through_args, ['-g', '1234'])
-
-  def testDebugPassThrough(self):
-    """Test we are passing --debug through."""
-    args = ['--remote', '--debug', '--buildbot', self._X86_PREFLIGHT]
-    options, args = cbuildbot.ParseCommandLine(self.parser, args)
-    self.assertEquals(options.pass_through_args, ['--debug', '--buildbot'])
-
   def testCreateBranch(self):
     """Test a normal create branch run."""
-    args = ['--branch-name', 'refs/heads/test', constants.BRANCH_UTIL_CONFIG]
+    args = ['-r', self._BUILD_ROOT,
+            '--branch-name', 'refs/heads/test', constants.BRANCH_UTIL_CONFIG]
     self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
 
   def testCreateBranchNoVersion(self):
     """Test we require --version with branch-util."""
     with cros_test_lib.LoggingCapturer() as logger:
-      args = [constants.BRANCH_UTIL_CONFIG]
+      args = ['-r', self._BUILD_ROOT, constants.BRANCH_UTIL_CONFIG]
       self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
       self.AssertLogsContain(logger, '--branch-name')
 
   def testCreateBranchDelete(self):
     """Test we don't require --version with --delete."""
-    args = ['--delete-branch', '--branch-name', 'refs/heads/test',
+    args = ['-r', self._BUILD_ROOT,
+            '--delete-branch', '--branch-name', 'refs/heads/test',
             constants.BRANCH_UTIL_CONFIG]
     cbuildbot.ParseCommandLine(self.parser, args)
 
@@ -398,7 +369,7 @@ class InterfaceTest(cros_test_lib.MockTestCase, cros_test_lib.LoggingTestCase):
                        ['--branch-name', 'refs/heads/test'],
                        ['--rename-to', 'abc']]:
       with cros_test_lib.LoggingCapturer() as logger:
-        args = [self._X86_PREFLIGHT] + extra_args
+        args = ['-r', self._BUILD_ROOT, self._GENERIC_PREFLIGHT] + extra_args
         self.assertDieSysExit(cbuildbot.ParseCommandLine, self.parser, args)
         self.AssertLogsContain(logger, 'Cannot specify')
 
@@ -438,66 +409,36 @@ class FullInterfaceTest(cros_test_lib.MockTempDirTestCase):
     self.input_mock = self.PatchObject(cros_build_lib, 'GetInput',
                                        side_effect=Exception())
     self.PatchObject(cbuildbot, '_RunBuildStagesWrapper', return_value=True)
+    # Suppress cgroups code.  For cbuildbot invocation, it doesn't hugely
+    # care about cgroups- that's a blackbox to it.  As such these unittests
+    # should not be sensitive to it.
+    self.PatchObject(cgroups.Cgroup, 'IsSupported',
+                     return_value=True)
+    self.PatchObject(cgroups, 'SimpleContainChildren')
 
   def assertMain(self, args, common_options=True):
     if common_options:
-      # Suppress cgroups code.  For cbuildbot invocation, it doesn't hugely
-      # care about cgroups- that's a blackbox to it.  As such these unittests
-      # should not be sensitive to it.
-      args.extend(['--sourceroot', self.sourceroot, '--nocgroups',
-                   '--notee'])
+      args.extend(['--sourceroot', self.sourceroot, '--notee'])
     return cbuildbot.main(args)
 
   def testNullArgsStripped(self):
     """Test that null args are stripped out and don't cause error."""
-    self.assertMain(['--local', '-r', self.buildroot, '', '',
-                     'x86-generic-paladin'])
+    self.assertMain(['-r', self.buildroot, '', '',
+                     'amd64-generic-pre-cq'])
 
   def testMultipleConfigsError(self):
-    """Test that multiple configs cause error if --remote is not used."""
-    self.assertRaises(cros_build_lib.DieSystemExit, self.assertMain,
-                      ['--local',
-                       '-r', self.buildroot,
-                       'arm-generic-paladin',
-                       'x86-generic-paladin'])
-
-  def testDontInferBuildrootForBuildBotRuns(self):
-    """Test that we don't infer buildroot if run with --buildbot option."""
-    self.assertRaises(TestArgsparseError, self.assertMain,
-                      ['--buildbot', '--debug', 'x86-generic-paladin'])
-
-  def testInferExternalBuildRoot(self):
-    """Test that we default to correct buildroot for external config."""
-    self.PatchObject(cbuildbot, '_ConfirmBuildRoot',
-                     side_effect=TestHaltedException())
-    self.assertRaises(TestHaltedException, self.assertMain,
-                      ['--local', 'x86-generic-paladin'])
-
-  def testInferInternalBuildRoot(self):
-    """Test that we default to correct buildroot for internal config."""
-    self.PatchObject(cbuildbot, '_ConfirmBuildRoot',
-                     side_effect=TestHaltedException())
-    self.assertRaises(TestHaltedException, self.assertMain,
-                      ['--local', 'x86-mario-paladin'])
-
-  def testInferBuildRootPromptNo(self):
-    """Test that a 'no' answer on the prompt halts execution."""
-    self.input_mock.side_effect = None
-    self.input_mock.return_value = 'no'
-    self.assertRaises(SystemExit, self.assertMain,
-                      ['--local', 'x86-generic-paladin'])
-
-  def testInferBuildRootExists(self):
-    """Test that we don't prompt the user if buildroot already exists."""
-    osutils.Touch(self.external_marker)
-    os.utime(self.external_marker, None)
-    self.assertMain(['--local', 'x86-generic-paladin'])
+    """Test that multiple configs cause error."""
+    with self.assertRaises(cros_build_lib.DieSystemExit):
+      self.assertMain(['-r', self.buildroot,
+                       'arm-generic-pre-cq',
+                       'amd64-generic-pre-cq'])
 
   def testBuildbotDiesInChroot(self):
     """Buildbot should quit if run inside a chroot."""
     self.inchroot_mock.return_value = True
-    self.assertRaises(cros_build_lib.DieSystemExit, self.assertMain,
-                      ['--local', '-r', self.buildroot, 'x86-generic-paladin'])
+    with self.assertRaises(cros_build_lib.DieSystemExit):
+      self.assertMain(['--debug', '-r', self.buildroot,
+                       'amd64-generic-pre-cq'])
 
   def testBuildBotOnNonCIBuilder(self):
     """Test BuildBot On Non-CIBuilder
@@ -506,5 +447,5 @@ class FullInterfaceTest(cros_test_lib.MockTempDirTestCase):
     both debug and remote.
     """
     if not cros_build_lib.HostIsCIBuilder():
-      self.assertRaises(cros_build_lib.DieSystemExit, self.assertMain,
-                        ['--buildbot', 'x86-generic-paladin'])
+      with self.assertRaises(cros_build_lib.DieSystemExit):
+        self.assertMain(['--buildbot', 'amd64-generic-pre-cq'])

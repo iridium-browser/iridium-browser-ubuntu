@@ -31,8 +31,6 @@ ChildProcessLauncher::ChildProcessLauncher(
       termination_status_(base::TERMINATION_STATUS_NORMAL_TERMINATION),
       exit_code_(RESULT_CODE_NORMAL_EXIT),
       starting_(true),
-      broker_client_invitation_(std::move(broker_client_invitation)),
-      process_error_callback_(process_error_callback),
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) ||  \
     defined(MEMORY_SANITIZER) || defined(THREAD_SANITIZER) || \
     defined(UNDEFINED_SANITIZER)
@@ -45,9 +43,9 @@ ChildProcessLauncher::ChildProcessLauncher(
   CHECK(BrowserThread::GetCurrentThreadIdentifier(&client_thread_id_));
 
   helper_ = new ChildProcessLauncherHelper(
-                child_process_id, client_thread_id_,
-              std::move(command_line), std::move(delegate),
-                       weak_factory_.GetWeakPtr(), terminate_on_shutdown);
+      child_process_id, client_thread_id_, std::move(command_line),
+      std::move(delegate), weak_factory_.GetWeakPtr(), terminate_on_shutdown,
+      std::move(broker_client_invitation), process_error_callback);
   helper_->StartLaunchOnClientThread();
 }
 
@@ -60,38 +58,25 @@ ChildProcessLauncher::~ChildProcessLauncher() {
   }
 }
 
-void ChildProcessLauncher::SetProcessPriority(bool background,
-                                              bool boost_for_pending_views) {
+void ChildProcessLauncher::SetProcessPriority(
+    const ChildProcessLauncherPriority& priority) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::Process to_pass = process_.process.Duplicate();
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      base::Bind(
+      base::BindOnce(
           &ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread,
-          helper_, base::Passed(&to_pass), background,
-          boost_for_pending_views));
+          helper_, std::move(to_pass), priority));
 }
 
 void ChildProcessLauncher::Notify(
     ChildProcessLauncherHelper::Process process,
-    mojo::edk::ScopedPlatformHandle server_handle,
     int error_code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   starting_ = false;
   process_ = std::move(process);
 
-  // Take ownership of the broker client invitation here so it's destroyed when
-  // we go out of scope regardless of the outcome below.
-  std::unique_ptr<mojo::edk::OutgoingBrokerClientInvitation> invitation =
-      std::move(broker_client_invitation_);
   if (process_.process.IsValid()) {
-    // Set up Mojo IPC to the new process.
-    DCHECK(invitation);
-    invitation->Send(
-        process_.process.Handle(),
-        mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
-                                    std::move(server_handle)),
-        process_error_callback_);
     client_->OnProcessLaunched();
   } else {
     termination_status_ = base::TERMINATION_STATUS_LAUNCH_FAILED;
@@ -135,8 +120,10 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
   // However, if GetTerminationStatus didn't reap the child (because it was
   // still running), we'll need to Terminate via ProcessWatcher. So we can't
   // close the handle here.
-  if (termination_status_ != base::TERMINATION_STATUS_STILL_RUNNING)
+  if (termination_status_ != base::TERMINATION_STATUS_STILL_RUNNING) {
+    process_.process.Exited(exit_code_);
     process_.process.Close();
+  }
 
   return termination_status_;
 }
@@ -179,6 +166,16 @@ ChildProcessLauncher::Client* ChildProcessLauncher::ReplaceClientForTest(
   Client* ret = client_;
   client_ = client;
   return ret;
+}
+
+bool ChildProcessLauncherPriority::operator==(
+    const ChildProcessLauncherPriority& other) const {
+  return background == other.background &&
+         boost_for_pending_views == other.boost_for_pending_views
+#if defined(OS_ANDROID)
+         && importance == other.importance
+#endif
+      ;
 }
 
 }  // namespace content

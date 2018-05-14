@@ -14,7 +14,6 @@
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/time_formatting.h"
 #include "base/lazy_instance.h"
-#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
@@ -216,8 +215,7 @@ bool BookmarksFunction::CanBeModified(const BookmarkNode* node) {
     return false;
   }
   ManagedBookmarkService* managed = GetManagedBookmarkService();
-  if (::bookmarks::IsDescendantOf(node, managed->managed_node()) ||
-      ::bookmarks::IsDescendantOf(node, managed->supervised_node())) {
+  if (::bookmarks::IsDescendantOf(node, managed->managed_node())) {
     error_ = keys::kModifyManagedError;
     return false;
   }
@@ -264,7 +262,7 @@ void BookmarkEventRouter::DispatchEvent(
     std::unique_ptr<base::ListValue> event_args) {
   EventRouter* event_router = EventRouter::Get(browser_context_);
   if (event_router) {
-    event_router->BroadcastEvent(base::MakeUnique<extensions::Event>(
+    event_router->BroadcastEvent(std::make_unique<extensions::Event>(
         histogram_value, event_name, std::move(event_args)));
   }
 }
@@ -404,14 +402,13 @@ void BookmarksAPI::Shutdown() {
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
-static base::LazyInstance<
-    BrowserContextKeyedAPIFactory<BookmarksAPI>>::DestructorAtExit g_factory =
-    LAZY_INSTANCE_INITIALIZER;
+static base::LazyInstance<BrowserContextKeyedAPIFactory<BookmarksAPI>>::
+    DestructorAtExit g_bookmarks_api_factory = LAZY_INSTANCE_INITIALIZER;
 
 // static
 BrowserContextKeyedAPIFactory<BookmarksAPI>*
 BookmarksAPI::GetFactoryInstance() {
-  return g_factory.Pointer();
+  return g_bookmarks_api_factory.Pointer();
 }
 
 void BookmarksAPI::OnListenerAdded(const EventListenerInfo& details) {
@@ -558,22 +555,7 @@ bool BookmarksSearchFunction::RunOnReady() {
   return true;
 }
 
-// static
-bool BookmarksRemoveFunction::ExtractIds(const base::ListValue* args,
-                                         std::list<int64_t>* ids,
-                                         bool* invalid_id) {
-  std::string id_string;
-  if (!args->GetString(0, &id_string))
-    return false;
-  int64_t id;
-  if (base::StringToInt64(id_string, &id))
-    ids->push_back(id);
-  else
-    *invalid_id = true;
-  return true;
-}
-
-bool BookmarksRemoveFunction::RunOnReady() {
+bool BookmarksRemoveFunctionBase::RunOnReady() {
   if (!EditBookmarksEnabled())
     return false;
 
@@ -585,15 +567,21 @@ bool BookmarksRemoveFunction::RunOnReady() {
   if (!GetBookmarkIdAsInt64(params->id, &id))
     return false;
 
-  bool recursive = false;
-  if (name() == BookmarksRemoveTreeFunction::function_name())
-    recursive = true;
-
   BookmarkModel* model = GetBookmarkModel();
   ManagedBookmarkService* managed = GetManagedBookmarkService();
-  if (!bookmark_api_helpers::RemoveNode(model, managed, id, recursive, &error_))
+  if (!bookmark_api_helpers::RemoveNode(model, managed, id, is_recursive(),
+                                        &error_)) {
     return false;
+  }
 
+  return true;
+}
+
+bool BookmarksRemoveFunction::is_recursive() const {
+  return false;
+}
+
+bool BookmarksRemoveTreeFunction::is_recursive() const {
   return true;
 }
 
@@ -616,14 +604,6 @@ bool BookmarksCreateFunction::RunOnReady() {
   results_ = bookmarks::Create::Results::Create(ret);
 
   return true;
-}
-
-// static
-bool BookmarksMoveFunction::ExtractIds(const base::ListValue* args,
-                                       std::list<int64_t>* ids,
-                                       bool* invalid_id) {
-  // For now, Move accepts ID parameters in the same way as an Update.
-  return BookmarksUpdateFunction::ExtractIds(args, ids, invalid_id);
 }
 
 bool BookmarksMoveFunction::RunOnReady() {
@@ -677,14 +657,6 @@ bool BookmarksMoveFunction::RunOnReady() {
   results_ = bookmarks::Move::Results::Create(tree_node);
 
   return true;
-}
-
-// static
-bool BookmarksUpdateFunction::ExtractIds(const base::ListValue* args,
-                                         std::list<int64_t>* ids,
-                                         bool* invalid_id) {
-  // For now, Update accepts ID parameters in the same way as an Remove.
-  return BookmarksRemoveFunction::ExtractIds(args, ids, invalid_id);
 }
 
 bool BookmarksUpdateFunction::RunOnReady() {
@@ -758,7 +730,7 @@ void BookmarksIOFunction::ShowSelectFileDialog(
   WebContents* web_contents = GetAssociatedWebContents();
 
   select_file_dialog_ = ui::SelectFileDialog::Create(
-      this, new ChromeSelectFilePolicy(web_contents));
+      this, std::make_unique<ChromeSelectFilePolicy>(web_contents));
   ui::SelectFileDialog::FileTypeInfo file_type_info;
   file_type_info.extensions.resize(1);
   file_type_info.extensions[0].push_back(FILE_PATH_LITERAL("html"));

@@ -25,10 +25,10 @@
 #ifndef ImageDocument_h
 #define ImageDocument_h
 
+#include "base/memory/scoped_refptr.h"
 #include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLImageElement.h"
-#include "platform/wtf/RefPtr.h"
 
 namespace blink {
 
@@ -36,8 +36,7 @@ class ImageResource;
 
 class CORE_EXPORT ImageDocument final : public HTMLDocument {
  public:
-  static ImageDocument* Create(
-      const DocumentInit& initializer = DocumentInit()) {
+  static ImageDocument* Create(const DocumentInit& initializer) {
     return new ImageDocument(initializer);
   }
 
@@ -47,6 +46,7 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
   ImageResource* CachedImageResourceDeprecated();
 
   HTMLImageElement* ImageElement() const { return image_element_.Get(); }
+  IntSize ImageSize() const;
 
   void WindowSizeChanged();
   void ImageUpdated();
@@ -55,7 +55,7 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
   void UpdateImageStyle();
   bool ShouldShrinkToFit() const;
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   explicit ImageDocument(const DocumentInit&);
@@ -89,9 +89,6 @@ class CORE_EXPORT ImageDocument final : public HTMLDocument {
 
   // Whether the image has finished loading or not
   bool image_is_loaded_;
-
-  // Size of the checkerboard background tiles
-  int style_checker_size_;
 
   // Desktop: State of the mouse cursor in the image style
   enum MouseCursorMode { kDefault, kZoomIn, kZoomOut };

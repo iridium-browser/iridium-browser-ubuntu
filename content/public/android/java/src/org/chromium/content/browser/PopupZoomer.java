@@ -21,25 +21,25 @@ import android.graphics.RectF;
 import android.graphics.Region.Op;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.SystemClock;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.Interpolator;
 import android.view.animation.OvershootInterpolator;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Log;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.content.R;
 
 /**
- * PopupZoomer is used to show the tap disambiguation popup.  When a tap lands ambiguously
- * between two tiny touch targets (usually links) on a desktop site viewed on a phone,
- * a magnified view of the content is shown, the screen is grayed out and the user
- * must re-tap the magnified content in order to clarify their intent.
+ * {@link View} class that implements tap disambiguation UI.
  */
-class PopupZoomer extends View {
+public class PopupZoomer extends View {
     private static final String TAG = "cr.PopupZoomer";
 
     // The padding between the edges of the view and the popup. Note that there is a mirror
@@ -73,7 +73,7 @@ class PopupZoomer extends View {
         public void onResolveTapDisambiguation(long timeMs, float x, float y, boolean isLongPress);
     }
 
-    private OnTapListener mOnTapListener;
+    private final OnTapListener mOnTapListener;
 
     /**
      * Interface to be implemented to add and remove PopupZoomer to/from the view hierarchy.
@@ -83,7 +83,7 @@ class PopupZoomer extends View {
         public void onPopupZoomerHidden(PopupZoomer zoomer);
     }
 
-    private OnVisibilityChangedListener mOnVisibilityChangedListener;
+    private final OnVisibilityChangedListener mOnVisibilityChangedListener;
 
     // Cached drawable used to frame the zooming popup.
     // TODO(tonyg): This should be marked purgeable so that if the system wants to recover this
@@ -140,7 +140,7 @@ class PopupZoomer extends View {
     private float mMinScrollX, mMaxScrollX;
     private float mMinScrollY, mMaxScrollY;
 
-    private GestureDetector mGestureDetector;
+    private final GestureDetector mGestureDetector;
 
     // These bounds are computed and valid for one execution of onDraw.
     // Extracted to a member variable to save unnecessary allocations on each invocation.
@@ -189,10 +189,16 @@ class PopupZoomer extends View {
     /**
      * Creates Popupzoomer.
      * @param context Context to be used.
-     * @param overlayRadiusDimensoinResId Resource to be used to get overlay corner radius.
+     * @param containerView view that popup zoomer gets added to.
+     * @param visibilityListener {@link OnVisibilityChangedListener} listener.
+     * @param tapListener {@link OnTapListener} listener.
      */
-    public PopupZoomer(Context context) {
+    public PopupZoomer(Context context, ViewGroup containerView,
+            OnVisibilityChangedListener visibilityListener, OnTapListener tapListener) {
         super(context);
+
+        mOnVisibilityChangedListener = visibilityListener;
+        mOnTapListener = tapListener;
 
         setVisibility(INVISIBLE);
         setFocusable(true);
@@ -243,23 +249,10 @@ class PopupZoomer extends View {
     }
 
     /**
-     * Sets the OnTapListener.
-     */
-    public void setOnTapListener(OnTapListener listener) {
-        mOnTapListener = listener;
-    }
-
-    /**
-     * Sets the OnVisibilityChangedListener.
-     */
-    public void setOnVisibilityChangedListener(OnVisibilityChangedListener listener) {
-        mOnVisibilityChangedListener = listener;
-    }
-
-    /**
      * Sets the bitmap to be used for the zoomed view.
      */
-    public void setBitmap(Bitmap bitmap) {
+    @VisibleForTesting
+    void setBitmap(Bitmap bitmap) {
         if (mZoomedBitmap != null) {
             mZoomedBitmap.recycle();
             mZoomedBitmap = null;
@@ -272,7 +265,11 @@ class PopupZoomer extends View {
         RectF canvasRect = new RectF(0, 0, canvas.getWidth(), canvas.getHeight());
         float overlayCornerRadius = getOverlayCornerRadius(getContext());
         path.addRoundRect(canvasRect, overlayCornerRadius, overlayCornerRadius, Direction.CCW);
-        canvas.clipPath(path, Op.XOR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            canvas.clipOutPath(path);
+        } else {
+            canvas.clipPath(path, Op.DIFFERENCE);
+        }
         Paint clearPaint = new Paint();
         clearPaint.setXfermode(new PorterDuffXfermode(Mode.SRC));
         clearPaint.setColor(Color.TRANSPARENT);
@@ -513,7 +510,8 @@ class PopupZoomer extends View {
     /**
      * Show the PopupZoomer view with given target bounds.
      */
-    public void show(Rect rect) {
+    @VisibleForTesting
+    void show(Rect rect) {
         if (mShowing || mZoomedBitmap == null) return;
 
         setTargetBounds(rect);
@@ -535,6 +533,7 @@ class PopupZoomer extends View {
             hideImmediately();
         }
     }
+
     private void tappedInside() {
         if (!mShowing) return;
         // Tapped-inside histogram value is recorded on the renderer side,

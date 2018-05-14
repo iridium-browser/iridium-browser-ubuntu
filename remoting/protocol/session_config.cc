@@ -83,10 +83,6 @@ std::unique_ptr<SessionConfig> SessionConfig::SelectCommon(
     return nullptr;
 
   std::unique_ptr<SessionConfig> result(new SessionConfig(Protocol::ICE));
-  ChannelConfig control_config;
-  ChannelConfig event_config;
-  ChannelConfig video_config;
-  ChannelConfig audio_config;
 
   // If neither host nor the client have VP9 experiment enabled then remove it
   // from the list of host video configs.
@@ -95,6 +91,15 @@ std::unique_ptr<SessionConfig> SessionConfig::SelectCommon(
       !host_config->vp9_experiment_enabled()) {
     host_video_configs.remove_if([](const ChannelConfig& config) {
       return config.codec == ChannelConfig::CODEC_VP9;
+    });
+  }
+
+  // If neither host nor the client have H264 experiment enabled then remove it
+  // from the list of host video configs.
+  if (!client_config->h264_experiment_enabled() &&
+      !host_config->h264_experiment_enabled()) {
+    host_video_configs.remove_if([](const ChannelConfig& config) {
+      return config.codec == ChannelConfig::CODEC_H264;
     });
   }
 
@@ -203,10 +208,10 @@ const ChannelConfig& SessionConfig::audio_config() const {
 
 SessionConfig::SessionConfig(Protocol protocol) : protocol_(protocol) {}
 
-CandidateSessionConfig::CandidateSessionConfig() {}
+CandidateSessionConfig::CandidateSessionConfig() = default;
 CandidateSessionConfig::CandidateSessionConfig(
     const CandidateSessionConfig& config) = default;
-CandidateSessionConfig::~CandidateSessionConfig() {}
+CandidateSessionConfig::~CandidateSessionConfig() = default;
 
 bool CandidateSessionConfig::IsSupported(const SessionConfig& config) const {
   switch (config.protocol()) {

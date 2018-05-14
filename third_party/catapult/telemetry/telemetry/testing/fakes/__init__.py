@@ -7,14 +7,16 @@
 These allow code like story_runner and Benchmark to be run and tested
 without compiling or starting a browser. Class names prepended with an
 underscore are intended to be implementation details, and should not
-be subclassed; however, some, like _FakeBrowser, have public APIs that
+be subclassed; however, some, like FakeBrowser, have public APIs that
 may need to be called in tests.
 """
+from telemetry.core import exceptions
 from telemetry.internal.backends.chrome_inspector import websocket
-from telemetry.internal.browser import browser_options
+from telemetry.internal.browser import browser_options as browser_options_module
 from telemetry.internal.platform import system_info
 from telemetry.page import shared_page_state
 from telemetry.util import image_util
+from telemetry.util import wpr_modes
 from telemetry.testing.internal import fake_gpu_info
 from types import ModuleType
 
@@ -31,6 +33,7 @@ class FakePlatform(object):
     self._device_type_name = 'abc'
     self._is_svelte = False
     self._is_aosp = True
+    self._get_os_version_detail_string = 'OsVersionString'
 
   @property
   def is_host_platform(self):
@@ -49,6 +52,9 @@ class FakePlatform(object):
     return  self._tracing_controller
 
   def Initialize(self):
+    pass
+
+  def SetFullPerformanceModeEnabled(self, enabled):
     pass
 
   def CanMonitorThermalThrottling(self):
@@ -72,8 +78,11 @@ class FakePlatform(object):
   def GetOSVersionName(self):
     raise NotImplementedError
 
-  def GetOSVersionDetailString(self):
-    raise NotImplementedError
+  def GetDeviceId(self):
+    return None
+
+  def GetSystemLog(self):
+    return None
 
   def StopAllLocalServers(self):
     pass
@@ -111,6 +120,12 @@ class FakePlatform(object):
   def IsAosp(self):
     return self._is_aosp and self._os_name == 'android'
 
+  def SetOsVersionDetailString(self, v):
+    self._get_os_version_detail_string = v
+
+  def GetOSVersionDetailString(self):
+    return self._get_os_version_detail_string
+
 
 class FakeLinuxPlatform(FakePlatform):
   def __init__(self):
@@ -128,6 +143,9 @@ class FakeLinuxPlatform(FakePlatform):
 
   def GetArchName(self):
     return 'x86_64'
+
+  def GetSystemTotalPhysicalMemory(self):
+    return 8 * (1024 ** 3)
 
   def GetOSName(self):
     return 'linux'
@@ -158,28 +176,53 @@ class FakeHTTPServer(object):
     return 'file:///foo'
 
 
+class FakeForwarder(object):
+  def Close(self):
+    pass
+
+
+class FakeForwarderFactory(object):
+  def __init__(self):
+    self.raise_exception_on_create = False
+    self.host_ip = '127.0.0.1'
+
+  def Create(self, local_port, remote_port, reverse=False):
+    del local_port  # Unused.
+    del remote_port  # Unused.
+    del reverse  # Unused.
+    if self.raise_exception_on_create:
+      raise exceptions.IntentionalException
+    return FakeForwarder()
+
+
 class FakePossibleBrowser(object):
   def __init__(self, execute_on_startup=None,
                execute_after_browser_creation=None):
-    self._returned_browser = _FakeBrowser(FakeLinuxPlatform())
+    self._returned_browser = FakeBrowser(FakeLinuxPlatform())
     self.browser_type = 'linux'
     self.supports_tab_control = False
     self.is_remote = False
     self.execute_on_startup = execute_on_startup
     self.execute_after_browser_creation = execute_after_browser_creation
+    self.browser_options = None  # This is set in SetUpEnvironment.
 
   @property
   def returned_browser(self):
     """The browser object that will be returned through later API calls."""
     return self._returned_browser
 
-  def Create(self, finder_options):
+  def Create(self):
     if self.execute_on_startup is not None:
       self.execute_on_startup()
-    del finder_options  # unused
     if self.execute_after_browser_creation is not None:
       self.execute_after_browser_creation(self._returned_browser)
     return self.returned_browser
+
+  def SetUpEnvironment(self, browser_options):
+    self.browser_options = browser_options
+
+  def CleanUpEnvironment(self):
+    self.browser_options = None
 
   @property
   def platform(self):
@@ -192,9 +235,6 @@ class FakePossibleBrowser(object):
 
   def IsRemote(self):
     return self.is_remote
-
-  def SetCredentialsPath(self, _):
-    pass
 
 
 class FakeSharedPageState(shared_page_state.SharedPageState):
@@ -228,37 +268,34 @@ class FakeSystemInfo(system_info.SystemInfo):
     super(FakeSystemInfo, self).__init__(model_name, gpu_dict, command_line)
 
 
-class _FakeBrowserFinderOptions(browser_options.BrowserFinderOptions):
+class _FakeBrowserFinderOptions(browser_options_module.BrowserFinderOptions):
   def __init__(self, execute_on_startup=None,
                execute_after_browser_creation=None, *args, **kwargs):
-    browser_options.BrowserFinderOptions.__init__(self, *args, **kwargs)
+    browser_options_module.BrowserFinderOptions.__init__(self, *args, **kwargs)
     self.fake_possible_browser = \
       FakePossibleBrowser(
-        execute_on_startup=execute_on_startup,
-        execute_after_browser_creation=execute_after_browser_creation)
+          execute_on_startup=execute_on_startup,
+          execute_after_browser_creation=execute_after_browser_creation)
 
 def CreateBrowserFinderOptions(browser_type=None, execute_on_startup=None,
                                execute_after_browser_creation=None):
   """Creates fake browser finder options for discovering a browser."""
   return _FakeBrowserFinderOptions(
-    browser_type=browser_type,
-    execute_on_startup=execute_on_startup,
-    execute_after_browser_creation=execute_after_browser_creation)
+      browser_type=browser_type,
+      execute_on_startup=execute_on_startup,
+      execute_after_browser_creation=execute_after_browser_creation)
 
 
-# Internal classes. Note that end users may still need to both call
-# and mock out methods of these classes, but they should not be
-# subclassed.
+class FakeApp(object):
 
-class _FakeBrowser(object):
-  def __init__(self, platform):
-    self._tabs = _FakeTabList(self)
-    # Fake the creation of the first tab.
-    self._tabs.New()
-    self._returned_system_info = FakeSystemInfo()
-    self._platform = platform
-    self._browser_type = 'release'
-    self._is_crashed = False
+  def __init__(self, platform=None):
+    if not platform:
+      self._platform = FakePlatform()
+    else:
+      self._platform = platform
+    self.standard_output = ''
+    self.stack_trace = (False, '')
+    self.recent_minidump_path = None
 
   @property
   def platform(self):
@@ -269,6 +306,30 @@ class _FakeBrowser(object):
     """Allows overriding of the fake browser's platform object."""
     assert isinstance(incoming, FakePlatform)
     self._platform = incoming
+
+  def GetStandardOutput(self):
+    return self.standard_output
+
+  def GetStackTrace(self):
+    return self.stack_trace
+
+  def GetMostRecentMinidumpPath(self):
+    return self.recent_minidump_path
+
+# Internal classes. Note that end users may still need to both call
+# and mock out methods of these classes, but they should not be
+# subclassed.
+
+class FakeBrowser(FakeApp):
+  def __init__(self, platform):
+    super(FakeBrowser, self).__init__(platform)
+    self._tabs = _FakeTabList(self)
+    # Fake the creation of the first tab.
+    self._tabs.New()
+    self._returned_system_info = FakeSystemInfo()
+    self._platform = platform
+    self._browser_type = 'release'
+    self._is_crashed = False
 
   @property
   def returned_system_info(self):
@@ -293,10 +354,6 @@ class _FakeBrowser(object):
     """Allows setting of the browser_type."""
     self._browser_type = incoming
 
-  @property
-  def credentials(self):
-    return _FakeCredentials()
-
   def Close(self):
     self._is_crashed = False
 
@@ -316,11 +373,6 @@ class _FakeBrowser(object):
     return self._tabs
 
   def DumpStateUponFailure(self):
-    pass
-
-
-class _FakeCredentials(object):
-  def WarnIfMissingCredentials(self, _):
     pass
 
 
@@ -350,37 +402,34 @@ class _FakeTracingController(object):
 class _FakeNetworkController(object):
   def __init__(self):
     self.wpr_mode = None
-    self.extra_wpr_args = None
-    self.is_initialized = False
-    self.is_open = False
-    self.use_live_traffic = None
 
-  def InitializeIfNeeded(self, use_live_traffic=False):
-    self.use_live_traffic = use_live_traffic
+  @property
+  def is_open(self):
+    return self.wpr_mode is not None
 
-  def UpdateTrafficSettings(self, round_trip_latency_ms=None,
+  @property
+  def use_live_traffic(self):
+    return self.wpr_mode == wpr_modes.WPR_OFF
+
+  def Open(self, wpr_mode=None):
+    self.wpr_mode = wpr_mode if wpr_mode is not None else wpr_modes.WPR_REPLAY
+
+  def UpdateTrafficSettings(
+      self, round_trip_latency_ms=None,
       download_bandwidth_kbps=None, upload_bandwidth_kbps=None):
     pass
 
-  def Open(self, wpr_mode, extra_wpr_args, use_wpr_go=False):
-    del use_wpr_go  # Unused.
-    self.wpr_mode = wpr_mode
-    self.extra_wpr_args = extra_wpr_args
-    self.is_open = True
-
   def Close(self):
+    self.StopReplay()
     self.wpr_mode = None
-    self.extra_wpr_args = None
-    self.is_initialized = False
-    self.is_open = False
 
-  def StartReplay(self, archive_path, make_javascript_deterministic=False):
-    del make_javascript_deterministic  # Unused.
+  def StartReplay(self, *args, **kwargs):
+    del args  # Unused.
+    del kwargs  # Unused.
     assert self.is_open
-    self.is_initialized = archive_path is not None
 
   def StopReplay(self):
-    self.is_initialized = False
+    pass
 
 
 class _FakeTab(object):
@@ -578,4 +627,3 @@ class FakeTimer(object):
       self._module.time = self._actual_time
       self._module = None
       self._actual_time = None
-

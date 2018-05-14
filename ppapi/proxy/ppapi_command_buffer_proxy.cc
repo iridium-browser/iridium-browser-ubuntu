@@ -170,6 +170,11 @@ void PpapiCommandBufferProxy::SetLock(base::Lock*) {
 }
 
 void PpapiCommandBufferProxy::EnsureWorkVisible() {
+  if (last_state_.error != gpu::error::kNoError)
+    return;
+
+  if (flush_info_->flush_pending)
+    FlushInternal();
   DCHECK_GE(flushed_fence_sync_release_, validated_fence_sync_release_);
   Send(new PpapiHostMsg_PPBGraphics3D_EnsureWorkVisible(
       ppapi::API_ID_PPB_GRAPHICS_3D, resource_));
@@ -184,35 +189,12 @@ gpu::CommandBufferId PpapiCommandBufferProxy::GetCommandBufferID() const {
   return command_buffer_id_;
 }
 
-int32_t PpapiCommandBufferProxy::GetStreamId() const {
-  return 0;
-}
-
-void PpapiCommandBufferProxy::FlushOrderingBarrierOnStream(int32_t stream_id) {
+void PpapiCommandBufferProxy::FlushPendingWork() {
   // This is only relevant for out-of-process command buffers.
 }
 
 uint64_t PpapiCommandBufferProxy::GenerateFenceSyncRelease() {
   return next_fence_sync_release_++;
-}
-
-bool PpapiCommandBufferProxy::IsFenceSyncRelease(uint64_t release) {
-  return release != 0 && release < next_fence_sync_release_;
-}
-
-bool PpapiCommandBufferProxy::IsFenceSyncFlushed(uint64_t release) {
-  return release <= flushed_fence_sync_release_;
-}
-
-bool PpapiCommandBufferProxy::IsFenceSyncFlushReceived(uint64_t release) {
-  if (!IsFenceSyncFlushed(release))
-    return false;
-
-  if (release <= validated_fence_sync_release_)
-    return true;
-
-  EnsureWorkVisible();
-  return release <= validated_fence_sync_release_;
 }
 
 bool PpapiCommandBufferProxy::IsFenceSyncReleased(uint64_t release) {
@@ -221,7 +203,7 @@ bool PpapiCommandBufferProxy::IsFenceSyncReleased(uint64_t release) {
 }
 
 void PpapiCommandBufferProxy::SignalSyncToken(const gpu::SyncToken& sync_token,
-                                              const base::Closure& callback) {
+                                              base::OnceClosure callback) {
   NOTIMPLEMENTED();
 }
 
@@ -235,12 +217,22 @@ bool PpapiCommandBufferProxy::CanWaitUnverifiedSyncToken(
   return false;
 }
 
-void PpapiCommandBufferProxy::AddLatencyInfo(
-    const std::vector<ui::LatencyInfo>& latency_info) {}
+void PpapiCommandBufferProxy::SetSnapshotRequested() {}
 
 void PpapiCommandBufferProxy::SignalQuery(uint32_t query,
-                                          const base::Closure& callback) {
+                                          base::OnceClosure callback) {
   NOTREACHED();
+}
+
+void PpapiCommandBufferProxy::CreateGpuFence(uint32_t gpu_fence_id,
+                                             ClientGpuFence source) {
+  NOTIMPLEMENTED();
+}
+
+void PpapiCommandBufferProxy::GetGpuFence(
+    uint32_t gpu_fence_id,
+    base::OnceCallback<void(std::unique_ptr<gfx::GpuFence>)> callback) {
+  NOTIMPLEMENTED();
 }
 
 void PpapiCommandBufferProxy::SetGpuControlClient(gpu::GpuControlClient*) {
@@ -248,7 +240,7 @@ void PpapiCommandBufferProxy::SetGpuControlClient(gpu::GpuControlClient*) {
   // to the plugin instance. Make it more uniform and use the GpuControlClient.
 }
 
-gpu::Capabilities PpapiCommandBufferProxy::GetCapabilities() {
+const gpu::Capabilities& PpapiCommandBufferProxy::GetCapabilities() const {
   return capabilities_;
 }
 

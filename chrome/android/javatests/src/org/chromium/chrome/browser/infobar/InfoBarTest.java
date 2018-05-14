@@ -28,6 +28,7 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
@@ -48,8 +49,7 @@ import java.util.concurrent.TimeoutException;
 
 /** Tests for the InfoBars. */
 @RunWith(ChromeJUnit4ClassRunner.class)
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
-        ChromeActivityTestRule.DISABLE_NETWORK_PREDICTION_FLAG})
+@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class InfoBarTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -61,8 +61,7 @@ public class InfoBarTest {
             "/chrome/test/data/geolocation/geolocation_on_load.html";
     private static final String POPUP_PAGE =
             "/chrome/test/data/popup_blocker/popup-window-open.html";
-    public static final String HELLO_WORLD_URL = UrlUtils.encodeHtmlDataUri(
-            "<html>"
+    private static final String HELLO_WORLD_URL = UrlUtils.encodeHtmlDataUri("<html>"
             + "<head><title>Hello, World!</title></head>"
             + "<body>Hello, World!</body>"
             + "</html>");
@@ -73,11 +72,11 @@ public class InfoBarTest {
     private EmbeddedTestServer mTestServer;
     private InfoBarTestAnimationListener mListener;
 
-    private static class TestInfoBar extends ConfirmInfoBar {
+    private static class TestInfoBar extends InfoBar {
         private boolean mCompact;
 
         private TestInfoBar(String message) {
-            super(0, null, message, null, null, null);
+            super(0, null, message);
         }
 
         @Override
@@ -85,8 +84,25 @@ public class InfoBarTest {
             return mCompact;
         }
 
-        public void setUsesCompactLayout(boolean compact) {
+        void setUsesCompactLayout(boolean compact) {
             mCompact = compact;
+        }
+    }
+
+    private static class TestInfoBarWithAccessibilityMessage extends TestInfoBar {
+        private CharSequence mAccessibilityMessage;
+
+        private TestInfoBarWithAccessibilityMessage(String message) {
+            super(message);
+        }
+
+        void setAccessibilityMessage(CharSequence accessibilityMessage) {
+            mAccessibilityMessage = accessibilityMessage;
+        }
+
+        @Override
+        protected CharSequence getAccessibilityMessage(CharSequence defaultMessage) {
+            return mAccessibilityMessage;
         }
     }
 
@@ -95,8 +111,7 @@ public class InfoBarTest {
             @Override
             public boolean isSatisfied() {
                 List<InfoBar> infobars = mActivityTestRule.getInfoBars();
-                if (infobars.size() != 1) return false;
-                return infobars.get(0) instanceof DataReductionPromoInfoBar;
+                return infobars.size() == 1 && infobars.get(0) instanceof DataReductionPromoInfoBar;
             }
         });
     }
@@ -109,12 +124,9 @@ public class InfoBarTest {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                if (mActivityTestRule.getActivity().getActivityTab() == null) return false;
-                if (mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer()
-                        == null) {
-                    return false;
-                }
-                return true;
+                return (mActivityTestRule.getActivity().getActivityTab() != null
+                        && mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer()
+                                != null);
             }
         });
         InfoBarContainer container =
@@ -122,8 +134,7 @@ public class InfoBarTest {
         mListener =  new InfoBarTestAnimationListener();
         container.addAnimationListener(mListener);
 
-        mTestServer = EmbeddedTestServer.createAndStartServer(
-                InstrumentationRegistry.getInstrumentation().getContext());
+        mTestServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
         // Using an AdvancedMockContext allows us to use a fresh in-memory SharedPreference.
         Context context = new AdvancedMockContext(InstrumentationRegistry.getInstrumentation()
@@ -157,25 +168,66 @@ public class InfoBarTest {
 
         TestInfoBar infoBarCompact = new TestInfoBar(null);
         infoBarCompact.setContext(ContextUtils.getApplicationContext());
+        infoBarCompact.setUsesCompactLayout(true);
         Assert.assertEquals("Infobar shouldn't have accessibility message before createView()", "",
                 infoBarCompact.getAccessibilityText());
-        infoBarCompact.setUsesCompactLayout(true);
         infoBarCompact.createView();
         Assert.assertEquals("Infobar should have accessibility message after createView()",
                 ContextUtils.getApplicationContext().getString(R.string.bottom_bar_screen_position),
                 infoBarCompact.getAccessibilityText());
 
-        String messsage = "Hello world";
-        TestInfoBar infoBarWithMessage = new TestInfoBar(messsage);
+        String message = "Hello world";
+        TestInfoBar infoBarWithMessage = new TestInfoBar(message);
         infoBarWithMessage.setContext(ContextUtils.getApplicationContext());
         Assert.assertEquals("Infobar shouldn't have accessibility message before createView()", "",
                 infoBarWithMessage.getAccessibilityText());
         infoBarWithMessage.createView();
         Assert.assertEquals("Infobar should have accessibility message after createView()",
-                messsage
+                message + " "
                         + ContextUtils.getApplicationContext().getString(
                                   R.string.bottom_bar_screen_position),
                 infoBarWithMessage.getAccessibilityText());
+    }
+
+    /**
+     * Verify getAccessibilityMessage() for infobar with customized accessibility message.
+     */
+    @Test
+    @MediumTest
+    @Feature({"Browser", "Main"})
+    public void testInfobarGetCustomizedAccessibilityMessage() {
+        String message = "Hello world";
+        String customizedAccessibilityMessage = "Customized";
+
+        TestInfoBarWithAccessibilityMessage infoBarWithAccessibilityMessage =
+                new TestInfoBarWithAccessibilityMessage(message);
+        infoBarWithAccessibilityMessage.setContext(ContextUtils.getApplicationContext());
+        infoBarWithAccessibilityMessage.setAccessibilityMessage(customizedAccessibilityMessage);
+        Assert.assertEquals("Infobar shouldn't have accessibility message before createView()", "",
+                infoBarWithAccessibilityMessage.getAccessibilityText());
+        infoBarWithAccessibilityMessage.createView();
+        Assert.assertEquals(
+                "Infobar should have customized accessibility message after createView()",
+                customizedAccessibilityMessage + " "
+                        + ContextUtils.getApplicationContext().getString(
+                                  R.string.bottom_bar_screen_position),
+                infoBarWithAccessibilityMessage.getAccessibilityText());
+
+        TestInfoBarWithAccessibilityMessage infoBarCompactWithAccessibilityMessage =
+                new TestInfoBarWithAccessibilityMessage(message);
+        infoBarCompactWithAccessibilityMessage.setContext(ContextUtils.getApplicationContext());
+        infoBarCompactWithAccessibilityMessage.setUsesCompactLayout(true);
+        infoBarCompactWithAccessibilityMessage.setAccessibilityMessage(
+                customizedAccessibilityMessage);
+        Assert.assertEquals("Infobar shouldn't have accessibility message before createView()", "",
+                infoBarCompactWithAccessibilityMessage.getAccessibilityText());
+        infoBarCompactWithAccessibilityMessage.createView();
+        Assert.assertEquals(
+                "Infobar should have customized accessibility message after createView()",
+                customizedAccessibilityMessage + " "
+                        + ContextUtils.getApplicationContext().getString(
+                                  R.string.bottom_bar_screen_position),
+                infoBarCompactWithAccessibilityMessage.getAccessibilityText());
     }
 
     /**
@@ -205,9 +257,12 @@ public class InfoBarTest {
 
     /**
      * Verify Geolocation creates an InfoBar.
+     *
+     * TODO(timloh): Remove this once we only use modals for permission prompts.
      */
     @Test
     @MediumTest
+    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Browser", "Main"})
     @RetryOnFailure
     public void testInfoBarForGeolocation() throws InterruptedException, TimeoutException {
@@ -226,12 +281,14 @@ public class InfoBarTest {
         Assert.assertTrue("Wrong infobar count", mActivityTestRule.getInfoBars().isEmpty());
     }
 
-
     /**
      * Verify Geolocation creates an InfoBar and that it's destroyed when navigating back.
+     *
+     * TODO(timloh): Use a different InfoBar type once we only use modals for permission prompts.
      */
     @Test
     @MediumTest
+    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Browser"})
     @RetryOnFailure
     public void testInfoBarForGeolocationDisappearsOnBack()
@@ -532,7 +589,7 @@ public class InfoBarTest {
         Assert.assertTrue(InfoBarUtil.hasPrimaryButton(infoBars.get(0)));
         Assert.assertTrue(InfoBarUtil.hasSecondaryButton(infoBars.get(0)));
 
-        // Activite the Kill button.
+        // Activate the Kill button.
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -553,9 +610,12 @@ public class InfoBarTest {
 
     /**
      * Verify InfoBarContainers swap the WebContents they are monitoring properly.
+     *
+     * TODO(timloh): Use a different InfoBar type once we only use modals for permission prompts.
      */
     @Test
     @MediumTest
+    @CommandLineFlags.Add("disable-features=" + ChromeFeatureList.MODAL_PERMISSION_PROMPTS)
     @Feature({"Browser", "Main"})
     @RetryOnFailure
     public void testInfoBarContainerSwapsWebContents()

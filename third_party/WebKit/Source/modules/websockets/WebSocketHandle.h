@@ -32,6 +32,7 @@
 #define WebSocketHandle_h
 
 #include <stdint.h>
+#include "base/single_thread_task_runner.h"
 #include "platform/wtf/Forward.h"
 #include "platform/wtf/Vector.h"
 #include "public/platform/modules/websockets/websocket.mojom-blink.h"
@@ -39,7 +40,6 @@
 namespace blink {
 
 class KURL;
-class SecurityOrigin;
 class WebSocketHandleClient;
 
 // WebSocketHandle is an interface class designed to be a handle of WebSocket
@@ -58,15 +58,15 @@ class WebSocketHandle {
     kMessageTypeBinary,
   };
 
-  virtual ~WebSocketHandle() {}
+  virtual ~WebSocketHandle() = default;
 
   virtual void Initialize(mojom::blink::WebSocketPtr) = 0;
   virtual void Connect(const KURL&,
                        const Vector<String>& protocols,
-                       SecurityOrigin*,
-                       const KURL& first_party_for_cookies,
+                       const KURL& site_for_cookies,
                        const String& user_agent_override,
-                       WebSocketHandleClient*) = 0;
+                       WebSocketHandleClient*,
+                       base::SingleThreadTaskRunner*) = 0;
   virtual void Send(bool fin, MessageType, const char* data, size_t) = 0;
   virtual void FlowControl(int64_t quota) = 0;
   virtual void Close(unsigned short code, const String& reason) = 0;

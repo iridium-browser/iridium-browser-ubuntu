@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 
 #include "base/location.h"
@@ -50,12 +51,13 @@ ToolbarActionsModel::ToolbarActionsModel(
       extension_action_manager_(
           extensions::ExtensionActionManager::Get(profile_)),
       component_actions_factory_(
-          base::MakeUnique<ComponentToolbarActionsFactory>(profile_)),
+          std::make_unique<ComponentToolbarActionsFactory>(profile_)),
       actions_initialized_(false),
       highlight_type_(HIGHLIGHT_NONE),
       has_active_bubble_(false),
       extension_action_observer_(this),
       extension_registry_observer_(this),
+      load_error_reporter_observer_(this),
       weak_ptr_factory_(this) {
   extensions::ExtensionSystem::Get(profile_)->ready().Post(
       FROM_HERE, base::Bind(&ToolbarActionsModel::OnReady,
@@ -182,7 +184,7 @@ ToolbarActionsModel::CreateActionForItem(Browser* browser,
       DCHECK(extension);
 
       // Create and add an ExtensionActionViewController for the extension.
-      result = base::MakeUnique<ExtensionActionViewController>(
+      result = std::make_unique<ExtensionActionViewController>(
           extension, browser,
           extension_action_manager_->GetExtensionAction(*extension), bar);
       break;
@@ -233,6 +235,15 @@ void ToolbarActionsModel::OnExtensionUninstalled(
   RemovePref(ToolbarItem(extension->id(), EXTENSION_ACTION));
 }
 
+void ToolbarActionsModel::OnLoadFailure(
+    content::BrowserContext* browser_context,
+    const base::FilePath& extension_path,
+    const std::string& error) {
+  for (ToolbarActionsModel::Observer& observer : observers_) {
+    observer.OnToolbarActionLoadFailed();
+  }
+}
+
 void ToolbarActionsModel::RemovePref(const ToolbarItem& item) {
   std::vector<std::string>::iterator pos = std::find(
       last_known_positions_.begin(), last_known_positions_.end(), item.id);
@@ -245,6 +256,10 @@ void ToolbarActionsModel::RemovePref(const ToolbarItem& item) {
 
 void ToolbarActionsModel::OnReady() {
   InitializeActionList();
+
+  load_error_reporter_observer_.Add(
+      extensions::LoadErrorReporter::GetInstance());
+
   // Wait until the extension system is ready before observing any further
   // changes so that the toolbar buttons can be shown in their stable ordering
   // taken from prefs.
@@ -254,10 +269,6 @@ void ToolbarActionsModel::OnReady() {
   actions_initialized_ = true;
   for (Observer& observer : observers_)
     observer.OnToolbarModelInitialized();
-
-  component_actions_factory_->UnloadMigratedExtensions(
-      extensions::ExtensionSystem::Get(profile_)->extension_service(),
-      extension_registry_);
 }
 
 size_t ToolbarActionsModel::FindNewPositionFromLastKnownGood(

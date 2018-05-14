@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,6 +10,7 @@ https://gerrit-review.googlesource.com/Documentation/rest-api.html
 
 from __future__ import print_function
 
+import HTMLParser
 import base64
 import cookielib
 import datetime
@@ -24,17 +26,96 @@ import urlparse
 import warnings
 from cStringIO import StringIO
 
+import httplib2
+try:
+  from oauth2client import gce
+except ImportError:  # Newer oauth2client versions put it in .contrib
+  # pylint: disable=import-error,no-name-in-module
+  from oauth2client.contrib import gce
+
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
+from chromite.lib import cros_build_lib
 
 
-try:
-  NETRC = netrc.netrc()
-except (IOError, netrc.NetrcParseError):
-  NETRC = netrc.netrc(os.devnull)
+_GAE_VERSION = 'GAE_VERSION'
+
+
+class ErrorParser(HTMLParser.HTMLParser):
+  """Class to parse GOB error message reported as HTML.
+
+  Only data inside <div id='af-error-container'> section is retrieved from the
+  GOB error message. Retrieved data is processed as follows:
+
+  - newlines are removed
+  - each <br> tag is replaced with '\n'
+  - each <p> tag is replaced with '\n\n'
+  """
+
+  def __init__(self):
+    HTMLParser.HTMLParser.__init__(self)
+    self.in_div = False
+    self.err_data = ''
+
+  def handle_starttag(self, tag, attrs):
+    tag_id = [x[1] for x in attrs if x[0] == 'id']
+    if tag == 'div' and tag_id and tag_id[0] == 'af-error-container':
+      self.in_div = True
+      return
+
+    if self.in_div:
+      if tag == 'p':
+        self.err_data += '\n\n'
+        return
+
+      if tag == 'br':
+        self.err_data += '\n'
+        return
+
+  def handle_endtag(self, tag):
+    if tag == 'div':
+      self.in_div = False
+
+  def handle_data(self, data):
+    if self.in_div:
+      self.err_data += data.replace('\n', '')
+
+  def ParsedDiv(self):
+    return self.err_data.strip()
+
+
+@cros_build_lib.Memoize
+def _GetNetRC():
+  try:
+    return netrc.netrc(None)
+  except (IOError, netrc.NetrcParseError):
+    try:
+      return netrc.netrc(os.devnull)
+    except IOError:
+      return None
+
+
+def _NetRCAuthenticators(host):
+  """Returns the authenticators, if any, for the given |host|.
+
+  Args:
+    host: A hostname
+  """
+  net_rc = _GetNetRC()
+  if net_rc:
+    return net_rc.authenticators(host)
+
+
+@cros_build_lib.Memoize
+def _GetAppCredentials():
+  """Returns the singleton Appengine credentials for gerrit code review."""
+  return gce.AppAssertionCredentials(
+      scope='https://www.googleapis.com/auth/gerritcodereview')
+
+
 TRY_LIMIT = 10
 SLEEP = 0.5
 REQUEST_TIMEOUT_SECONDS = 120  # 2 minutes.
@@ -117,22 +198,41 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
   path = '/a/' + path.lstrip('/')
   headers = headers or {}
   bare_host = host.partition(':')[0]
-  auth = NETRC.authenticators(bare_host)
+  auth = _NetRCAuthenticators(bare_host)
   if auth:
-    headers.setdefault('Authorization', 'Basic %s' % (
-        base64.b64encode('%s:%s' % (auth[0], auth[2]))))
-  else:
-    logging.debug('No netrc file found')
+    headers.setdefault(
+        'Authorization',
+        'Basic %s' % base64.b64encode('%s:%s' % (auth[0], auth[2])))
+  elif _InAppengine():
+    # TODO(phobbs) how can we choose to only run this on GCE / AppEngine?
+    credentials = _GetAppCredentials()
+    try:
+      headers.setdefault(
+          'Authorization',
+          'Bearer %s' % credentials.get_access_token().access_token)
+    except gce.HttpAccessTokenRefreshError as e:
+      logging.debug('Failed to retreive gce access token: %s', e)
+    # Not in an Appengine or GCE environment.
+    except httplib2.ServerNotFoundError as e:
+      pass
 
+  if not 'Authorization' in headers:
+    logging.debug('No netrc file or Appengine credentials found.')
   if 'Cookie' not in headers:
     cookies = GetCookies(host, path)
     headers['Cookie'] = '; '.join('%s=%s' % (n, v) for n, v in cookies.items())
 
   if 'User-Agent' not in headers:
+    # We may not be in a git repository.
+    try:
+      version = git.GetGitRepoRevision(
+          os.path.dirname(os.path.realpath(__file__)))
+    except cros_build_lib.RunCommandError:
+      version = 'unknown'
     headers['User-Agent'] = ' '.join((
         'chromite.lib.gob_util',
         os.path.basename(sys.argv[0]),
-        git.GetGitRepoRevision(os.path.dirname(os.path.realpath(__file__))),
+        version,
     ))
 
   if body:
@@ -156,6 +256,11 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
   }
   conn.request(**conn.req_params)
   return conn
+
+
+def _InAppengine():
+  """Returns whether we're in the Appengine environment."""
+  return _GAE_VERSION in os.environ
 
 
 def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
@@ -203,6 +308,11 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     # Bad responses.
     logging.debug('response msg:\n%s', response.msg)
     http_version = 'HTTP/%s' % ('1.1' if response.version == 11 else '1.0')
+    ep = ErrorParser()
+    ep.feed(str(response_body))
+    ep.close()
+    parsed_div = ep.ParsedDiv()
+
     msg = ('%s %s %s\n%s %d %s\nResponse body: %r' %
            (reqtype, conn.req_params['url'], http_version,
             http_version, response.status, response.reason,
@@ -230,12 +340,20 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     elif response.status in (422,):
       err_prefix = ('Bad request body?')
 
+    logging.warning(err_prefix)
+
+    # If GOB output contained expected error message, reduce log visibility of
+    # raw GOB output reported below.
+    if parsed_div:
+      logging.warning('GOB Error:\n%s', parsed_div)
+      logging_function = logging.debug
+    else:
+      logging_function = logging.warning
+
+    logging_function(msg)
     if response.status >= 400:
       # The 'X-ErrorId' header is set only on >= 400 response code.
-      logging.warning('%s\n%s\nX-ErrorId: %s', err_prefix, msg,
-                      response.getheader('X-ErrorId'))
-    else:
-      logging.warning('%s\n%s', err_prefix, msg)
+      logging_function('X-ErrorId: %s', response.getheader('X-ErrorId'))
 
     try:
       logging.warning('conn.sock.getpeername(): %s', conn.sock.getpeername())

@@ -20,9 +20,9 @@ TEST(TestBrowserThreadBundleTest,
   ScopedTaskEnvironment scoped_task_environment(
       ScopedTaskEnvironment::MainThreadType::UI);
   TestBrowserThreadBundle test_browser_thread_bundle;
-  base::PostTaskAndReply(
-      FROM_HERE, base::BindOnce(&base::DoNothing),
-      base::BindOnce([]() { DCHECK_CURRENTLY_ON(BrowserThread::UI); }));
+  base::PostTaskAndReply(FROM_HERE, base::DoNothing(), base::BindOnce([]() {
+                           DCHECK_CURRENTLY_ON(BrowserThread::UI);
+                         }));
   scoped_task_environment.RunUntilIdle();
 }
 
@@ -34,7 +34,7 @@ TEST(TestBrowserThreadBundleTest,
   ScopedTaskEnvironment queued_scoped_task_environment(
       ScopedTaskEnvironment::MainThreadType::UI,
       ScopedTaskEnvironment::ExecutionMode::QUEUED);
-  base::PostTask(FROM_HERE, base::BindOnce(&base::DoNothing));
+  base::PostTask(FROM_HERE, base::DoNothing());
 
   {
     TestBrowserThreadBundle test_browser_thread_bundle;
@@ -44,7 +44,8 @@ TEST(TestBrowserThreadBundleTest,
 
 TEST(TestBrowserThreadBundleTest, MessageLoopTypeMismatch) {
   base::MessageLoopForUI message_loop;
-  EXPECT_DEATH(
+
+  EXPECT_DEATH_IF_SUPPORTED(
       {
         TestBrowserThreadBundle test_browser_thread_bundle(
             TestBrowserThreadBundle::IO_MAINLOOP);
@@ -53,7 +54,7 @@ TEST(TestBrowserThreadBundleTest, MessageLoopTypeMismatch) {
 }
 
 TEST(TestBrowserThreadBundleTest, MultipleTestBrowserThreadBundle) {
-  EXPECT_DEATH(
+  EXPECT_DEATH_IF_SUPPORTED(
       {
         TestBrowserThreadBundle test_browser_thread_bundle;
         TestBrowserThreadBundle other_test_browser_thread_bundle;

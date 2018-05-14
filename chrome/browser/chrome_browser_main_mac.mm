@@ -15,11 +15,14 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/path_service.h"
+#include "base/task_scheduler/post_task.h"
+#include "base/task_scheduler/task_traits.h"
 #include "base/threading/thread_task_runner_handle.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_manager_mac.h"
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/chrome_browser_application_mac.h"
+#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/mac/install_from_dmg.h"
 #include "chrome/browser/mac/keychain_reauthorize.h"
 #import "chrome/browser/mac/keystone_glue.h"
@@ -52,8 +55,10 @@ void EnsureMetadataNeverIndexFileOnFileThread(
 }
 
 void EnsureMetadataNeverIndexFile(const base::FilePath& user_data_dir) {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::FILE, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE,
+      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+       base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
       base::Bind(&EnsureMetadataNeverIndexFileOnFileThread, user_data_dir));
 }
 
@@ -69,9 +74,7 @@ ChromeBrowserMainPartsMac::ChromeBrowserMainPartsMac(
 ChromeBrowserMainPartsMac::~ChromeBrowserMainPartsMac() {
 }
 
-void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
-  ChromeBrowserMainPartsPosix::PreEarlyInitialization();
-
+int ChromeBrowserMainPartsMac::PreEarlyInitialization() {
   if (base::mac::WasLaunchedAsLoginItemRestoreState()) {
     base::CommandLine* singleton_command_line =
         base::CommandLine::ForCurrentProcess();
@@ -81,12 +84,6 @@ void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
         base::CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kNoStartupWindow);
   }
-}
-
-void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
-  MacStartupProfiler::GetInstance()->Profile(
-      MacStartupProfiler::PRE_MAIN_MESSAGE_LOOP_START);
-  ChromeBrowserMainPartsPosix::PreMainMessageLoopStart();
 
   // Tell Cocoa to finish its initialization, which we want to do manually
   // instead of calling NSApplicationMain(). The primary reason is that NSAM()
@@ -102,24 +99,23 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // If ui_task is not NULL, the app is actually a browser_test.
   if (!parameters().ui_task) {
     // The browser process only wants to support the language Cocoa will use,
-    // so force the app locale to be overriden with that value.
+    // so force the app locale to be overriden with that value. This must
+    // happen before the ResourceBundle is loaded, which happens in
+    // ChromeBrowserMainParts::PreEarlyInitialization().
     l10n_util::OverrideLocaleWithCocoaLocale();
   }
 
-  // Before we load the nib, we need to start up the resource bundle so we
-  // have the strings avaiable for localization.
-  // TODO(markusheintz): Read preference pref::kApplicationLocale in order
-  // to enforce the application locale.
-  const std::string loaded_locale =
-      ui::ResourceBundle::InitSharedInstanceWithLocale(
-          std::string(), &resource_delegate_,
-          ui::ResourceBundle::LOAD_COMMON_RESOURCES);
-  CHECK(!loaded_locale.empty()) << "Default locale could not be found";
+  return ChromeBrowserMainPartsPosix::PreEarlyInitialization();
+}
 
-  base::FilePath resources_pack_path;
-  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
-  ResourceBundle::GetSharedInstance().AddDataPackFromPath(
-      resources_pack_path, ui::SCALE_FACTOR_NONE);
+void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
+  MacStartupProfiler::GetInstance()->Profile(
+      MacStartupProfiler::PRE_MAIN_MESSAGE_LOOP_START);
+  ChromeBrowserMainPartsPosix::PreMainMessageLoopStart();
+
+  // ChromeBrowserMainParts should have loaded the resource bundle by this
+  // point (needed to load the nib).
+  CHECK(ui::ResourceBundle::HasSharedInstance());
 
   // This is a no-op if the KeystoneRegistration framework is not present.
   // The framework is only distributed with branded Google Chrome builds.
@@ -196,10 +192,8 @@ void ChromeBrowserMainPartsMac::PostProfileInit() {
   g_browser_process->metrics_service()->RecordBreakpadRegistration(
       crash_reporter::GetUploadsEnabled());
 
-  // TODO(calamity): Make this gated on first_run::IsChromeFirstRun() in M45.
-  content::BrowserThread::PostAfterStartupTask(
-      FROM_HERE, base::ThreadTaskRunnerHandle::Get(),
-      base::Bind(&EnsureMetadataNeverIndexFile, user_data_dir()));
+  if (first_run::IsChromeFirstRun())
+    EnsureMetadataNeverIndexFile(user_data_dir());
 
   // Activation of Keystone is not automatic but done in response to the
   // counting and reporting of profiles.

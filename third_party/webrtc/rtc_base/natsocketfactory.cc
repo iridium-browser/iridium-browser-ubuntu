@@ -8,13 +8,13 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/rtc_base/natsocketfactory.h"
+#include "rtc_base/natsocketfactory.h"
 
-#include "webrtc/rtc_base/arraysize.h"
-#include "webrtc/rtc_base/checks.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/natserver.h"
-#include "webrtc/rtc_base/virtualsocketserver.h"
+#include "rtc_base/arraysize.h"
+#include "rtc_base/checks.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/natserver.h"
+#include "rtc_base/virtualsocketserver.h"
 
 namespace rtc {
 
@@ -189,8 +189,8 @@ class NATSocket : public AsyncSocket, public sigslot::has_slots<> {
           *out_addr = real_remote_addr;
         result = result - static_cast<int>(addrlength);
       } else {
-        LOG(LS_ERROR) << "Dropping packet from unknown remote address: "
-                      << real_remote_addr.ToString();
+        RTC_LOG(LS_ERROR) << "Dropping packet from unknown remote address: "
+                          << real_remote_addr.ToString();
         result = 0;  // Tell the caller we didn't read anything
       }
     }

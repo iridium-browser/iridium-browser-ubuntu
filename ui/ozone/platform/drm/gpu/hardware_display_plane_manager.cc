@@ -90,32 +90,57 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
   uint32_t num_planes = plane_resources->count_planes;
   std::set<uint32_t> plane_ids;
   for (uint32_t i = 0; i < num_planes; ++i) {
+    // TODO(hoegsberg) crbug.com/763760: We've rolled back the
+    // downstream, incompatible drmModeGetPlane2 ioctl for now while
+    // we update libdrm to the upstream per-plane IN_FORMATS property
+    // API. This drops support for compressed and tiled framebuffers
+    // in the interim, but once the buildroots and SDKs have pulled in
+    // the new libdrm we'll add it back by reading the property.
     ScopedDrmPlanePtr drm_plane(
-        drmModeGetPlane2(drm->get_fd(), plane_resources->planes[i]));
+        drmModeGetPlane(drm->get_fd(), plane_resources->planes[i]));
     if (!drm_plane) {
       PLOG(ERROR) << "Failed to get plane " << i;
       return false;
     }
 
-    uint32_t formats_size = drm_plane->count_formats;
-    uint32_t format_modifiers_size = drm_plane->count_format_modifiers;
+    ScopedDrmObjectPropertyPtr drm_plane_properties(drmModeObjectGetProperties(
+        drm->get_fd(), plane_resources->planes[i], DRM_MODE_OBJECT_PLANE));
+
+    std::vector<uint32_t> supported_formats;
+    std::vector<drm_format_modifier> supported_format_modifiers;
+
+    if (drm_plane_properties) {
+      for (uint32_t j = 0; j < drm_plane_properties->count_props; j++) {
+        ScopedDrmPropertyPtr property(
+            drmModeGetProperty(drm->get_fd(), drm_plane_properties->props[j]));
+        if (strcmp(property->name, "IN_FORMATS") == 0) {
+          ScopedDrmPropertyBlobPtr blob(drmModeGetPropertyBlob(
+              drm->get_fd(), drm_plane_properties->prop_values[j]));
+
+          auto* data = static_cast<const uint8_t*>(blob->data);
+          auto* header = reinterpret_cast<const drm_format_modifier_blob*>(data);
+          auto* formats =
+              reinterpret_cast<const uint32_t*>(data + header->formats_offset);
+          auto* modifiers = reinterpret_cast<const drm_format_modifier*>(
+              data + header->modifiers_offset);
+
+          for (uint32_t k = 0; k < header->count_formats; k++)
+            supported_formats.push_back(formats[k]);
+          for (uint32_t k = 0; k < header->count_modifiers; k++)
+            supported_format_modifiers.push_back(modifiers[k]);
+        }
+      }
+    }
+
+    if (supported_formats.empty()) {
+      uint32_t formats_size = drm_plane->count_formats;
+      for (uint32_t j = 0; j < formats_size; j++)
+        supported_formats.push_back(drm_plane->formats[j]);
+    }
+
     plane_ids.insert(drm_plane->plane_id);
     std::unique_ptr<HardwareDisplayPlane> plane(
         CreatePlane(drm_plane->plane_id, drm_plane->possible_crtcs));
-
-    std::vector<uint32_t> supported_formats(formats_size);
-    for (uint32_t j = 0; j < formats_size; j++)
-      supported_formats[j] = drm_plane->formats[j];
-
-    std::vector<drm_format_modifier> supported_format_modifiers(
-        format_modifiers_size);
-    for (uint32_t j = 0; j < format_modifiers_size; j++)
-      supported_format_modifiers[j] = drm_plane->format_modifiers[j];
-    std::sort(supported_format_modifiers.begin(),
-              supported_format_modifiers.end(),
-              [](drm_format_modifier l, drm_format_modifier r) {
-                return l.modifier < r.modifier;
-              });
 
     if (plane->Initialize(drm, supported_formats, supported_format_modifiers,
                           false, false)) {
@@ -283,39 +308,6 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
 const std::vector<uint32_t>& HardwareDisplayPlaneManager::GetSupportedFormats()
     const {
   return supported_formats_;
-}
-
-bool HardwareDisplayPlaneManager::IsFormatSupported(uint32_t fourcc_format,
-                                                    uint32_t z_order,
-                                                    uint32_t crtc_id) const {
-  bool format_supported = false;
-  int crtc_index = LookupCrtcIndex(crtc_id);
-  if (crtc_index < 0) {
-    LOG(ERROR) << "Cannot find crtc " << crtc_id;
-    return format_supported;
-  }
-
-  // We dont have a way to query z_order of a plane. This is a temporary
-  // solution till driver exposes z_order property.
-  uint32_t plane_z_order = 0;
-  for (const auto& hardware_plane : planes_) {
-    if (plane_z_order > z_order)
-      break;
-
-    if (!hardware_plane->CanUseForCrtc(crtc_index))
-      continue;
-
-    if (plane_z_order == z_order) {
-      if (hardware_plane->IsSupportedFormat(fourcc_format))
-        format_supported = true;
-
-      break;
-    } else {
-      plane_z_order++;
-    }
-  }
-
-  return format_supported;
 }
 
 std::vector<uint64_t> HardwareDisplayPlaneManager::GetFormatModifiers(

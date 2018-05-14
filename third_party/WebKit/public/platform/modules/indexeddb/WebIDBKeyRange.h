@@ -28,33 +28,33 @@
 
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebPrivatePtr.h"
+#include "public/platform/modules/indexeddb/WebIDBKey.h"
 
 namespace blink {
 
 class IDBKeyRange;
-class WebIDBKey;
 
 class WebIDBKeyRange {
  public:
   ~WebIDBKeyRange() { Reset(); }
 
-  WebIDBKeyRange() {}
+  WebIDBKeyRange() = default;
   WebIDBKeyRange(const WebIDBKeyRange& key_range) { Assign(key_range); }
-  WebIDBKeyRange(const WebIDBKey& lower,
-                 const WebIDBKey& upper,
+  WebIDBKeyRange(WebIDBKey lower,
+                 WebIDBKey upper,
                  bool lower_open,
                  bool upper_open) {
-    Assign(lower, upper, lower_open, upper_open);
+    Assign(std::move(lower), std::move(upper), lower_open, upper_open);
   }
 
-  BLINK_EXPORT WebIDBKey Lower() const;
-  BLINK_EXPORT WebIDBKey Upper() const;
+  BLINK_EXPORT WebIDBKeyView Lower() const;
+  BLINK_EXPORT WebIDBKeyView Upper() const;
   BLINK_EXPORT bool LowerOpen() const;
   BLINK_EXPORT bool UpperOpen() const;
 
   BLINK_EXPORT void Assign(const WebIDBKeyRange&);
-  BLINK_EXPORT void Assign(const WebIDBKey& lower,
-                           const WebIDBKey& upper,
+  BLINK_EXPORT void Assign(WebIDBKey lower,
+                           WebIDBKey upper,
                            bool lower_open,
                            bool upper_open);
 
@@ -65,7 +65,7 @@ class WebIDBKeyRange {
 
   BLINK_EXPORT void Reset();
 
-#if BLINK_IMPLEMENTATION
+#if INSIDE_BLINK
   WebIDBKeyRange(IDBKeyRange* value) : private_(value) {}
   WebIDBKeyRange& operator=(IDBKeyRange* value) {
     private_ = value;

@@ -11,17 +11,15 @@
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "components/signin/core/browser/signin_manager_base.h"
 #include "components/suggestions/blacklist_store.h"
 #include "components/suggestions/features.h"
 #include "components/suggestions/image_manager.h"
@@ -29,7 +27,6 @@
 #include "components/sync/driver/sync_service.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "google_apis/gaia/oauth2_token_service.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -40,9 +37,9 @@
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
+#include "services/identity/public/cpp/identity_manager.h"
 
 using base::TimeDelta;
-using base::TimeTicks;
 
 namespace suggestions {
 
@@ -62,15 +59,14 @@ void LogResponseState(SuggestionsResponseState state) {
                             RESPONSE_STATE_SIZE);
 }
 
-// Default delay used when scheduling a request.
-const int kDefaultSchedulingDelaySec = 1;
-
-// Multiplier on the delay used when re-scheduling a failed request.
-const int kSchedulingBackoffMultiplier = 2;
-
-// Maximum valid delay for scheduling a request. Candidate delays larger than
-// this are rejected. This means the maximum backoff is at least 5 / 2 minutes.
-const int kSchedulingMaxDelaySec = 5 * 60;
+const net::BackoffEntry::Policy kBlacklistBackoffPolicy = {
+    /*num_errors_to_ignore=*/0,
+    /*initial_delay_ms=*/1000,
+    /*multiply_factor=*/2.0,
+    /*jitter_factor=*/0.0,
+    /*maximum_backoff_ms=*/2 * 60 * 60 * 1000,
+    /*entry_lifetime_ms=*/-1,
+    /*always_use_initial_delay=*/true};
 
 const char kDefaultGoogleBaseURL[] = "https://www.google.com/";
 
@@ -121,15 +117,14 @@ int GetMinimumSuggestionsCount() {
 }  // namespace
 
 SuggestionsServiceImpl::SuggestionsServiceImpl(
-    SigninManagerBase* signin_manager,
-    OAuth2TokenService* token_service,
+    identity::IdentityManager* identity_manager,
     syncer::SyncService* sync_service,
     net::URLRequestContextGetter* url_request_context,
     std::unique_ptr<SuggestionsStore> suggestions_store,
     std::unique_ptr<ImageManager> thumbnail_manager,
-    std::unique_ptr<BlacklistStore> blacklist_store)
-    : signin_manager_(signin_manager),
-      token_service_(token_service),
+    std::unique_ptr<BlacklistStore> blacklist_store,
+    std::unique_ptr<base::TickClock> tick_clock)
+    : identity_manager_(identity_manager),
       sync_service_(sync_service),
       sync_service_observer_(this),
       sync_state_(INITIALIZED_ENABLED_HISTORY),
@@ -137,7 +132,9 @@ SuggestionsServiceImpl::SuggestionsServiceImpl(
       suggestions_store_(std::move(suggestions_store)),
       thumbnail_manager_(std::move(thumbnail_manager)),
       blacklist_store_(std::move(blacklist_store)),
-      scheduling_delay_(TimeDelta::FromSeconds(kDefaultSchedulingDelaySec)),
+      tick_clock_(std::move(tick_clock)),
+      blacklist_upload_backoff_(&kBlacklistBackoffPolicy, tick_clock_.get()),
+      blacklist_upload_timer_(tick_clock_.get()),
       weak_ptr_factory_(this) {
   // |sync_service_| is null if switches::kDisableSync is set (tests use that).
   if (sync_service_) {
@@ -146,6 +143,8 @@ SuggestionsServiceImpl::SuggestionsServiceImpl(
   // Immediately get the current sync state, so we'll flush the cache if
   // necessary.
   OnStateChanged(sync_service_);
+  // This makes sure the initial delay is actually respected.
+  blacklist_upload_backoff_.InformOfRequest(/*succeeded=*/true);
 }
 
 SuggestionsServiceImpl::~SuggestionsServiceImpl() {}
@@ -236,6 +235,14 @@ void SuggestionsServiceImpl::ClearBlacklist() {
   callback_list_.Notify(
       GetSuggestionsDataFromCache().value_or(SuggestionsProfile()));
   IssueRequestIfNoneOngoing(BuildSuggestionsBlacklistClearURL());
+}
+
+base::TimeDelta SuggestionsServiceImpl::BlacklistDelayForTesting() const {
+  return blacklist_upload_backoff_.GetTimeUntilRelease();
+}
+
+bool SuggestionsServiceImpl::HasPendingRequestForTesting() const {
+  return !!pending_request_.get();
 }
 
 // static
@@ -391,10 +398,11 @@ void SuggestionsServiceImpl::IssueRequestIfNoneOngoing(const GURL& url) {
   }
 
   OAuth2TokenService::ScopeSet scopes{GaiaConstants::kChromeSyncOAuth2Scope};
-  token_fetcher_ = base::MakeUnique<AccessTokenFetcher>(
-      "suggestions_service", signin_manager_, token_service_, scopes,
+  token_fetcher_ = identity_manager_->CreateAccessTokenFetcherForPrimaryAccount(
+      "suggestions_service", scopes,
       base::BindOnce(&SuggestionsServiceImpl::AccessTokenAvailable,
-                     base::Unretained(this), url));
+                     base::Unretained(this), url),
+      identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
 }
 
 void SuggestionsServiceImpl::AccessTokenAvailable(
@@ -402,11 +410,11 @@ void SuggestionsServiceImpl::AccessTokenAvailable(
     const GoogleServiceAuthError& error,
     const std::string& access_token) {
   DCHECK(token_fetcher_);
-  std::unique_ptr<AccessTokenFetcher> token_fetcher_deleter(
-      std::move(token_fetcher_));
+  std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher>
+      token_fetcher_deleter(std::move(token_fetcher_));
 
   if (error.state() != GoogleServiceAuthError::NONE) {
-    UpdateBlacklistDelay(false);
+    blacklist_upload_backoff_.InformOfRequest(/*succeeded=*/false);
     ScheduleBlacklistUpload();
     return;
   }
@@ -422,7 +430,7 @@ void SuggestionsServiceImpl::IssueSuggestionsRequest(
   DCHECK(!access_token.empty());
   pending_request_ = CreateSuggestionsRequest(url, access_token);
   pending_request_->Start();
-  last_request_started_time_ = TimeTicks::Now();
+  last_request_started_time_ = tick_clock_->NowTicks();
 }
 
 std::unique_ptr<net::URLFetcher>
@@ -442,7 +450,7 @@ SuggestionsServiceImpl::CreateSuggestionsRequest(
           destination: GOOGLE_OWNED_SERVICE
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting:
             "Users can disable this feature by signing out of Chromium, or "
             "disabling Sync or History Sync in Chromium settings under "
@@ -471,11 +479,11 @@ SuggestionsServiceImpl::CreateSuggestionsRequest(
   request->SetRequestContext(url_request_context_);
   // Add Chrome experiment state to the request headers.
   net::HttpRequestHeaders headers;
-  // Note: It's OK to pass |is_signed_in| false if it's unknown, as it does
-  // not affect transmission of experiments coming from the variations server.
-  bool is_signed_in = false;
-  variations::AppendVariationHeaders(request->GetOriginalURL(), false, false,
-                                     is_signed_in, &headers);
+  // Note: It's OK to pass SignedIn::kNo if it's unknown, as it does not affect
+  // transmission of experiments coming from the variations server.
+  variations::AppendVariationHeaders(request->GetOriginalURL(),
+                                     variations::InIncognito::kNo,
+                                     variations::SignedIn::kNo, &headers);
   request->SetExtraRequestHeaders(headers.ToString());
   if (!access_token.empty()) {
     request->AddExtraRequestHeader(
@@ -495,28 +503,29 @@ void SuggestionsServiceImpl::OnURLFetchComplete(const net::URLFetcher* source) {
   if (request_status.status() != net::URLRequestStatus::SUCCESS) {
     // This represents network errors (i.e. the server did not provide a
     // response).
-    UMA_HISTOGRAM_SPARSE_SLOWLY("Suggestions.FailedRequestErrorCode",
-                                -request_status.error());
+    base::UmaHistogramSparse("Suggestions.FailedRequestErrorCode",
+                             -request_status.error());
     DVLOG(1) << "Suggestions server request failed with error: "
              << request_status.error() << ": "
              << net::ErrorToString(request_status.error());
-    UpdateBlacklistDelay(false);
+    blacklist_upload_backoff_.InformOfRequest(/*succeeded=*/false);
     ScheduleBlacklistUpload();
     return;
   }
 
   const int response_code = request->GetResponseCode();
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Suggestions.FetchResponseCode", response_code);
+  base::UmaHistogramSparse("Suggestions.FetchResponseCode", response_code);
   if (response_code != net::HTTP_OK) {
     // A non-200 response code means that server has no (longer) suggestions for
     // this user. Aggressively clear the cache.
     suggestions_store_->ClearSuggestions();
-    UpdateBlacklistDelay(false);
+    blacklist_upload_backoff_.InformOfRequest(/*succeeded=*/false);
     ScheduleBlacklistUpload();
     return;
   }
 
-  const TimeDelta latency = TimeTicks::Now() - last_request_started_time_;
+  const TimeDelta latency =
+      tick_clock_->NowTicks() - last_request_started_time_;
   UMA_HISTOGRAM_MEDIUM_TIMES("Suggestions.FetchSuccessLatency", latency);
 
   // Handle a successful blacklisting.
@@ -550,7 +559,7 @@ void SuggestionsServiceImpl::OnURLFetchComplete(const net::URLFetcher* source) {
   callback_list_.Notify(
       GetSuggestionsDataFromCache().value_or(SuggestionsProfile()));
 
-  UpdateBlacklistDelay(true);
+  blacklist_upload_backoff_.InformOfRequest(/*succeeded=*/true);
   ScheduleBlacklistUpload();
 }
 
@@ -574,11 +583,10 @@ void SuggestionsServiceImpl::ScheduleBlacklistUpload() {
   TimeDelta time_delta;
   if (blacklist_store_->GetTimeUntilReadyForUpload(&time_delta)) {
     // Blacklist cache is not empty: schedule.
-    base::Closure blacklist_cb =
+    blacklist_upload_timer_.Start(
+        FROM_HERE, time_delta + blacklist_upload_backoff_.GetTimeUntilRelease(),
         base::Bind(&SuggestionsServiceImpl::UploadOneFromBlacklist,
-                   weak_ptr_factory_.GetWeakPtr());
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, blacklist_cb, time_delta + scheduling_delay_);
+                   weak_ptr_factory_.GetWeakPtr()));
   }
 }
 
@@ -596,20 +604,6 @@ void SuggestionsServiceImpl::UploadOneFromBlacklist() {
   // Even though there's no candidate for upload, the blacklist might not be
   // empty.
   ScheduleBlacklistUpload();
-}
-
-void SuggestionsServiceImpl::UpdateBlacklistDelay(
-    bool last_request_successful) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (last_request_successful) {
-    scheduling_delay_ = TimeDelta::FromSeconds(kDefaultSchedulingDelaySec);
-  } else {
-    TimeDelta candidate_delay =
-        scheduling_delay_ * kSchedulingBackoffMultiplier;
-    if (candidate_delay < TimeDelta::FromSeconds(kSchedulingMaxDelaySec))
-      scheduling_delay_ = candidate_delay;
-  }
 }
 
 }  // namespace suggestions

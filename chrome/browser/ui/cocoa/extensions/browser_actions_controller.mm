@@ -15,10 +15,10 @@
 #include "chrome/browser/extensions/extension_message_bubble_controller.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/cocoa/browser_dialogs_views_mac.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_container_view.h"
-#import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/toolbar_actions_bar_bubble_mac.h"
 #import "chrome/browser/ui/cocoa/extensions/toolbar_actions_bar_bubble_views_presenter.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
@@ -34,7 +34,6 @@
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/cocoa/appkit_utils.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
-#include "ui/base/material_design/material_design_controller.h"
 
 NSString* const kBrowserActionVisibilityChangedNotification =
     @"BrowserActionVisibilityChangedNotification";
@@ -269,9 +268,9 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
         new ToolbarActionsBar(toolbarActionsBarBridge_.get(),
                               browser_,
                               mainBar));
-    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+    if (chrome::ShowAllDialogsWithViewsToolkit()) {
       viewsBubblePresenter_ =
-          base::MakeUnique<ToolbarActionsBarBubbleViewsPresenter>(self);
+          std::make_unique<ToolbarActionsBarBubbleViewsPresenter>(self);
     }
 
     containerView_ = container;
@@ -445,7 +444,7 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
 }
 
 - (void)redraw {
-  if (![self updateContainerVisibility])
+  if ([containerView_ isHidden])
     return;  // Container is hidden; no need to update.
 
   std::unique_ptr<ui::NinePartImageIds> highlight;
@@ -623,6 +622,7 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
   [self updateButtonPositions];
   [self updateButtonOpacity];
   [[containerView_ window] invalidateCursorRectsForView:containerView_];
+  [self redraw];
 }
 
 - (void)containerDragStart:(NSNotification*)notification {
@@ -679,6 +679,15 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
   // Determine what index the dragged button should lie in, alter the model and
   // reposition the buttons.
   BrowserActionButton* draggedButton = [notification object];
+
+  if (!isDraggingSession_) {
+    for (BrowserActionButton* button : buttons_.get()) {
+      if (button != draggedButton)
+        [[button cell] setIsHoverDisabled:YES];
+    }
+    isDraggingSession_ = YES;
+  }
+
   NSRect draggedButtonFrame = [draggedButton frame];
   // Find the mid-point. We flip the y-coordinates so that y = 0 is at the
   // top of the container to make row calculation more logical.
@@ -712,6 +721,13 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
 }
 
 - (void)actionButtonDragFinished:(NSNotification*)notification {
+  BrowserActionButton* draggedButton = [notification object];
+  for (BrowserActionButton* button : buttons_.get()) {
+    if (button != draggedButton)
+      [[button cell] setIsHoverDisabled:NO];
+  }
+
+  isDraggingSession_ = NO;
   [self redraw];
 }
 
@@ -737,7 +753,7 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
 - (NSPoint)popupPointForView:(NSView*)view
                   withBounds:(NSRect)bounds {
   NSPoint anchor;
-  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+  if (chrome::ShowAllDialogsWithViewsToolkit()) {
     // Anchor to the bottom-right of the button.
     anchor = NSMakePoint(NSMaxX(bounds), [view isFlipped] ? NSMaxY(bounds) : 0);
   } else {
@@ -749,8 +765,13 @@ void ToolbarActionsBarBridge::ShowToolbarActionBubble(
   // Convert the point to the container view's frame, and adjust for animation.
   NSPoint anchorInContainer =
       [containerView_ convertPoint:anchor fromView:view];
-  anchorInContainer.x -= NSMinX([containerView_ frame]) -
-      NSMinX([containerView_ animationEndFrame]);
+  if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    anchorInContainer.x += NSMaxX([containerView_ frame]) -
+                           NSMaxX([containerView_ animationEndFrame]);
+  } else {
+    anchorInContainer.x -= NSMinX([containerView_ frame]) -
+                           NSMinX([containerView_ animationEndFrame]);
+  }
 
   return [containerView_ convertPoint:anchorInContainer toView:nil];
 }

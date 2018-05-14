@@ -85,10 +85,10 @@ PlatformVerificationDialog::PlatformVerificationDialog(
     : content::WebContentsObserver(web_contents),
       domain_(domain),
       callback_(callback) {
-  SetLayoutManager(new views::FillLayout());
+  SetLayoutManager(std::make_unique<views::FillLayout>());
 
-  gfx::Insets dialog_insets = ChromeLayoutProvider::Get()->GetInsetsMetric(
-      views::INSETS_DIALOG_CONTENTS);
+  gfx::Insets dialog_insets =
+      ChromeLayoutProvider::Get()->GetInsetsMetric(views::INSETS_DIALOG);
   SetBorder(views::CreateEmptyBorder(0, dialog_insets.left(), 0,
                                      dialog_insets.right()));
   const base::string16 learn_more = l10n_util::GetStringUTF16(IDS_LEARN_MORE);
@@ -157,12 +157,11 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(
   if (!browser) {
     Profile* profile =
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-    chrome::NavigateParams params(
-        profile, learn_more_url, ui::PAGE_TRANSITION_LINK);
+    NavigateParams params(profile, learn_more_url, ui::PAGE_TRANSITION_LINK);
     params.disposition = WindowOpenDisposition::SINGLETON_TAB;
-    chrome::Navigate(&params);
+    Navigate(&params);
   } else {
-    chrome::ShowSingletonTab(browser, learn_more_url);
+    ShowSingletonTab(browser, learn_more_url);
   }
 }
 

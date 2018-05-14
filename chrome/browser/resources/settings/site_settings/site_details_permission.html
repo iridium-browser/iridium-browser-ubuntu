@@ -13,16 +13,42 @@
   <template>
     <style include="settings-shared md-select"></style>
     <div id="details">
-      <div class="list-item underbar">
+      <div id="permissionItem"
+          class$="list-item [[permissionInfoStringClass_(site.source, category,
+                                                         site.setting)]]">
         <div>
           <iron-icon icon="[[icon]]">
           </iron-icon>
         </div>
-        <div class="middle" id="permissionHeader">[[label]]</div>
+        <div class="middle" id="permissionHeader">
+          [[label]]
+          <div class="secondary"
+              hidden$="[[!hasPermissionInfoString_(site.source, category,
+                                                   site.setting)]]"
+              inner-h-t-m-l="[[permissionInfoString_(
+                site.source,
+                category,
+                site.setting,
+                '$i18nPolymer{siteSettingsSourceAdsBlacklist}',
+                '$i18nPolymer{siteSettingsAdsBlockSingular}',
+                '$i18nPolymer{siteSettingsSourceEmbargo}',
+                '$i18nPolymer{siteSettingsSourceInsecureOrigin}',
+                '$i18nPolymer{siteSettingsSourceKillSwitch}',
+                '$i18nPolymer{siteSettingsSourceExtensionAllow}',
+                '$i18nPolymer{siteSettingsSourceExtensionBlock}',
+                '$i18nPolymer{siteSettingsSourceExtensionAsk}',
+                '$i18nPolymer{siteSettingsSourcePolicyAllow}',
+                '$i18nPolymer{siteSettingsSourcePolicyBlock}',
+                '$i18nPolymer{siteSettingsSourcePolicyAsk}',
+                '$i18nPolymer{siteSettingsSourceDrmDisabled}')]]">
+          </div>
+        </div>
         <div class="md-select-wrapper">
           <select id="permission" class="md-select"
               aria-labelledby="permissionHeader"
-              on-change="onPermissionSelectionChange_">
+              on-change="onPermissionSelectionChange_"
+              disabled$="[[!isPermissionUserControlled_(site.source, category,
+                                                        site.setting)]]">
             <option id="default" value$="[[ContentSetting.DEFAULT]]">
               [[defaultSettingString_(
                   defaultSetting_,
@@ -35,6 +61,10 @@
             </option>
             <option id="block" value$="[[ContentSetting.BLOCK]]">
               $i18n{siteSettingsActionBlock}
+            </option>
+            <option id="ask" value$="[[ContentSetting.ASK]]"
+                hidden$="[[!isNonDefaultAsk_(site.setting, site.source)]]">
+              $i18n{siteSettingsActionAsk}
             </option>
           </select>
           <span class="md-select-underline"></span>

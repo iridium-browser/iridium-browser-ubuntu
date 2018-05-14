@@ -4,6 +4,7 @@
 
 #include "chrome/test/base/chrome_test_launcher.h"
 
+#include "base/command_line.h"
 #include "build/build_config.h"
 #include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -14,7 +15,7 @@
 #if defined(USE_AURA)
 #include "ui/aura/test/ui_controls_factory_aura.h"
 #include "ui/base/test/ui_controls_aura.h"
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(USE_X11)
 #include "ui/views/test/ui_controls_factory_desktop_aurax11.h"
 #endif
 #endif
@@ -79,6 +80,37 @@ class InteractiveUITestSuite : public ChromeTestSuite {
 #endif
 };
 
+class InteractiveUITestLauncherDelegate : public ChromeTestLauncherDelegate {
+ public:
+  explicit InteractiveUITestLauncherDelegate(ChromeTestSuiteRunner* runner)
+      : ChromeTestLauncherDelegate(runner) {}
+
+ protected:
+  // content::TestLauncherDelegate:
+  void PreSharding() override {
+    ChromeTestLauncherDelegate::PreSharding();
+#if defined(OS_WIN)
+    // Check for any always-on-top windows present before any tests are run.
+    // Take a snapshot if any are found and attempt to close any that are system
+    // dialogs.
+    KillAlwaysOnTopWindows(RunType::BEFORE_SHARD);
+#endif
+  }
+
+  void OnTestTimedOut(const base::CommandLine& command_line) override {
+#if defined(OS_WIN)
+    // Take a snapshot of the screen and check for any always-on-top windows
+    // present before terminating the test. Attempt to close any that are system
+    // dialogs.
+    KillAlwaysOnTopWindows(RunType::AFTER_TEST_TIMEOUT, &command_line);
+#endif
+    ChromeTestLauncherDelegate::OnTestTimedOut(command_line);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InteractiveUITestLauncherDelegate);
+};
+
 class InteractiveUITestSuiteRunner : public ChromeTestSuiteRunner {
  public:
   int RunTestSuite(int argc, char** argv) override {
@@ -87,9 +119,7 @@ class InteractiveUITestSuiteRunner : public ChromeTestSuiteRunner {
 };
 
 int main(int argc, char** argv) {
-#if defined(OS_WIN)
-  KillAlwaysOnTopWindows(RunType::BEFORE_TEST);
-#endif
+  base::CommandLine::Init(argc, argv);
   // TODO(sky): this causes a crash in an autofill test on macosx, figure out
   // why: http://crbug.com/641969.
 #if !defined(OS_MACOSX)
@@ -107,10 +137,6 @@ int main(int argc, char** argv) {
   size_t parallel_jobs = 1U;
 
   InteractiveUITestSuiteRunner runner;
-  ChromeTestLauncherDelegate delegate(&runner);
-  const int result = LaunchChromeTests(parallel_jobs, &delegate, argc, argv);
-#if defined(OS_WIN)
-  KillAlwaysOnTopWindows(RunType::AFTER_TEST);
-#endif
-  return result;
+  InteractiveUITestLauncherDelegate delegate(&runner);
+  return LaunchChromeTests(parallel_jobs, &delegate, argc, argv);
 }

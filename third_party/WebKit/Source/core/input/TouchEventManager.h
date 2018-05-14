@@ -5,6 +5,7 @@
 #ifndef TouchEventManager_h
 #define TouchEventManager_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
 #include "core/events/PointerEventFactory.h"
 #include "core/input/EventHandlingUtil.h"
@@ -26,12 +27,10 @@ class Document;
 // maintaining related states.
 class CORE_EXPORT TouchEventManager
     : public GarbageCollectedFinalized<TouchEventManager> {
-  WTF_MAKE_NONCOPYABLE(TouchEventManager);
-
  public:
 
   explicit TouchEventManager(LocalFrame&);
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*);
 
   void HandleTouchPoint(const WebPointerEvent&,
                         const Vector<WebPointerEvent>&,
@@ -51,9 +50,9 @@ class CORE_EXPORT TouchEventManager
   class TouchPointAttributes
       : public GarbageCollectedFinalized<TouchPointAttributes> {
    public:
-    DEFINE_INLINE_TRACE() { visitor->Trace(target_); }
+    void Trace(blink::Visitor* visitor) { visitor->Trace(target_); }
 
-    TouchPointAttributes() {}
+    TouchPointAttributes() = default;
     explicit TouchPointAttributes(WebPointerEvent event)
         : event_(event), stale_(false) {}
 
@@ -111,6 +110,8 @@ class CORE_EXPORT TouchEventManager
   // The current touch action, computed on each touch start and is
   // a union of all touches. Reset when all touches are released.
   TouchAction current_touch_action_;
+
+  DISALLOW_COPY_AND_ASSIGN(TouchEventManager);
 };
 
 }  // namespace blink

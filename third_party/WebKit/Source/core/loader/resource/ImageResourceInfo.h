@@ -8,9 +8,11 @@
 #include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
+#include "platform/loader/fetch/ResourceError.h"
 #include "platform/loader/fetch/ResourceStatus.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/wtf/Forward.h"
+#include "platform/wtf/Optional.h"
 
 namespace blink {
 
@@ -26,11 +28,9 @@ class SecurityOrigin;
 // ImageResource and ImageResourceContent.
 class CORE_EXPORT ImageResourceInfo : public GarbageCollectedMixin {
  public:
-  ~ImageResourceInfo() {}
+  ~ImageResourceInfo() = default;
   virtual const KURL& Url() const = 0;
   virtual bool IsSchedulingReload() const = 0;
-  virtual bool HasDevicePixelRatioHeaderValue() const = 0;
-  virtual float DevicePixelRatioHeaderValue() const = 0;
   virtual const ResourceResponse& GetResponse() const = 0;
   virtual bool ShouldShowPlaceholder() const = 0;
   virtual bool IsCacheValidator() const = 0;
@@ -40,10 +40,10 @@ class CORE_EXPORT ImageResourceInfo : public GarbageCollectedMixin {
     kHasSingleSecurityOrigin
   };
   virtual bool IsAccessAllowed(
-      SecurityOrigin*,
+      const SecurityOrigin*,
       DoesCurrentFrameHaveSingleSecurityOrigin) const = 0;
   virtual bool HasCacheControlNoStoreHeader() const = 0;
-  virtual const ResourceError& GetResourceError() const = 0;
+  virtual Optional<ResourceError> GetResourceError() const = 0;
 
   // TODO(hiroshige): Remove this once MemoryCache becomes further weaker.
   virtual void SetDecodedSize(size_t) = 0;
@@ -58,7 +58,7 @@ class CORE_EXPORT ImageResourceInfo : public GarbageCollectedMixin {
       const KURL&,
       const AtomicString& initiator_name) = 0;
 
-  DEFINE_INLINE_VIRTUAL_TRACE() {}
+  void Trace(blink::Visitor* visitor) override {}
 };
 
 }  // namespace blink

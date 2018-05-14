@@ -12,8 +12,9 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 #include "services/service_manager/public/cpp/service_context_ref.h"
-#include "services/video_capture/public/interfaces/device_factory_provider.mojom.h"
-#include "services/video_capture/public/interfaces/testing_controls.mojom.h"
+#include "services/video_capture/device_factory_provider_impl.h"
+#include "services/video_capture/public/mojom/device_factory_provider.mojom.h"
+#include "services/video_capture/public/mojom/testing_controls.mojom.h"
 
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
@@ -26,12 +27,17 @@ class ServiceImpl : public service_manager::Service {
   ServiceImpl();
   ~ServiceImpl() override;
 
+  static std::unique_ptr<service_manager::Service> Create();
+
   // service_manager::Service implementation.
   void OnStart() override;
   void OnBindInterface(const service_manager::BindSourceInfo& source_info,
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override;
   bool OnServiceManagerConnectionLost() override;
+
+  void SetFactoryProviderClientDisconnectedObserver(
+      const base::RepeatingClosure& observer_cb);
 
  private:
   void OnDeviceFactoryProviderRequest(
@@ -40,6 +46,8 @@ class ServiceImpl : public service_manager::Service {
   void SetShutdownDelayInSeconds(float seconds);
   void MaybeRequestQuitDelayed();
   void MaybeRequestQuit();
+  void LazyInitializeDeviceFactoryProvider();
+  void OnProviderClientDisconnected();
 
 #if defined(OS_WIN)
   // COM must be initialized in order to access the video capture devices.
@@ -47,7 +55,12 @@ class ServiceImpl : public service_manager::Service {
 #endif
   float shutdown_delay_in_seconds_;
   service_manager::BinderRegistry registry_;
+  mojo::BindingSet<mojom::DeviceFactoryProvider> factory_provider_bindings_;
+  std::unique_ptr<DeviceFactoryProviderImpl> device_factory_provider_;
   std::unique_ptr<service_manager::ServiceContextRefFactory> ref_factory_;
+  // Callback to be invoked when a provider client is disconnected. Mainly used
+  // for testing.
+  base::RepeatingClosure factory_provider_client_disconnected_cb_;
   base::ThreadChecker thread_checker_;
   base::WeakPtrFactory<ServiceImpl> weak_factory_;
 

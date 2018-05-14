@@ -11,13 +11,13 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/json/json_writer.h"
-#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/time/time.h"
+#include "base/time/time_to_iso8601.h"
 #include "base/values.h"
 #include "chrome/common/chrome_features.h"
 #include "net/base/load_flags.h"
@@ -37,7 +37,7 @@ bool HasHeaderValues(net::URLRequest* request,
   std::string response_headers;
   request->GetResponseHeaderByName(header, &response_headers);
   const std::vector<std::string> response_values = base::SplitString(
-      response_headers, ",", base::KEEP_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+      response_headers, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   for (const auto& value : response_values) {
     for (const auto& allowed : allowed_values) {
       if (base::ToLowerASCII(allowed) == base::ToLowerASCII(value)) {
@@ -48,25 +48,16 @@ bool HasHeaderValues(net::URLRequest* request,
   return false;
 }
 
-std::string TimeToISO8601(const base::Time& t) {
-  base::Time::Exploded exploded;
-  t.UTCExplode(&exploded);
-  return base::StringPrintf(
-      "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", exploded.year, exploded.month,
-      exploded.day_of_month, exploded.hour, exploded.minute, exploded.second,
-      exploded.millisecond);
-}
-
 std::unique_ptr<base::ListValue> GetPEMEncodedChainAsList(
     const net::X509Certificate* cert_chain) {
   if (!cert_chain)
-    return base::MakeUnique<base::ListValue>();
+    return std::make_unique<base::ListValue>();
 
   std::unique_ptr<base::ListValue> result(new base::ListValue());
   std::vector<std::string> pem_encoded_chain;
   cert_chain->GetPEMEncodedChain(&pem_encoded_chain);
   for (const std::string& cert : pem_encoded_chain)
-    result->Append(base::MakeUnique<base::Value>(cert));
+    result->Append(std::make_unique<base::Value>(cert));
 
   return result;
 }
@@ -116,16 +107,9 @@ void AddSCT(const net::SignedCertificateTimestampAndStatus& sct,
   list->Append(std::move(list_item));
 }
 
-// Records an UMA histogram of the net errors when Expect CT reports
-// fail to send.
-void RecordUMAOnFailure(const GURL& report_uri,
-                        int net_error,
-                        int http_response_code) {
-  UMA_HISTOGRAM_SPARSE_SLOWLY("SSL.ExpectCTReportFailure2", -net_error);
-}
-
-constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
-    net::DefineNetworkTrafficAnnotation("chrome_expect_ct_reporter", R"(
+constexpr net::NetworkTrafficAnnotationTag
+    kChromeExpectCtReporterTrafficAnnotation =
+        net::DefineNetworkTrafficAnnotation("chrome_expect_ct_reporter", R"(
         semantics {
           sender: "Expect-CT reporting for Certificate Transparency reporting"
           description:
@@ -142,7 +126,7 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
           destination: OTHER
         }
         policy {
-          cookies_allowed: false
+          cookies_allowed: NO
           setting: "This feature cannot be disabled by settings."
           policy_exception_justification:
             "Not implemented, this is a feature that websites can opt into and "
@@ -152,10 +136,15 @@ constexpr net::NetworkTrafficAnnotationTag kTrafficAnnotation =
 }  // namespace
 
 ChromeExpectCTReporter::ChromeExpectCTReporter(
-    net::URLRequestContext* request_context)
+    net::URLRequestContext* request_context,
+    const base::Closure& success_callback,
+    const base::Closure& failure_callback)
     : report_sender_(
-          new net::ReportSender(request_context, kTrafficAnnotation)),
-      request_context_(request_context) {}
+          new net::ReportSender(request_context,
+                                kChromeExpectCtReporterTrafficAnnotation)),
+      request_context_(request_context),
+      success_callback_(success_callback),
+      failure_callback_(failure_callback) {}
 
 ChromeExpectCTReporter::~ChromeExpectCTReporter() {}
 
@@ -175,11 +164,12 @@ void ChromeExpectCTReporter::OnExpectCTFailed(
 
   base::DictionaryValue outer_report;
   base::DictionaryValue* report = outer_report.SetDictionary(
-      "expect-ct-report", base::MakeUnique<base::DictionaryValue>());
+      "expect-ct-report", std::make_unique<base::DictionaryValue>());
   report->SetString("hostname", host_port_pair.host());
   report->SetInteger("port", host_port_pair.port());
-  report->SetString("date-time", TimeToISO8601(base::Time::Now()));
-  report->SetString("effective-expiration-date", TimeToISO8601(expiration));
+  report->SetString("date-time", base::TimeToISO8601(base::Time::Now()));
+  report->SetString("effective-expiration-date",
+                    base::TimeToISO8601(expiration));
   report->Set("served-certificate-chain",
               GetPEMEncodedChainAsList(served_certificate_chain));
   report->Set("validated-certificate-chain",
@@ -218,8 +208,8 @@ void ChromeExpectCTReporter::OnResponseStarted(net::URLRequest* request,
   // - Access-Control-Allow-Headers: Content-Type
 
   if (response_code == -1 || response_code < 200 || response_code > 299) {
-    RecordUMAOnFailure(preflight->report_uri, request->status().error(),
-                       response_code);
+    OnReportFailure(preflight->report_uri, request->status().error(),
+                    response_code);
     inflight_preflights_.erase(request);
     // Do not use |preflight| after this point, since it has been erased above.
     return;
@@ -229,8 +219,8 @@ void ChromeExpectCTReporter::OnResponseStarted(net::URLRequest* request,
       !HasHeaderValues(request, "Access-Control-Allow-Methods", {"post"}) ||
       !HasHeaderValues(request, "Access-Control-Allow-Headers",
                        {"content-type"})) {
-    RecordUMAOnFailure(preflight->report_uri, request->status().error(),
-                       response_code);
+    OnReportFailure(preflight->report_uri, request->status().error(),
+                    response_code);
     inflight_preflights_.erase(request);
     // Do not use |preflight| after this point, since it has been erased above.
     return;
@@ -238,8 +228,12 @@ void ChromeExpectCTReporter::OnResponseStarted(net::URLRequest* request,
 
   report_sender_->Send(preflight->report_uri,
                        "application/expect-ct-report+json; charset=utf-8",
-                       preflight->serialized_report, base::Callback<void()>(),
-                       base::Bind(RecordUMAOnFailure));
+                       preflight->serialized_report, success_callback_,
+                       // Since |this| owns the |report_sender_|, it's safe to
+                       // use base::Unretained here: |report_sender_| will be
+                       // destroyed before |this|.
+                       base::Bind(&ChromeExpectCTReporter::OnReportFailure,
+                                  base::Unretained(this)));
   inflight_preflights_.erase(request);
 }
 
@@ -263,7 +257,7 @@ void ChromeExpectCTReporter::SendPreflight(
     const std::string& serialized_report) {
   std::unique_ptr<net::URLRequest> url_request =
       request_context_->CreateRequest(report_uri, net::DEFAULT_PRIORITY, this,
-                                      kTrafficAnnotation);
+                                      kChromeExpectCtReporterTrafficAnnotation);
   url_request->SetLoadFlags(net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
                             net::LOAD_DO_NOT_SEND_AUTH_DATA |
                             net::LOAD_DO_NOT_SEND_COOKIES |
@@ -277,7 +271,15 @@ void ChromeExpectCTReporter::SendPreflight(
   url_request->SetExtraRequestHeaders(extra_headers);
 
   net::URLRequest* raw_request = url_request.get();
-  inflight_preflights_[raw_request] = base::MakeUnique<PreflightInProgress>(
+  inflight_preflights_[raw_request] = std::make_unique<PreflightInProgress>(
       std::move(url_request), serialized_report, report_uri);
   raw_request->Start();
+}
+
+void ChromeExpectCTReporter::OnReportFailure(const GURL& report_uri,
+                                             int net_error,
+                                             int http_response_code) {
+  base::UmaHistogramSparse("SSL.ExpectCTReportFailure2", -net_error);
+  if (!failure_callback_.is_null())
+    failure_callback_.Run();
 }

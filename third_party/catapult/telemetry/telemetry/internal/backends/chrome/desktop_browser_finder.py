@@ -5,12 +5,15 @@
 
 import logging
 import os
+import shutil
 import sys
+import tempfile
 
 import dependency_manager  # pylint: disable=import-error
 
 from telemetry.core import exceptions
 from telemetry.core import platform as platform_module
+from telemetry.internal.backends.chrome import chrome_startup_args
 from telemetry.internal.backends.chrome import desktop_browser_backend
 from telemetry.internal.browser import browser
 from telemetry.internal.browser import possible_browser
@@ -35,11 +38,26 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
     self._flash_path = flash_path
     self._is_content_shell = is_content_shell
     self._browser_directory = browser_directory
+    self._profile_directory = None
     self.is_local_build = is_local_build
 
   def __repr__(self):
     return 'PossibleDesktopBrowser(type=%s, executable=%s, flash=%s)' % (
         self.browser_type, self._local_executable, self._flash_path)
+
+  @property
+  def browser_directory(self):
+    return self._browser_directory
+
+  @property
+  def profile_directory(self):
+    return self._profile_directory
+
+  @property
+  def last_modification_time(self):
+    if os.path.exists(self._local_executable):
+      return os.path.getmtime(self._local_executable)
+    return -1
 
   def _InitPlatformIfNeeded(self):
     if self._platform:
@@ -50,7 +68,39 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
     # pylint: disable=protected-access
     self._platform_backend = self._platform._platform_backend
 
-  def Create(self, finder_options):
+  def _GetPathsForOsPageCacheFlushing(self):
+    return [self.profile_directory, self.browser_directory]
+
+  def SetUpEnvironment(self, browser_options):
+    super(PossibleDesktopBrowser, self).SetUpEnvironment(browser_options)
+    if self._browser_options.dont_override_profile:
+      return
+
+    # If given, this directory's contents will be used to seed the profile.
+    source_profile = self._browser_options.profile_dir
+    if source_profile and self._is_content_shell:
+      raise RuntimeError('Profiles cannot be used with content shell')
+
+    self._profile_directory = tempfile.mkdtemp()
+    if source_profile:
+      logging.info('Seeding profile directory from: %s', source_profile)
+      shutil.copytree(source_profile, self._profile_directory)
+
+      # When using an existing profile directory, we need to make sure to
+      # delete the file containing the active DevTools port number.
+      devtools_file_path = os.path.join(
+          self._profile_directory,
+          desktop_browser_backend.DEVTOOLS_ACTIVE_PORT_FILE)
+      if os.path.isfile(devtools_file_path):
+        os.remove(devtools_file_path)
+
+  def _TearDownEnvironment(self):
+    if self._profile_directory and os.path.exists(self._profile_directory):
+      # Remove the profile directory, which was hosted on a temp dir.
+      shutil.rmtree(self._profile_directory, ignore_errors=True)
+      self._profile_directory = None
+
+  def Create(self):
     if self._flash_path and not os.path.exists(self._flash_path):
       logging.warning(
           'Could not find Flash at %s. Continuing without Flash.\n'
@@ -60,6 +110,8 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
 
     self._InitPlatformIfNeeded()
 
+    startup_args = self.GetBrowserStartupArgs(self._browser_options)
+
     num_retries = 3
     for x in range(0, num_retries):
       returned_browser = None
@@ -67,15 +119,17 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
         returned_browser = None
 
         browser_backend = desktop_browser_backend.DesktopBrowserBackend(
-            self._platform_backend,
-            finder_options.browser_options, self._local_executable,
-            self._flash_path, self._is_content_shell, self._browser_directory)
+            self._platform_backend, self._browser_options,
+            self._browser_directory, self._profile_directory,
+            self._local_executable, self._flash_path, self._is_content_shell)
+
+        self._ClearCachesOnStart()
 
         returned_browser = browser.Browser(
-            browser_backend, self._platform_backend, self._credentials_path)
+            browser_backend, self._platform_backend, startup_args)
 
         return returned_browser
-      except Exception:
+      except Exception: # pylint: disable=broad-except
         report = 'Browser creation failed (attempt %d of %d)' % (
             (x + 1), num_retries)
         if x < num_retries - 1:
@@ -85,11 +139,42 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
         try:
           if returned_browser:
             returned_browser.Close()
-        except Exception:
+        except Exception: # pylint: disable=broad-except
           pass
         # Re-raise the exception the last time through.
         if x == num_retries - 1:
           raise
+
+  def GetBrowserStartupArgs(self, browser_options):
+    startup_args = chrome_startup_args.GetFromBrowserOptions(browser_options)
+    startup_args.extend(chrome_startup_args.GetReplayArgs(
+        self._platform_backend.network_controller_backend))
+
+    # Setting port=0 allows the browser to choose a suitable port.
+    startup_args.append('--remote-debugging-port=0')
+    startup_args.append('--enable-crash-reporter-for-testing')
+    startup_args.append('--disable-component-update')
+
+    if not self._is_content_shell:
+      startup_args.append('--window-size=1280,1024')
+      if self._flash_path:
+        startup_args.append('--ppapi-flash-path=%s' % self._flash_path)
+        # Also specify the version of Flash as a large version, so that it is
+        # not overridden by the bundled or component-updated version of Flash.
+        startup_args.append('--ppapi-flash-version=99.9.999.999')
+
+    if self.profile_directory is not None:
+      if self._is_content_shell:
+        startup_args.append('--data-path=%s' % self.profile_directory)
+      else:
+        startup_args.append('--user-data-dir=%s' % self.profile_directory)
+
+    trace_config_file = (self._platform_backend.tracing_controller_backend
+                         .GetChromeTraceConfigFile())
+    if trace_config_file:
+      startup_args.append('--trace-config-file=%s' % trace_config_file)
+
+    return startup_args
 
   def SupportsOptions(self, browser_options):
     if ((len(browser_options.extensions_to_load) != 0)
@@ -100,15 +185,11 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
   def UpdateExecutableIfNeeded(self):
     pass
 
-  def last_modification_time(self):
-    if os.path.exists(self._local_executable):
-      return os.path.getmtime(self._local_executable)
-    return -1
 
 def SelectDefaultBrowser(possible_browsers):
   local_builds_by_date = [
       b for b in sorted(possible_browsers,
-                        key=lambda b: b.last_modification_time())
+                        key=lambda b: b.last_modification_time)
       if b.is_local_build]
   if local_builds_by_date:
     return local_builds_by_date[-1]
@@ -116,14 +197,6 @@ def SelectDefaultBrowser(possible_browsers):
 
 def CanFindAvailableBrowsers():
   return not platform_module.GetHostPlatform().GetOSName() == 'chromeos'
-
-def CanPossiblyHandlePath(target_path):
-  _, extension = os.path.splitext(target_path.lower())
-  if sys.platform == 'darwin' or sys.platform.startswith('linux'):
-    return not extension
-  elif sys.platform.startswith('win'):
-    return extension == '.exe'
-  return False
 
 def FindAllBrowserTypes(_):
   return [
@@ -185,31 +258,25 @@ def FindAllAvailableBrowsers(finder_options, device):
     raise Exception('Platform not recognized')
 
   # Add the explicit browser executable if given and we can handle it.
-  if (finder_options.browser_executable and
-      CanPossiblyHandlePath(finder_options.browser_executable)):
+  if finder_options.browser_executable:
     is_content_shell = finder_options.browser_executable.endswith(
         content_shell_app_name)
-    is_chrome_or_chromium = len([
-        x for x in chromium_app_names
-        if finder_options.browser_executable.endswith(x)
-    ]) != 0
 
     # It is okay if the executable name doesn't match any of known chrome
     # browser executables, since it may be of a different browser.
-    if is_chrome_or_chromium or is_content_shell:
-      normalized_executable = os.path.expanduser(
-          finder_options.browser_executable)
-      if path_module.IsExecutable(normalized_executable):
-        browser_directory = os.path.dirname(finder_options.browser_executable)
-        browsers.append(PossibleDesktopBrowser(
-            'exact', finder_options, normalized_executable, flash_path,
-            is_content_shell,
-            browser_directory))
-      else:
-        raise exceptions.PathMissingError(
-            '%s specified by --browser-executable does not exist or is not '
-            'executable' %
-            normalized_executable)
+    normalized_executable = os.path.expanduser(
+        finder_options.browser_executable)
+    if path_module.IsExecutable(normalized_executable):
+      browser_directory = os.path.dirname(finder_options.browser_executable)
+      browsers.append(PossibleDesktopBrowser(
+          'exact', finder_options, normalized_executable, flash_path,
+          is_content_shell,
+          browser_directory))
+    else:
+      raise exceptions.PathMissingError(
+          '%s specified by --browser-executable does not exist or is not '
+          'executable' %
+          normalized_executable)
 
   def AddIfFound(browser_type, build_path, app_name, content_shell):
     app = os.path.join(build_path, app_name)

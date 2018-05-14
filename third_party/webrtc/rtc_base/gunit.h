@@ -8,14 +8,14 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_RTC_BASE_GUNIT_H_
-#define WEBRTC_RTC_BASE_GUNIT_H_
+#ifndef RTC_BASE_GUNIT_H_
+#define RTC_BASE_GUNIT_H_
 
-#include "webrtc/rtc_base/fakeclock.h"
-#include "webrtc/rtc_base/logging.h"
-#include "webrtc/rtc_base/thread.h"
+#include "rtc_base/fakeclock.h"
+#include "rtc_base/logging.h"
+#include "rtc_base/thread.h"
 #if defined(GTEST_RELATIVE_PATH)
-#include "webrtc/test/gtest.h"
+#include "test/gtest.h"
 #else
 #include "testing/base/public/gunit.h"
 #endif
@@ -83,19 +83,19 @@
 // Version with a "soft" timeout and a margin. This logs if the timeout is
 // exceeded, but it only fails if the expression still isn't true after the
 // margin time passes.
-#define EXPECT_TRUE_WAIT_MARGIN(ex, timeout, margin)                       \
-  GTEST_AMBIGUOUS_ELSE_BLOCKER_                                            \
-  if (bool res = true) {                                                   \
-    WAIT_(ex, timeout, res);                                               \
-    if (res)                                                               \
-      break;                                                               \
-    LOG(LS_WARNING) << "Expression " << #ex << " still not true after "    \
-                    << (timeout) << "ms; waiting an additional " << margin \
-                    << "ms";                                               \
-    WAIT_(ex, margin, res);                                                \
-    if (!res)                                                              \
-      goto GTEST_CONCAT_TOKEN_(gunit_label_, __LINE__);                    \
-  } else                                                                   \
+#define EXPECT_TRUE_WAIT_MARGIN(ex, timeout, margin)                           \
+  GTEST_AMBIGUOUS_ELSE_BLOCKER_                                                \
+  if (bool res = true) {                                                       \
+    WAIT_(ex, timeout, res);                                                   \
+    if (res)                                                                   \
+      break;                                                                   \
+    RTC_LOG(LS_WARNING) << "Expression " << #ex << " still not true after "    \
+                        << (timeout) << "ms; waiting an additional " << margin \
+                        << "ms";                                               \
+    WAIT_(ex, margin, res);                                                    \
+    if (!res)                                                                  \
+      goto GTEST_CONCAT_TOKEN_(gunit_label_, __LINE__);                        \
+  } else                                                                       \
     GTEST_CONCAT_TOKEN_(gunit_label_, __LINE__) : EXPECT_TRUE(ex)
 
 // Wait until "ex" is true, or "timeout" expires, using fake clock where
@@ -157,4 +157,16 @@
   } else                                                 \
     GTEST_CONCAT_TOKEN_(gunit_label_, __LINE__) : ASSERT_EQ(v1, v2)
 
-#endif  // WEBRTC_RTC_BASE_GUNIT_H_
+// Usage: EXPECT_PRED_FORMAT2(AssertStartsWith, str, "prefix");
+testing::AssertionResult AssertStartsWith(const char* str_expr,
+                                          const char* prefix_expr,
+                                          const std::string& str,
+                                          const std::string& prefix);
+
+// Usage: EXPECT_PRED_FORMAT2(AssertStringContains, str, "substring");
+testing::AssertionResult AssertStringContains(const char* str_expr,
+                                              const char* substr_expr,
+                                              const std::string& str,
+                                              const std::string& substr);
+
+#endif  // RTC_BASE_GUNIT_H_

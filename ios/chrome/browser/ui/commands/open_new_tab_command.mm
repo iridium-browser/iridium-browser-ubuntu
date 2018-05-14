@@ -12,12 +12,15 @@
 
 @synthesize incognito = _incognito;
 @synthesize originPoint = _originPoint;
+@synthesize userInitiated = _userInitiated;
+@synthesize shouldFocusOmnibox = _shouldFocusOmnibox;
 
 - (instancetype)initWithIncognito:(BOOL)incognito
                       originPoint:(CGPoint)originPoint {
-  if ((self = [super initWithTag:0])) {
+  if ((self = [super init])) {
     _incognito = incognito;
     _originPoint = originPoint;
+    _userInitiated = YES;
   }
   return self;
 }

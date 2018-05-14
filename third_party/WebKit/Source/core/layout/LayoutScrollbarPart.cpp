@@ -117,12 +117,12 @@ void LayoutScrollbarPart::LayoutVerticalPart() {
   }
 }
 
-static int CalcScrollbarThicknessUsing(SizeType size_type,
-                                       const Length& length,
-                                       int containing_length) {
+int LayoutScrollbarPart::CalcScrollbarThicknessUsing(SizeType size_type,
+                                                     const Length& length,
+                                                     int containing_length) {
   if (!length.IsIntrinsicOrAuto() || (size_type == kMinSize && length.IsAuto()))
     return MinimumValueForLength(length, LayoutUnit(containing_length)).ToInt();
-  return ScrollbarTheme::GetTheme().ScrollbarThickness();
+  return scrollbar_->GetTheme().ScrollbarThickness();
 }
 
 void LayoutScrollbarPart::ComputeScrollbarWidth() {
@@ -146,11 +146,14 @@ void LayoutScrollbarPart::ComputeScrollbarWidth() {
   SetWidth(LayoutUnit(std::max(min_width, std::min(max_width, w))));
 
   // Buttons and track pieces can all have margins along the axis of the
-  // scrollbar.
-  SetMarginLeft(
-      MinimumValueForLength(Style()->MarginLeft(), LayoutUnit(visible_size)));
-  SetMarginRight(
-      MinimumValueForLength(Style()->MarginRight(), LayoutUnit(visible_size)));
+  // scrollbar. Values are rounded because scrollbar parts need to be rendered
+  // at device pixel boundaries.
+  SetMarginLeft(LayoutUnit(
+      MinimumValueForLength(Style()->MarginLeft(), LayoutUnit(visible_size))
+          .Round()));
+  SetMarginRight(LayoutUnit(
+      MinimumValueForLength(Style()->MarginRight(), LayoutUnit(visible_size))
+          .Round()));
 }
 
 void LayoutScrollbarPart::ComputeScrollbarHeight() {
@@ -174,11 +177,14 @@ void LayoutScrollbarPart::ComputeScrollbarHeight() {
   SetHeight(LayoutUnit(std::max(min_height, std::min(max_height, h))));
 
   // Buttons and track pieces can all have margins along the axis of the
-  // scrollbar.
-  SetMarginTop(
-      MinimumValueForLength(Style()->MarginTop(), LayoutUnit(visible_size)));
-  SetMarginBottom(
-      MinimumValueForLength(Style()->MarginBottom(), LayoutUnit(visible_size)));
+  // scrollbar. Values are rounded because scrollbar parts need to be rendered
+  // at device pixel boundaries.
+  SetMarginTop(LayoutUnit(
+      MinimumValueForLength(Style()->MarginTop(), LayoutUnit(visible_size))
+          .Round()));
+  SetMarginBottom(LayoutUnit(
+      MinimumValueForLength(Style()->MarginBottom(), LayoutUnit(visible_size))
+          .Round()));
 }
 
 void LayoutScrollbarPart::ComputePreferredLogicalWidths() {
@@ -209,9 +215,10 @@ void LayoutScrollbarPart::StyleDidChange(StyleDifference diff,
 }
 
 void LayoutScrollbarPart::ImageChanged(WrappedImagePtr image,
+                                       CanDeferInvalidation defer,
                                        const IntRect* rect) {
   SetNeedsPaintInvalidation();
-  LayoutBlock::ImageChanged(image, rect);
+  LayoutBlock::ImageChanged(image, defer, rect);
 }
 
 LayoutObject* LayoutScrollbarPart::ScrollbarStyleSource() const {

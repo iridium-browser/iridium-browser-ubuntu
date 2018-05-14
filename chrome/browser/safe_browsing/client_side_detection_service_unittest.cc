@@ -8,23 +8,22 @@
 
 #include <map>
 #include <memory>
-#include <queue>
 #include <string>
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/queue.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
-#include "components/safe_browsing/csd.pb.h"
+#include "components/safe_browsing/proto/csd.pb.h"
 #include "components/variations/variations_associated_data.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/sha2.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -71,14 +70,11 @@ class ClientSideDetectionServiceTest : public testing::Test {
  protected:
   void SetUp() override {
     factory_.reset(new net::FakeURLFetcherFactory(NULL));
-    browser_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
-                                                         &msg_loop_));
   }
 
   void TearDown() override {
     base::RunLoop().RunUntilIdle();
     csd_service_.reset();
-    browser_thread_.reset();
   }
 
   bool SendClientReportPhishingRequest(const GURL& phishing_url,
@@ -87,25 +83,26 @@ class ClientSideDetectionServiceTest : public testing::Test {
     request->set_url(phishing_url.spec());
     request->set_client_score(score);
     request->set_is_phishing(true);  // client thinks the URL is phishing.
+    base::RunLoop run_loop;
     csd_service_->SendClientReportPhishingRequest(
-        request,
-        false,
+        request, false,
         base::Bind(&ClientSideDetectionServiceTest::SendRequestDone,
-                   base::Unretained(this)));
+                   base::Unretained(this), run_loop.QuitWhenIdleClosure()));
     phishing_url_ = phishing_url;
-    base::RunLoop().Run();  // Waits until callback is called.
+    run_loop.Run();  // Waits until callback is called.
     return is_phishing_;
   }
 
   bool SendClientReportMalwareRequest(const GURL& url) {
     std::unique_ptr<ClientMalwareRequest> request(new ClientMalwareRequest());
     request->set_url(url.spec());
+    base::RunLoop run_loop;
     csd_service_->SendClientReportMalwareRequest(
         request.release(),
         base::Bind(&ClientSideDetectionServiceTest::SendMalwareRequestDone,
-                   base::Unretained(this)));
+                   base::Unretained(this), run_loop.QuitWhenIdleClosure()));
     phishing_url_ = url;
-    base::RunLoop().Run();  // Waits until callback is called.
+    run_loop.Run();  // Waits until callback is called.
     return is_malware_;
   }
 
@@ -139,22 +136,22 @@ class ClientSideDetectionServiceTest : public testing::Test {
         response_data, response_code, status);
   }
 
-  int GetNumReports(std::queue<base::Time>* report_times) {
+  int GetNumReports(base::queue<base::Time>* report_times) {
     return csd_service_->GetNumReports(report_times);
   }
 
-  std::queue<base::Time>& GetPhishingReportTimes() {
+  base::queue<base::Time>& GetPhishingReportTimes() {
     return csd_service_->phishing_report_times_;
   }
 
-  std::queue<base::Time>& GetMalwareReportTimes() {
+  base::queue<base::Time>& GetMalwareReportTimes() {
     return csd_service_->malware_report_times_;
   }
 
   void SetCache(const GURL& gurl, bool is_phishing, base::Time time) {
     csd_service_->cache_[gurl] =
-        base::MakeUnique<ClientSideDetectionService::CacheState>(
-            is_phishing, time);
+        std::make_unique<ClientSideDetectionService::CacheState>(is_phishing,
+                                                                 time);
   }
 
   void TestCache() {
@@ -165,28 +162,28 @@ class ClientSideDetectionServiceTest : public testing::Test {
             ClientSideDetectionService::kNegativeCacheIntervalDays) +
         base::TimeDelta::FromMinutes(5);
     cache[GURL("http://first.url.com/")] =
-        base::MakeUnique<ClientSideDetectionService::CacheState>(false, time);
+        std::make_unique<ClientSideDetectionService::CacheState>(false, time);
 
     time =
         now - base::TimeDelta::FromDays(
             ClientSideDetectionService::kNegativeCacheIntervalDays) -
         base::TimeDelta::FromHours(1);
-    cache[GURL("http://second.url.com/")]
-        = base::MakeUnique<ClientSideDetectionService::CacheState>(false, time);
+    cache[GURL("http://second.url.com/")] =
+        std::make_unique<ClientSideDetectionService::CacheState>(false, time);
 
     time =
         now - base::TimeDelta::FromMinutes(
             ClientSideDetectionService::kPositiveCacheIntervalMinutes) -
         base::TimeDelta::FromMinutes(5);
-    cache[GURL("http://third.url.com/")]
-        = base::MakeUnique<ClientSideDetectionService::CacheState>(true, time);
+    cache[GURL("http://third.url.com/")] =
+        std::make_unique<ClientSideDetectionService::CacheState>(true, time);
 
     time =
         now - base::TimeDelta::FromMinutes(
             ClientSideDetectionService::kPositiveCacheIntervalMinutes) +
         base::TimeDelta::FromMinutes(5);
     cache[GURL("http://fourth.url.com/")] =
-        base::MakeUnique<ClientSideDetectionService::CacheState>(true, time);
+        std::make_unique<ClientSideDetectionService::CacheState>(true, time);
 
     csd_service_->UpdateCache();
 
@@ -229,26 +226,29 @@ class ClientSideDetectionServiceTest : public testing::Test {
   }
 
  protected:
+  content::TestBrowserThreadBundle browser_thread_bundle_;
   std::unique_ptr<ClientSideDetectionService> csd_service_;
   std::unique_ptr<net::FakeURLFetcherFactory> factory_;
-  base::MessageLoop msg_loop_;
 
  private:
-  void SendRequestDone(GURL phishing_url, bool is_phishing) {
+  void SendRequestDone(base::OnceClosure continuation_callback,
+                       GURL phishing_url,
+                       bool is_phishing) {
     ASSERT_EQ(phishing_url, phishing_url_);
     is_phishing_ = is_phishing;
-    msg_loop_.QuitWhenIdle();
+    std::move(continuation_callback).Run();
   }
 
-  void SendMalwareRequestDone(GURL original_url, GURL malware_url,
+  void SendMalwareRequestDone(base::OnceClosure continuation_callback,
+                              GURL original_url,
+                              GURL malware_url,
                               bool is_malware) {
     ASSERT_EQ(phishing_url_, original_url);
     confirmed_malware_url_ = malware_url;
     is_malware_ = is_malware;
-    msg_loop_.QuitWhenIdle();
+    std::move(continuation_callback).Run();
   }
 
-  std::unique_ptr<content::TestBrowserThread> browser_thread_;
   std::unique_ptr<base::FieldTrialList> field_trials_;
 
   GURL phishing_url_;
@@ -304,7 +304,7 @@ TEST_F(ClientSideDetectionServiceTest, SendClientReportPhishingRequest) {
   base::Time after = base::Time::Now();
 
   // Check that we have recorded all 3 requests within the correct time range.
-  std::queue<base::Time>& report_times = GetPhishingReportTimes();
+  base::queue<base::Time>& report_times = GetPhishingReportTimes();
   EXPECT_EQ(3U, report_times.size());
   while (!report_times.empty()) {
     base::Time time = report_times.back();
@@ -363,7 +363,7 @@ TEST_F(ClientSideDetectionServiceTest, SendClientReportMalwareRequest) {
 
   // Check that we have recorded all 5 requests within the correct time range.
   base::Time after = base::Time::Now();
-  std::queue<base::Time>& report_times = GetMalwareReportTimes();
+  base::queue<base::Time>& report_times = GetMalwareReportTimes();
   EXPECT_EQ(5U, report_times.size());
 
   // Check that the malware report limit was reached.
@@ -383,7 +383,7 @@ TEST_F(ClientSideDetectionServiceTest, GetNumReportTest) {
   SetModelFetchResponses();
   csd_service_.reset(ClientSideDetectionService::Create(NULL));
 
-  std::queue<base::Time>& report_times = GetPhishingReportTimes();
+  base::queue<base::Time>& report_times = GetPhishingReportTimes();
   base::Time now = base::Time::Now();
   base::TimeDelta twenty_five_hours = base::TimeDelta::FromHours(25);
   report_times.push(now - twenty_five_hours);

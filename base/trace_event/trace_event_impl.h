@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include <memory>
-#include <stack>
 #include <string>
 #include <vector>
 
@@ -41,8 +40,8 @@ typedef base::Callback<bool(const char* category_group_name,
 // class must implement this interface.
 class BASE_EXPORT ConvertableToTraceFormat {
  public:
-  ConvertableToTraceFormat() {}
-  virtual ~ConvertableToTraceFormat() {}
+  ConvertableToTraceFormat() = default;
+  virtual ~ConvertableToTraceFormat() = default;
 
   // Append the class info to the provided |out| string. The appended
   // data must be a valid JSON object. Strings must be properly quoted, and
@@ -99,7 +98,7 @@ class BASE_EXPORT TraceEvent {
                   unsigned long long id,
                   unsigned long long bind_id,
                   int num_args,
-                  const char** arg_names,
+                  const char* const* arg_names,
                   const unsigned char* arg_types,
                   const unsigned long long* arg_values,
                   std::unique_ptr<ConvertableToTraceFormat>* convertable_values,

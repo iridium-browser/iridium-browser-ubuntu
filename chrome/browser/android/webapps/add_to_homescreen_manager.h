@@ -20,41 +20,36 @@ class SkBitmap;
 struct ShortcutInfo;
 
 // AddToHomescreenManager is the C++ counterpart of
-// org.chromium.chrome.browser's AddToHomescreenManager in Java. The object
-// is owned by the Java object. It is created from there via a JNI
-// (InitializeAndStart) call and MUST BE DESTROYED via Destroy().
+// org.chromium.chrome.browser's AddToHomescreenManager in Java. This object
+// fetches the data required to add a URL to home screen. It is owned by the
+// Java counterpart, created from there via a JNI Start() call and MUST BE
+// DESTROYED via Destroy().
 class AddToHomescreenManager : public AddToHomescreenDataFetcher::Observer {
  public:
   AddToHomescreenManager(JNIEnv* env, jobject obj);
 
-  // Called by the Java counterpart to destroy its native half.
+  // Called by the Java counterpart to destroy this object.
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
 
-  // Adds a shortcut to the current URL to the Android home screen.
-  void AddShortcut(JNIEnv* env,
-                   const base::android::JavaParamRef<jobject>& obj,
-                   const base::android::JavaParamRef<jstring>& title);
+  // Adds the current URL to the Android home screen using |title|. Depending on
+  // the site, the shortcut may be in the form of a bookmark shortcut or a
+  // WebAPK (which ignores the provided title).
+  void AddToHomescreen(JNIEnv* env,
+                       const base::android::JavaParamRef<jobject>& obj,
+                       const base::android::JavaParamRef<jstring>& title);
 
-  // Starts the add-to-homescreen process.
+  // Starts the process of fetching data required for add to home screen.
   void Start(content::WebContents* web_contents);
 
  private:
   ~AddToHomescreenManager() override;
 
-  // Shows alert to prompt user for name of home screen shortcut.
-  void ShowDialog();
-
-  // Called only when the AddToHomescreenDataFetcher has retrieved all of the
-  // data needed to install a WebAPK.
-  void CreateInfoBarForWebApk(const ShortcutInfo& info,
-                              const SkBitmap& primary_icon,
-                              const SkBitmap& badge_icon);
-
   void RecordAddToHomescreen();
 
   // AddToHomescreenDataFetcher::Observer:
-  void OnDidDetermineWebApkCompatibility(bool is_webapk_compatible) override;
-  void OnUserTitleAvailable(const base::string16& user_title) override;
+  void OnUserTitleAvailable(const base::string16& user_title,
+                            const GURL& url,
+                            bool is_webapk_compatible) override;
   void OnDataAvailable(const ShortcutInfo& info,
                        const SkBitmap& primary_icon,
                        const SkBitmap& badge_icon) override;

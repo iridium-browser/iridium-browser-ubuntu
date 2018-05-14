@@ -29,21 +29,24 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Element.h"
-#include "core/style/ComputedStyle.h"
 
 namespace blink {
+
+class ComputedStyle;
 
 class CORE_EXPORT PseudoElement : public Element {
  public:
   static PseudoElement* Create(Element* parent, PseudoId);
 
-  PassRefPtr<ComputedStyle> CustomStyleForLayoutObject() override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() override;
   void AttachLayoutTree(AttachContext&) override;
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
 
   bool CanStartSelection() const override { return false; }
   bool CanContainRangeEndPoint() const override { return false; }
   PseudoId GetPseudoId() const override { return pseudo_id_; }
+  const ComputedStyle* VirtualEnsureComputedStyle(
+      PseudoId pseudo_element_specifier = kPseudoIdNone) final;
 
   static String PseudoElementNameForEvents(PseudoId);
 
@@ -55,23 +58,14 @@ class CORE_EXPORT PseudoElement : public Element {
   PseudoElement(Element*, PseudoId);
 
  private:
-  void DidRecalcStyle() override;
+  void DidRecalcStyle(StyleRecalcChange) override;
 
   PseudoId pseudo_id_;
 };
 
 const QualifiedName& PseudoElementTagName();
 
-inline bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle* style) {
-  if (!style)
-    return false;
-  if (style->Display() == EDisplay::kNone)
-    return false;
-  if (style->StyleType() == kPseudoIdFirstLetter ||
-      style->StyleType() == kPseudoIdBackdrop)
-    return true;
-  return style->GetContentData();
-}
+bool PseudoElementLayoutObjectIsNeeded(const ComputedStyle*);
 
 DEFINE_ELEMENT_TYPE_CASTS(PseudoElement, IsPseudoElement());
 

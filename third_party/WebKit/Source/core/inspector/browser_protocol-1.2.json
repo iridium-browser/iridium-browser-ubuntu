@@ -488,25 +488,6 @@
                 "parameters": [
                     { "name": "threshold", "type": "number", "description": "If set to a positive number, specifies threshold in seconds for input event latency that will cause a console warning about blocked event to be issued. If zero or less, the warning is disabled." }
                 ]
-            },
-            {
-                "name": "setControlNavigations",
-                "parameters": [
-                    { "name": "enabled", "type": "boolean" }
-                ],
-                "description": "Toggles navigation throttling which allows programatic control over navigation and redirect response.",
-                "experimental": true,
-                "handlers": ["browser"]
-            },
-            {
-                "name": "processNavigation",
-                "parameters": [
-                    { "name": "response", "$ref": "NavigationResponse" },
-                    { "name": "navigationId", "type": "integer" }
-                ],
-                "description": "Should be sent in response to a navigationRequested or a redirectRequested event, telling the browser how to handle the navigation.",
-                "experimental": true,
-                "handlers": ["browser"]
             }
         ],
         "events": [
@@ -633,17 +614,6 @@
             {
                 "name": "interstitialHidden",
                 "description": "Fired when interstitial page was hidden",
-                "handlers": ["browser"]
-            },
-            {
-                "name": "navigationRequested",
-                "description": "Fired when a navigation is started if navigation throttles are enabled.  The navigation will be deferred until processNavigation is called.",
-                "parameters": [
-                    { "name": "isInMainFrame", "type": "boolean", "description": "Whether the navigation is taking place in the main frame or in a subframe." },
-                    { "name": "isRedirect", "type": "boolean", "description": "Whether the navigation has encountered a server redirect or not." },
-                    { "name": "navigationId", "type": "integer" },
-                    { "name": "url", "type": "string", "description": "URL of requested navigation." }
-                ],
                 "handlers": ["browser"]
             }
         ]
@@ -853,7 +823,7 @@
             {
                 "id": "SecurityState",
                 "type": "string",
-                "enum": ["unknown", "neutral", "insecure", "warning", "secure", "info"],
+                "enum": ["unknown", "neutral", "insecure", "secure", "info"],
                 "description": "The security level of a page or resource."
             },
             {
@@ -1046,7 +1016,7 @@
                 "description": "HTTP response data.",
                 "properties": [
                     { "name": "url", "type": "string", "description": "Response URL. This URL can be different from CachedResource.url in case of redirect." },
-                    { "name": "status", "type": "number", "description": "HTTP response status code." },
+                    { "name": "status", "type": "integer", "description": "HTTP response status code." },
                     { "name": "statusText", "type": "string", "description": "HTTP response status text." },
                     { "name": "headers", "$ref": "Headers", "description": "HTTP response headers." },
                     { "name": "headersText", "type": "string", "optional": true, "description": "HTTP response headers text." },
@@ -1081,7 +1051,7 @@
                 "description": "WebSocket response data.",
                 "experimental": true,
                 "properties": [
-                    { "name": "status", "type": "number", "description": "HTTP response status code." },
+                    { "name": "status", "type": "integer", "description": "HTTP response status code." },
                     { "name": "statusText", "type": "string", "description": "HTTP response status text." },
                     { "name": "headers", "$ref": "Headers", "description": "HTTP response headers." },
                     { "name": "headersText", "type": "string", "optional": true, "description": "HTTP response headers text." },
@@ -2295,7 +2265,7 @@
                 "returns": [
                     { "name": "nodeIds", "type": "array", "items": { "$ref": "NodeId" }, "description": "Ids of the search result nodes." }
                 ],
-                "description": "Returns search results from given <code>fromIndex</code> to given <code>toIndex</code> from the sarch with the given identifier.",
+                "description": "Returns search results from given <code>fromIndex</code> to given <code>toIndex</code> from the search with the given identifier.",
                 "experimental": true
             },
             {

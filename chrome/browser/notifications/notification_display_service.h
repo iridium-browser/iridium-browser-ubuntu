@@ -13,73 +13,62 @@
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "chrome/browser/notifications/notification_common.h"
+#include "chrome/browser/notifications/notification_handler.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-namespace base {
-class NullableString16;
-}
-
-class Notification;
-class NotificationHandler;
 class Profile;
 
-// Profile-bound service that enables notifications to be displayed and
-// interacted with on the user's screen, orthogonal of whether this
-// functionality is provided by the browser or by the operating system. An
-// instance can be retrieved through the NotificationDisplayServiceFactory.
-//
-// TODO(peter): Add a NotificationHandler mechanism for registering listeners.
+namespace message_center {
+class Notification;
+}
+
+// Profile-bound service that enables user-visible notifications to be displayed
+// and managed. Notifications may either be presented using a notification
+// center provided by the platform, or by Chrome's Message Center.
 class NotificationDisplayService : public KeyedService {
  public:
+  ~NotificationDisplayService() override;
+
+  // Callback to be used with the GetDisplayed() method. Includes the set of
+  // notification ids that is being displayed to the user. The
+  // |supports_synchronization| callback indicates whether the platform has the
+  // ability to query which notifications are still being displayed.
+  //
+  // TODO(peter): Rename |supports_synchronization| to |supported|.
+  // TODO(peter): Change this to be a base::OnceCallback, remove use of the
+  //              std::unique_ptr<> in favor of move semantics.
   using DisplayedNotificationsCallback =
       base::Callback<void(std::unique_ptr<std::set<std::string>>,
                           bool /* supports_synchronization */)>;
-  explicit NotificationDisplayService(Profile* profile);
-  ~NotificationDisplayService() override;
 
-  // Displays the |notification| identified by |notification_id|.
-  virtual void Display(NotificationCommon::Type notification_type,
-                       const std::string& notification_id,
-                       const Notification& notification) = 0;
+  // Returns an instance of the display service for the given |profile|.
+  static NotificationDisplayService* GetForProfile(Profile* profile);
 
-  // Closes the notification identified by |notification_id|.
-  virtual void Close(NotificationCommon::Type notification_type,
+  // Returns the NDS for system notifications which aren't tied to a particular
+  // user. Currently only implemented on Chrome OS. TODO(estade): implement
+  // elsewhere as needed.
+  static NotificationDisplayService* GetForSystemNotifications();
+
+  // Displays the |notification| of type |notification_type|. The |metadata|
+  // may be provided for certain notification types that require additional
+  // information for the notification to be displayed.
+  virtual void Display(
+      NotificationHandler::Type notification_type,
+      const message_center::Notification& notification,
+      std::unique_ptr<NotificationCommon::Metadata> metadata = nullptr) = 0;
+
+  // Closes the notification having |notification_id| of |notification_type|.
+  virtual void Close(NotificationHandler::Type notification_type,
                      const std::string& notification_id) = 0;
 
-  // Writes the ids of all currently displaying notifications and
-  // invokes |callback| with the result once known.
+  // Gets the IDs of currently displaying notifications and invokes |callback|
+  // once available. Not all backends support retrieving this information.
   virtual void GetDisplayed(const DisplayedNotificationsCallback& callback) = 0;
 
-  // Used to propagate back events originate from the user (click, close...).
-  // The events are received and dispatched to the right consumer depending on
-  // the type of notification. Consumers include, service workers, pages,
-  // extensions...
-  void ProcessNotificationOperation(NotificationCommon::Operation operation,
-                                    NotificationCommon::Type notification_type,
-                                    const std::string& origin,
-                                    const std::string& notification_id,
-                                    int action_index,
-                                    const base::NullableString16& reply);
-
-  // Return whether a notification of |notification_type| should be displayed
-  // for |origin| when the browser is in full screen mode.
-  bool ShouldDisplayOverFullscreen(const GURL& origin,
-                                   NotificationCommon::Type notification_type);
-
  protected:
-  NotificationHandler* GetNotificationHandler(
-      NotificationCommon::Type notification_type);
+  NotificationDisplayService() = default;
 
  private:
-  // Registers an implementation object to handle notification operations
-  // for |notification_type|.
-  void AddNotificationHandler(NotificationCommon::Type notification_type,
-                              std::unique_ptr<NotificationHandler> handler);
-
-  std::map<NotificationCommon::Type, std::unique_ptr<NotificationHandler>>
-      notification_handlers_;
-  Profile* profile_;
-
   DISALLOW_COPY_AND_ASSIGN(NotificationDisplayService);
 };
 

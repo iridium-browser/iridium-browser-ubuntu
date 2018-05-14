@@ -210,6 +210,7 @@ struct MEDIA_EXPORT HandlerReference : Box {
   std::string name;
 };
 
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 struct MEDIA_EXPORT AVCDecoderConfigurationRecord : Box {
   DECLARE_BOX_METHODS(AVCDecoderConfigurationRecord);
 
@@ -235,6 +236,7 @@ struct MEDIA_EXPORT AVCDecoderConfigurationRecord : Box {
  private:
   bool ParseInternal(BufferReader* reader, MediaLog* media_log);
 };
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 struct MEDIA_EXPORT VPCodecConfigurationRecord : Box {
   DECLARE_BOX_METHODS(VPCodecConfigurationRecord);
@@ -272,7 +274,29 @@ struct MEDIA_EXPORT ElementaryStreamDescriptor : Box {
   DECLARE_BOX_METHODS(ElementaryStreamDescriptor);
 
   uint8_t object_type;
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
   AAC aac;
+#endif
+};
+
+struct MEDIA_EXPORT FlacSpecificBox : Box {
+  DECLARE_BOX_METHODS(FlacSpecificBox);
+
+  // We only care about the first metadata block, and it must be
+  // METADATA_BLOCK_STREAM_INFO.
+
+  // For FLAC decoder configuration, this is needed as extradata().
+  // TODO(wolenetz,xhwang): MediaCodec or CDM decode of FLAC may need the
+  // METADATA_BLOCK_HEADER, too (and if so, we may need to force the
+  // last-metadata-block-flag in that header to be true, to allow us to ignore
+  // non-streaminfo blocks.) Alternatively, the header can be reconstructed.
+  // See https://crbug.com/747050.
+  std::vector<uint8_t> stream_info;
+
+  // MP4StreamParser needs this subset of |stream_info| parsed:
+  uint32_t sample_rate;
+  uint8_t channel_count;
+  uint8_t bits_per_sample;
 };
 
 struct MEDIA_EXPORT AudioSampleEntry : Box {
@@ -286,6 +310,7 @@ struct MEDIA_EXPORT AudioSampleEntry : Box {
 
   ProtectionSchemeInfo sinf;
   ElementaryStreamDescriptor esds;
+  FlacSpecificBox dfla;
 };
 
 struct MEDIA_EXPORT SampleDescription : Box {

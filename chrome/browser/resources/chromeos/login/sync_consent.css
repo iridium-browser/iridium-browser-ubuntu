@@ -1,0 +1,45 @@
+/* Copyright 2017 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:root {
+  color: #333;
+  font: 13px Roboto, sans-serif;
+  font-weight: 400; /* roboto-regular */
+  height: 640px;
+  width: 768px;
+  --sync-consent-dialog-list-item-border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.overview-list-item {
+  background-color: var(--google-grey-100);
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.overview-list-item-icon {
+  -webkit-padding-end: 16px;
+}
+
+.overview-list-item-title {
+  font-weight: 500; /* roboto-medium */
+  margin-bottom: 4px;
+}
+
+.sync-status-line {
+  padding-top: 32px;
+}
+
+a {
+  color: var(--google-blue-500);
+  text-decoration: none;
+  width: fit-content;
+}
+
+#syncConsentOverviewDialog .bottom-buttons {
+  padding: 0 6px; /* = 8px - 2px button border */
+}
+
+#acceptAndContinue {
+  -webkit-padding-end: 18px;
+}

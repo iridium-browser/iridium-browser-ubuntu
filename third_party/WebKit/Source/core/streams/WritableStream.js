@@ -4,9 +4,9 @@
 
 // Implementation of WritableStream for Blink.  See
 // https://streams.spec.whatwg.org/#ws. The implementation closely follows the
-// standard, except where required for performance or integration with Blink. In
-// particular, classes, methods and abstract operations are implemented in the
-// same order as in the standard, to simplify side-by-side reading.
+// standard, except where required for performance or integration with Blink.
+// In particular, classes, methods and abstract operations are implemented in
+// the same order as in the standard, to simplify side-by-side reading.
 
 (function(global, binding, v8) {
   'use strict';
@@ -17,25 +17,25 @@
   // TODO(ricea): Optimise [[closeRequest]] and [[inFlightCloseRequest]] into a
   // single slot + a flag to say which one is set at the moment.
   const _closeRequest = v8.createPrivateSymbol('[[closeRequest]]');
-  const _inFlightWriteRequest = v8.createPrivateSymbol('[[inFlightWriteRequest]]');
-  const _inFlightCloseRequest = v8.createPrivateSymbol('[[inFlightCloseRequest]]');
+  const _inFlightWriteRequest =
+        v8.createPrivateSymbol('[[inFlightWriteRequest]]');
+  const _inFlightCloseRequest =
+        v8.createPrivateSymbol('[[inFlightCloseRequest]]');
   const _pendingAbortRequest =
-      v8.createPrivateSymbol('[[pendingAbortRequest]]');
+        v8.createPrivateSymbol('[[pendingAbortRequest]]');
   // Flags and state are combined into a single integer field for efficiency.
   const _stateAndFlags = v8.createPrivateSymbol('[[state]] and flags');
   const _storedError = v8.createPrivateSymbol('[[storedError]]');
   const _writableStreamController =
-      v8.createPrivateSymbol('[[writableStreamController]]');
+        v8.createPrivateSymbol('[[writableStreamController]]');
   const _writer = v8.createPrivateSymbol('[[writer]]');
   const _writeRequests = v8.createPrivateSymbol('[[writeRequests]]');
   const _closedPromise = v8.createPrivateSymbol('[[closedPromise]]');
   const _ownerWritableStream =
-      v8.createPrivateSymbol('[[ownerWritableStream]]');
+        v8.createPrivateSymbol('[[ownerWritableStream]]');
   const _readyPromise = v8.createPrivateSymbol('[[readyPromise]]');
   const _controlledWritableStream =
-      v8.createPrivateSymbol('[[controlledWritableStream]]');
-  const _queue = v8.createPrivateSymbol('[[queue]]');
-  const _queueTotalSize = v8.createPrivateSymbol('[[queueTotalSize]]');
+        v8.createPrivateSymbol('[[controlledWritableStream]]');
   const _started = v8.createPrivateSymbol('[[started]]');
   const _strategyHWM = v8.createPrivateSymbol('[[strategyHWM]]');
   const _strategySize = v8.createPrivateSymbol('[[strategySize]]');
@@ -57,42 +57,53 @@
   // the global object may have been overwritten. See "V8 Extras Design Doc",
   // section "Security Considerations".
   // https://docs.google.com/document/d/1AT5-T0aHGp7Lt29vPWFr2-qG8r3l9CByyvKwEuA8Ec0/edit#heading=h.9yixony1a18r
-  const undefined = global.undefined;
-
   const defineProperty = global.Object.defineProperty;
-  const hasOwnProperty = v8.uncurryThis(global.Object.hasOwnProperty);
 
-  const Function_apply = v8.uncurryThis(global.Function.prototype.apply);
   const Function_call = v8.uncurryThis(global.Function.prototype.call);
 
   const TypeError = global.TypeError;
   const RangeError = global.RangeError;
 
   const Boolean = global.Boolean;
-  const Number = global.Number;
-  const Number_isNaN = Number.isNaN;
-  const Number_isFinite = Number.isFinite;
 
   const Promise = global.Promise;
   const thenPromise = v8.uncurryThis(Promise.prototype.then);
-  const Promise_resolve = v8.simpleBind(Promise.resolve, Promise);
-  const Promise_reject = v8.simpleBind(Promise.reject, Promise);
+  const Promise_resolve = Promise.resolve.bind(Promise);
+  const Promise_reject = Promise.reject.bind(Promise);
+
+  // From CommonOperations.js
+  const {
+    _queue,
+    _queueTotalSize,
+    hasOwnPropertyNoThrow,
+    rejectPromise,
+    resolvePromise,
+    markPromiseAsHandled,
+    promiseState,
+    DequeueValue,
+    EnqueueValueWithSize,
+    PeekQueueValue,
+    ResetQueue,
+    ValidateAndNormalizeQueuingStrategy,
+    CallOrNoop1,
+    PromiseCallOrNoop0,
+    PromiseCallOrNoop1,
+    PromiseCallOrNoop2
+  } = binding.streamOperations;
 
   // User-visible strings.
   const streamErrors = binding.streamErrors;
-  const errAbortLockedStream = 'Cannot abort a writable stream that is locked to a writer';
-  const errStreamAborted = 'The stream has been aborted';
+  const errAbortLockedStream =
+        'Cannot abort a writable stream that is locked to a writer';
   const errStreamAborting = 'The stream is in the process of being aborted';
-  const errWriterLockReleasedPrefix = 'This writable stream writer has been released and cannot be ';
-  const errCloseCloseRequestedStream =
-      'Cannot close a writable stream that has already been requested to be closed';
-  const errWriteCloseRequestedStream =
-      'Cannot write to a writable stream that is due to be closed';
-  const templateErrorCannotActionOnStateStream =
-      (action, state) => `Cannot ${action} a ${state} writable stream`;
-  const errReleasedWriterClosedPromise =
-      'This writable stream writer has been released and cannot be used to monitor the stream\'s state';
-  const templateErrorIsNotAFunction = f => `${f} is not a function`;
+  const errWriterLockReleasedPrefix =
+        'This writable stream writer has been released and cannot be ';
+  const errCloseCloseRequestedStream = 'Cannot close a writable stream that ' +
+        'has already been requested to be closed';
+  const templateErrorCannotActionOnStateStream = (action, state) =>
+        `Cannot ${action} a ${state} writable stream`;
+  const errReleasedWriterClosedPromise = 'This writable stream writer has ' +
+        'been released and cannot be used to monitor the stream\'s state';
 
   // These verbs are used after errWriterLockReleasedPrefix
   const verbUsedToGetTheDesiredSize = 'used to get the desiredSize';
@@ -105,7 +116,10 @@
     return new TypeError(errWriterLockReleasedPrefix + verb);
   }
 
-  const stateNames = {[CLOSED]: 'closed', [ERRORED]: 'errored'};
+  const stateNames = {
+    [CLOSED]: 'closed',
+    [ERRORED]: 'errored'
+  };
   function createCannotActionOnStateStreamError(action, state) {
     // assert(stateNames[state] !== undefined,
     //        `name for state ${state} exists in stateNames`);
@@ -113,45 +127,12 @@
         templateErrorCannotActionOnStateStream(action, stateNames[state]));
   }
 
-  // TODO(ricea): Share these with ReadableStream.
-  function internalError() {
-    throw new RangeError('WritableStream Internal Error');
-  }
-
-  function rejectPromise(p, reason) {
-    if (!v8.isPromise(p)) {
-      internalError();
-    }
-    v8.rejectPromise(p, reason);
-  }
-
-  function resolvePromise(p, value) {
-    if (!v8.isPromise(p)) {
-      internalError();
-    }
-    v8.resolvePromise(p, value);
-  }
-
-  function markPromiseAsHandled(p) {
-    if (!v8.isPromise(p)) {
-      internalError();
-    }
-    v8.markPromiseAsHandled(p);
-  }
-
-  function promiseState(p) {
-    if (!v8.isPromise(p)) {
-      internalError();
-    }
-    return v8.promiseState(p);
-  }
-
   function rejectPromises(queue, e) {
     queue.forEach(promise => rejectPromise(promise, e));
   }
 
   class WritableStream {
-    constructor(underlyingSink = {}, { size, highWaterMark = 1 } = {}) {
+    constructor(underlyingSink = {}, {size, highWaterMark = 1} = {}) {
       this[_stateAndFlags] = WRITABLE;
       this[_storedError] = undefined;
       this[_writer] = undefined;
@@ -165,10 +146,10 @@
       if (type !== undefined) {
         throw new RangeError(streamErrors.invalidType);
       }
-      this[_writableStreamController] =
-          new WritableStreamDefaultController(this, underlyingSink, size,
-                                              highWaterMark);
-      WritableStreamDefaultControllerStartSteps(this[_writableStreamController]);
+      this[_writableStreamController] = new WritableStreamDefaultController(
+          this, underlyingSink, size, highWaterMark);
+      WritableStreamDefaultControllerStartSteps(
+          this[_writableStreamController]);
     }
 
     get locked() {
@@ -190,7 +171,7 @@
 
     getWriter() {
       if (!IsWritableStream(this)) {
-         throw new TypeError(streamErrors.illegalInvocation);
+        throw new TypeError(streamErrors.illegalInvocation);
       }
       return AcquireWritableStreamDefaultWriter(this);
     }
@@ -203,7 +184,7 @@
   }
 
   function IsWritableStream(x) {
-    return hasOwnProperty(x, _writableStreamController);
+    return hasOwnPropertyNoThrow(x, _writableStreamController);
   }
 
   function IsWritableStreamLocked(stream) {
@@ -292,7 +273,8 @@
     // assert((stream[_stateAndFlags] & STATE_MASK) === ERRORING,
     //        '_stream_.[[state]] is `"erroring"`');
     // assert(!WritableStreamHasOperationMarkedInFlight(stream),
-    //        '! WritableStreamHasOperationMarkedInFlight(_stream_) is *false*');
+    //        '! WritableStreamHasOperationMarkedInFlight(_stream_) is ' +
+    //        '*false*');
 
     stream[_stateAndFlags] = (stream[_stateAndFlags] & ~STATE_MASK) | ERRORED;
 
@@ -345,7 +327,7 @@
     rejectPromise(stream[_inFlightWriteRequest], error);
     stream[_inFlightWriteRequest] = undefined;
 
-    let state = stream[_stateAndFlags] & STATE_MASK;
+    // const state = stream[_stateAndFlags] & STATE_MASK;
     // assert(state === WRITABLE || state === ERRORING,
     //        '_stream_.[[state]] is `"writable"` or `"erroring"`');
 
@@ -388,7 +370,7 @@
     rejectPromise(stream[_inFlightCloseRequest], error);
     stream[_inFlightCloseRequest] = undefined;
 
-    const state = stream[_stateAndFlags] & STATE_MASK;
+    // const state = stream[_stateAndFlags] & STATE_MASK;
     // assert(state === WRITABLE || state === ERRORING,
     //        '_stream_.[[state]] is `"writable"` or `"erroring"`');
 
@@ -489,6 +471,25 @@
     return stream[_storedError];
   }
 
+  // Expose internals for TransformStream
+  function isWritableStreamWritable(stream) {
+    // assert(
+    //     IsWritableStream(stream), '! IsWritableStream(stream) is true.');
+    return  (stream[_stateAndFlags] & STATE_MASK) === WRITABLE;
+  }
+
+  function isWritableStreamErroring(stream) {
+    // assert(
+    //     IsWritableStream(stream), '! IsWritableStream(stream) is true.');
+    return  (stream[_stateAndFlags] & STATE_MASK) === ERRORING;
+  }
+
+  function getWritableStreamController(stream) {
+    // assert(
+    //     IsWritableStream(stream), '! IsWritableStream(stream) is true.');
+    return stream[_writableStreamController];
+  }
+
   class WritableStreamDefaultWriter {
     constructor(stream) {
       if (!IsWritableStream(stream)) {
@@ -501,8 +502,7 @@
       stream[_writer] = this;
       const state = stream[_stateAndFlags] & STATE_MASK;
       switch (state) {
-        case WRITABLE:
-        {
+        case WRITABLE: {
           if (!WritableStreamCloseQueuedOrInFlight(stream) &&
               stream[_stateAndFlags] & BACKPRESSURE_FLAG) {
             this[_readyPromise] = v8.createPromise();
@@ -513,23 +513,20 @@
           break;
         }
 
-        case ERRORING:
-        {
+        case ERRORING: {
           this[_readyPromise] = Promise_reject(stream[_storedError]);
           markPromiseAsHandled(this[_readyPromise]);
           this[_closedPromise] = v8.createPromise();
           break;
         }
 
-        case CLOSED:
-        {
+        case CLOSED: {
           this[_readyPromise] = Promise_resolve(undefined);
           this[_closedPromise] = Promise_resolve(undefined);
           break;
         }
 
-        default:
-        {
+        default: {
           // assert(state === ERRORED, '_state_ is `"errored"`.');
           const storedError = stream[_storedError];
           this[_readyPromise] = Promise_reject(storedError);
@@ -566,7 +563,7 @@
     }
 
     abort(reason) {
-     if (!IsWritableStreamDefaultWriter(this)) {
+      if (!IsWritableStreamDefaultWriter(this)) {
         return Promise_reject(new TypeError(streamErrors.illegalInvocation));
       }
       if (this[_ownerWritableStream] === undefined) {
@@ -616,7 +613,7 @@
   // Writable Stream Writer Abstract Operations
 
   function IsWritableStreamDefaultWriter(x) {
-    return hasOwnProperty(x, _ownerWritableStream);
+    return hasOwnPropertyNoThrow(x, _ownerWritableStream);
   }
 
   function WritableStreamDefaultWriterAbort(writer, reason) {
@@ -642,8 +639,7 @@
     const promise = v8.createPromise();
     stream[_closeRequest] = promise;
 
-    if ((stream[_stateAndFlags] & BACKPRESSURE_FLAG) &&
-        state === WRITABLE) {
+    if ((stream[_stateAndFlags] & BACKPRESSURE_FLAG) && state === WRITABLE) {
       resolvePromise(writer[_readyPromise], undefined);
     }
     WritableStreamDefaultControllerClose(stream[_writableStreamController]);
@@ -721,7 +717,7 @@
     // assert(stream !== undefined, 'stream is not undefined.');
     const controller = stream[_writableStreamController];
     const chunkSize =
-        WritableStreamDefaultControllerGetChunkSize(controller, chunk);
+          WritableStreamDefaultControllerGetChunkSize(controller, chunk);
     if (stream !== writer[_ownerWritableStream]) {
       return Promise_reject(createWriterLockReleasedError(verbWrittenTo));
     }
@@ -779,7 +775,7 @@
       ResetQueue(this);
       this[_started] = false;
       const normalizedStrategy =
-          ValidateAndNormalizeQueuingStrategy(size, highWaterMark);
+            ValidateAndNormalizeQueuingStrategy(size, highWaterMark);
       this[_strategySize] = normalizedStrategy.size;
       this[_strategyHWM] = normalizedStrategy.highWaterMark;
       const backpressure = WritableStreamDefaultControllerGetBackpressure(this);
@@ -791,7 +787,7 @@
         throw new TypeError(streamErrors.illegalInvocation);
       }
       const state =
-          this[_controlledWritableStream][_stateAndFlags] & STATE_MASK;
+            this[_controlledWritableStream][_stateAndFlags] & STATE_MASK;
       if (state !== WRITABLE) {
         return;
       }
@@ -805,7 +801,8 @@
   // or impossible, so use static dispatch for now. This will have to be fixed
   // when adding a byte controller.
   function WritableStreamDefaultControllerAbortSteps(controller, reason) {
-    return PromiseInvokeOrNoop(controller[_underlyingSink], 'abort', [reason]);
+    return PromiseCallOrNoop1(controller[_underlyingSink], 'abort', reason,
+                              'underlyingSink.abort');
   }
 
   function WritableStreamDefaultControllerErrorSteps(controller) {
@@ -813,21 +810,21 @@
   }
 
   function WritableStreamDefaultControllerStartSteps(controller) {
-    const startResult =
-        InvokeOrNoop(controller[_underlyingSink], 'start', [controller]);
+    const startResult = CallOrNoop1(controller[_underlyingSink], 'start',
+                                    controller, 'underlyingSink.start');
     const stream = controller[_controlledWritableStream];
     const startPromise = Promise_resolve(startResult);
     thenPromise(
         startPromise,
         () => {
-          const state = stream[_stateAndFlags] & STATE_MASK;
+          // const state = stream[_stateAndFlags] & STATE_MASK;
           // assert(state === WRITABLE || state === ERRORING,
           //        '_stream_.[[state]] is `"writable"` or `"erroring"`');
           controller[_started] = true;
           WritableStreamDefaultControllerAdvanceQueueIfNeeded(controller);
         },
         r => {
-          const state = stream[_stateAndFlags] & STATE_MASK;
+          // const state = stream[_stateAndFlags] & STATE_MASK;
           // assert(state === WRITABLE || state === ERRORING,
           //        '_stream_.[[state]] is `"writable"` or `"erroring"`');
           controller[_started] = true;
@@ -838,7 +835,7 @@
   // Writable Stream Default Controller Abstract Operations
 
   function IsWritableStreamDefaultController(x) {
-    return hasOwnProperty(x, _underlyingSink);
+    return hasOwnPropertyNoThrow(x, _underlyingSink);
   }
 
   function WritableStreamDefaultControllerClose(controller) {
@@ -877,7 +874,7 @@
     if (!WritableStreamCloseQueuedOrInFlight(stream) &&
         (stream[_stateAndFlags] & STATE_MASK) === WRITABLE) {
       const backpressure =
-          WritableStreamDefaultControllerGetBackpressure(controller);
+            WritableStreamDefaultControllerGetBackpressure(controller);
       WritableStreamUpdateBackpressure(stream, backpressure);
     }
     WritableStreamDefaultControllerAdvanceQueueIfNeeded(controller);
@@ -906,14 +903,14 @@
     if (writeRecord === 'close') {
       WritableStreamDefaultControllerProcessClose(controller);
     } else {
-      WritableStreamDefaultControllerProcessWrite(controller,
-                                                  writeRecord.chunk);
+      WritableStreamDefaultControllerProcessWrite(
+          controller, writeRecord.chunk);
     }
   }
 
   function WritableStreamDefaultControllerErrorIfNeeded(controller, error) {
     const state =
-        controller[_controlledWritableStream][_stateAndFlags] & STATE_MASK;
+          controller[_controlledWritableStream][_stateAndFlags] & STATE_MASK;
     if (state === WRITABLE) {
       WritableStreamDefaultControllerError(controller, error);
     }
@@ -925,20 +922,20 @@
     DequeueValue(controller);
     // assert(controller[_queue].length === 0,
     //        'controller.[[queue]] is empty.');
-    const sinkClosePromise = PromiseInvokeOrNoop(
-        controller[_underlyingSink], 'close', []);
+    const sinkClosePromise =
+          PromiseCallOrNoop0(controller[_underlyingSink], 'close',
+                             'underlyingSink.close');
     thenPromise(
-        sinkClosePromise,
-        () => WritableStreamFinishInFlightClose(stream),
-        reason => WritableStreamFinishInFlightCloseWithError(stream, reason)
-        );
+        sinkClosePromise, () => WritableStreamFinishInFlightClose(stream),
+        reason => WritableStreamFinishInFlightCloseWithError(stream, reason));
   }
 
   function WritableStreamDefaultControllerProcessWrite(controller, chunk) {
     const stream = controller[_controlledWritableStream];
     WritableStreamMarkFirstWriteRequestInFlight(stream);
-    const sinkWritePromise = PromiseInvokeOrNoop(controller[_underlyingSink],
-                                                 'write', [chunk, controller]);
+    const sinkWritePromise = PromiseCallOrNoop2(
+        controller[_underlyingSink], 'write', chunk, controller,
+        'underlyingSink.write');
     thenPromise(
         sinkWritePromise,
         () => {
@@ -950,7 +947,7 @@
           if (!WritableStreamCloseQueuedOrInFlight(stream) &&
               state === WRITABLE) {
             const backpressure =
-                WritableStreamDefaultControllerGetBackpressure(controller);
+                  WritableStreamDefaultControllerGetBackpressure(controller);
             WritableStreamUpdateBackpressure(stream, backpressure);
           }
           WritableStreamDefaultControllerAdvanceQueueIfNeeded(controller);
@@ -962,7 +959,7 @@
 
   function WritableStreamDefaultControllerGetBackpressure(controller) {
     const desiredSize =
-        WritableStreamDefaultControllerGetDesiredSize(controller);
+          WritableStreamDefaultControllerGetDesiredSize(controller);
     return desiredSize <= 0;
   }
 
@@ -971,114 +968,6 @@
     // assert((stream[_stateAndFlags] & STATE_MASK) === WRITABLE,
     //        '_stream_.[[state]] is `"writable"`.');
     WritableStreamStartErroring(stream, error);
-  }
-
-  // Queue-with-Sizes Operations
-  //
-  // TODO(ricea): Share these operations with ReadableStream.js.
-  function DequeueValue(container) {
-    // assert(
-    //     hasOwnProperty(container, _queue) &&
-    //         hasOwnProperty(container, _queueTotalSize),
-    //     'Assert: _container_ has [[queue]] and [[queueTotalSize]] internal ' +
-    //         'slots.');
-    // assert(container[_queue].length !== 0,
-    //        '_container_.[[queue]] is not empty.');
-    const pair = container[_queue].shift();
-    container[_queueTotalSize] -= pair.size;
-    if (container[_queueTotalSize] < 0) {
-      container[_queueTotalSize] = 0;
-    }
-    return pair.value;
-  }
-
-  function EnqueueValueWithSize(container, value, size) {
-    // assert(
-    //     hasOwnProperty(container, _queue) &&
-    //         hasOwnProperty(container, _queueTotalSize),
-    //     'Assert: _container_ has [[queue]] and [[queueTotalSize]] internal ' +
-    //         'slots.');
-    size = Number(size);
-    if (!IsFiniteNonNegativeNumber(size)) {
-      throw new RangeError(streamErrors.invalidSize);
-    }
-
-    container[_queue].push({value, size});
-    container[_queueTotalSize] += size;
-  }
-
-  function PeekQueueValue(container) {
-    // assert(
-    //     hasOwnProperty(container, _queue) &&
-    //         hasOwnProperty(container, _queueTotalSize),
-    //     'Assert: _container_ has [[queue]] and [[queueTotalSize]] internal ' +
-    //         'slots.');
-    // assert(container[_queue].length !== 0,
-    //        '_container_.[[queue]] is not empty.');
-    const pair = container[_queue].peek();
-    return pair.value;
-  }
-
-  function ResetQueue(container) {
-    // assert(
-    //     hasOwnProperty(container, _queue) &&
-    //         hasOwnProperty(container, _queueTotalSize),
-    //     'Assert: _container_ has [[queue]] and [[queueTotalSize]] internal ' +
-    //         'slots.');
-    container[_queue] = new binding.SimpleQueue();
-    container[_queueTotalSize] = 0;
-  }
-
-  // Miscellaneous Operations
-
-  // This differs from "CallOrNoop" in the ReadableStream implementation in
-  // that it takes the arguments as an array, so that multiple arguments can be
-  // passed.
-  //
-  // TODO(ricea): Consolidate with ReadableStream implementation.
-  function InvokeOrNoop(O, P, args) {
-    // assert(IsPropertyKey(P),
-    //        'P is a valid property key.');
-    if (args === undefined) {
-      args = [];
-    }
-    const method = O[P];
-    if (method === undefined) {
-      return undefined;
-    }
-    if (typeof method !== 'function') {
-      throw new TypeError(templateErrorIsNotAFunction(P));
-    }
-    return Function_apply(method, O, args);
-  }
-
-  function IsFiniteNonNegativeNumber(v) {
-    return Number_isFinite(v) && v >= 0;
-  }
-
-  function PromiseInvokeOrNoop(O, P, args) {
-    try {
-      return Promise_resolve(InvokeOrNoop(O, P, args));
-    } catch (e) {
-      return Promise_reject(e);
-    }
-  }
-
-  // TODO(ricea): Share this operation with ReadableStream.js.
-  function ValidateAndNormalizeQueuingStrategy(size, highWaterMark) {
-    if (size !== undefined && typeof size !== 'function') {
-      throw new TypeError(streamErrors.sizeNotAFunction);
-    }
-
-    highWaterMark = Number(highWaterMark);
-    if (Number_isNaN(highWaterMark)) {
-      throw new RangeError(streamErrors.invalidHWM);
-    }
-    if (highWaterMark < 0) {
-      throw new RangeError(streamErrors.invalidHWM);
-    }
-
-    return {size, highWaterMark};
   }
 
   //
@@ -1114,4 +1003,12 @@
       WritableStreamDefaultWriterRelease;
   binding.WritableStreamDefaultWriterWrite = WritableStreamDefaultWriterWrite;
   binding.getWritableStreamStoredError = getWritableStreamStoredError;
+
+  // Exports for TransformStream
+  binding.WritableStream = WritableStream;
+  binding.WritableStreamDefaultControllerErrorIfNeeded =
+      WritableStreamDefaultControllerErrorIfNeeded;
+  binding.isWritableStreamWritable = isWritableStreamWritable;
+  binding.isWritableStreamErroring = isWritableStreamErroring;
+  binding.getWritableStreamController = getWritableStreamController;
 });

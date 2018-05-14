@@ -53,7 +53,7 @@ struct MediaLogEvent {
     PIPELINE_STATE_CHANGED,
 
     // An error has occurred in the pipeline.
-    // params: "pipeline_error": <string name of the error>.
+    // params: "pipeline_error": <integral PipelineStatus error code>.
     PIPELINE_ERROR,
 
     // The size of the video has been determined.
@@ -87,10 +87,7 @@ struct MediaLogEvent {
     // A property has changed without any special event occurring.
     PROPERTY_CHANGE,
 
-    // Indicates that updated watch time statistics are available.
-    WATCH_TIME_UPDATE,
-
-    TYPE_LAST = WATCH_TIME_UPDATE
+    TYPE_LAST = PROPERTY_CHANGE
   };
 
   int32_t id;

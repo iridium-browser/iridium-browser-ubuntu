@@ -61,8 +61,6 @@ namespace {
 // and the new format.
 const char kDevToolsChannelNameFormat[] = "%s_devtools_remote";
 
-const char kFrontEndURL[] =
-    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
 const char kTetheringSocketName[] = "chrome_devtools_tethering_%d_%d";
 
 const int kBackLog = 10;
@@ -155,9 +153,7 @@ void DevToolsServer::Start(bool allow_debug_permission) {
       new UnixDomainServerSocketFactory(socket_name_, auth_callback));
   DevToolsAgentHost::StartRemoteDebuggingServer(
       std::move(factory),
-      base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
-      base::FilePath(), base::FilePath(),
-      version_info::GetProductNameAndVersionForUserAgent(), ::GetUserAgent());
+      base::FilePath(), base::FilePath());
   is_started_ = true;
 }
 
@@ -170,7 +166,7 @@ bool DevToolsServer::IsStarted() const {
   return is_started_;
 }
 
-static jlong InitRemoteDebugging(
+static jlong JNI_DevToolsServer_InitRemoteDebugging(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jstring>& socket_name_prefix) {
@@ -179,23 +175,26 @@ static jlong InitRemoteDebugging(
   return reinterpret_cast<intptr_t>(server);
 }
 
-static void DestroyRemoteDebugging(JNIEnv* env,
-                                   const JavaParamRef<jobject>& obj,
-                                   jlong server) {
+static void JNI_DevToolsServer_DestroyRemoteDebugging(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong server) {
   delete reinterpret_cast<DevToolsServer*>(server);
 }
 
-static jboolean IsRemoteDebuggingEnabled(JNIEnv* env,
-                                         const JavaParamRef<jobject>& obj,
-                                         jlong server) {
+static jboolean JNI_DevToolsServer_IsRemoteDebuggingEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong server) {
   return reinterpret_cast<DevToolsServer*>(server)->IsStarted();
 }
 
-static void SetRemoteDebuggingEnabled(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj,
-                                      jlong server,
-                                      jboolean enabled,
-                                      jboolean allow_debug_permission) {
+static void JNI_DevToolsServer_SetRemoteDebuggingEnabled(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jlong server,
+    jboolean enabled,
+    jboolean allow_debug_permission) {
   DevToolsServer* devtools_server = reinterpret_cast<DevToolsServer*>(server);
   if (enabled) {
     devtools_server->Start(allow_debug_permission);

@@ -25,18 +25,18 @@ public:
      *  in order to correct the absolute texture coordinates.
      *  Places the color space of the texture in (*texColorSpace).
      */
-    sk_sp<GrTextureProxy> refTextureProxyForParams(const GrSamplerParams&,
+    sk_sp<GrTextureProxy> refTextureProxyForParams(const GrSamplerState&,
                                                    SkColorSpace* dstColorSpace,
                                                    sk_sp<SkColorSpace>* texColorSpace,
                                                    SkScalar scaleAdjust[2]);
 
-    sk_sp<GrFragmentProcessor> createFragmentProcessor(
-                                const SkMatrix& textureMatrix,
-                                const SkRect& constraintRect,
-                                FilterConstraint filterConstraint,
-                                bool coordsLimitedToConstraintRect,
-                                const GrSamplerParams::FilterMode* filterOrNullForBicubic,
-                                SkColorSpace* dstColorSpace) override;
+    std::unique_ptr<GrFragmentProcessor> createFragmentProcessor(
+            const SkMatrix& textureMatrix,
+            const SkRect& constraintRect,
+            FilterConstraint filterConstraint,
+            bool coordsLimitedToConstraintRect,
+            const GrSamplerState::Filter* filterOrNullForBicubic,
+            SkColorSpace* dstColorSpace) override;
 
 protected:
     GrTextureMaker(GrContext* context, int width, int height, bool isAlphaOnly)

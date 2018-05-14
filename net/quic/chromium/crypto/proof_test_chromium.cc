@@ -17,6 +17,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 using std::string;
 
@@ -55,7 +56,7 @@ void RunVerification(ProofVerifier* verifier,
                      const string& hostname,
                      const uint16_t port,
                      const string& server_config,
-                     QuicVersion quic_version,
+                     QuicTransportVersion quic_version,
                      QuicStringPiece chlo_hash,
                      const std::vector<string>& certs,
                      const string& proof,
@@ -114,13 +115,13 @@ class TestCallback : public ProofSource::Callback {
   QuicCryptoProof* proof_;
 };
 
-class ProofTest : public ::testing::TestWithParam<QuicVersion> {};
+class ProofTest : public ::testing::TestWithParam<QuicTransportVersion> {};
 
 }  // namespace
 
-INSTANTIATE_TEST_CASE_P(QuicVersion,
+INSTANTIATE_TEST_CASE_P(QuicTransportVersion,
                         ProofTest,
-                        ::testing::ValuesIn(AllSupportedVersions()));
+                        ::testing::ValuesIn(AllSupportedTransportVersions()));
 
 // TODO(rtenneti): Enable testing of ProofVerifier. See http://crbug.com/514468.
 TEST_P(ProofTest, DISABLED_Verify) {
@@ -134,7 +135,7 @@ TEST_P(ProofTest, DISABLED_Verify) {
   const uint16_t port = 8443;
   const string first_chlo_hash = "first chlo hash bytes";
   const string second_chlo_hash = "first chlo hash bytes";
-  const QuicVersion quic_version = GetParam();
+  const QuicTransportVersion quic_version = GetParam();
 
   bool called = false;
   bool first_called = false;
@@ -153,9 +154,9 @@ TEST_P(ProofTest, DISABLED_Verify) {
   // GetProof here expects the async method to invoke the callback
   // synchronously.
   source->GetProof(server_addr, hostname, server_config, quic_version,
-                   first_chlo_hash, QuicTagVector(), std::move(first_cb));
+                   first_chlo_hash, std::move(first_cb));
   source->GetProof(server_addr, hostname, server_config, quic_version,
-                   second_chlo_hash, QuicTagVector(), std::move(cb));
+                   second_chlo_hash, std::move(cb));
   ASSERT_TRUE(called);
   ASSERT_TRUE(first_called);
   ASSERT_TRUE(ok);
@@ -189,6 +190,79 @@ TEST_P(ProofTest, DISABLED_Verify) {
                   first_chlo_hash, wrong_certs, corrupt_signature, false);
 }
 
+namespace {
+
+class TestingSignatureCallback : public ProofSource::SignatureCallback {
+ public:
+  TestingSignatureCallback(bool* ok_out, std::string* signature_out)
+      : ok_out_(ok_out), signature_out_(signature_out) {}
+
+  void Run(bool ok, std::string signature) override {
+    *ok_out_ = ok;
+    *signature_out_ = std::move(signature);
+  }
+
+ private:
+  bool* ok_out_;
+  std::string* signature_out_;
+};
+
+}  // namespace
+
+TEST_P(ProofTest, TlsSignature) {
+  std::unique_ptr<ProofSource> source(
+      crypto_test_utils::ProofSourceForTesting());
+
+  QuicSocketAddress server_address;
+  const string hostname = "test.example.com";
+
+  QuicReferenceCountedPointer<ProofSource::Chain> chain =
+      source->GetCertChain(server_address, hostname);
+  ASSERT_GT(chain->certs.size(), 0ul);
+
+  // Generate a value to be signed similar to the example in TLS 1.3 section
+  // 4.4.3. The value to be signed starts with octed 0x20 repeated 64 times,
+  // followed by the context string, followed by a single 0 byte, followed by
+  // the transcript hash. Since there's no TLS stack here, we're using 32 bytes
+  // of 01 as the transcript hash.
+  string to_be_signed(64, ' ');
+  to_be_signed.append("TLS 1.3, server CertificateVerify");
+  to_be_signed.append(1, '\0');
+  to_be_signed.append(32, 1);
+
+  string sig;
+  bool success;
+  std::unique_ptr<TestingSignatureCallback> callback =
+      QuicMakeUnique<TestingSignatureCallback>(&success, &sig);
+  source->ComputeTlsSignature(server_address, hostname, SSL_SIGN_RSA_PSS_SHA256,
+                              to_be_signed, std::move(callback));
+  EXPECT_TRUE(success);
+
+  // Verify that the signature from ComputeTlsSignature can be verified with the
+  // leaf cert from GetCertChain.
+  const uint8_t* data;
+  const uint8_t* orig_data;
+  orig_data = data = reinterpret_cast<const uint8_t*>(chain->certs[0].data());
+  bssl::UniquePtr<X509> leaf(d2i_X509(nullptr, &data, chain->certs[0].size()));
+  ASSERT_NE(leaf.get(), nullptr);
+  EXPECT_EQ(data - orig_data, static_cast<ptrdiff_t>(chain->certs[0].size()));
+  bssl::UniquePtr<EVP_PKEY> pkey(X509_get_pubkey(leaf.get()));
+  bssl::ScopedEVP_MD_CTX md_ctx;
+  EVP_PKEY_CTX* ctx;
+  ASSERT_EQ(EVP_DigestVerifyInit(md_ctx.get(), &ctx, EVP_sha256(), nullptr,
+                                 pkey.get()),
+            1);
+  ASSERT_EQ(EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PSS_PADDING), 1);
+  ASSERT_EQ(EVP_PKEY_CTX_set_rsa_pss_saltlen(ctx, -1), 1);
+  ASSERT_EQ(EVP_DigestVerifyUpdate(md_ctx.get(), to_be_signed.data(),
+                                   to_be_signed.size()),
+            1);
+  EXPECT_EQ(EVP_DigestVerifyFinal(md_ctx.get(),
+                                  reinterpret_cast<const uint8_t*>(sig.data()),
+                                  sig.size()),
+            1);
+}
+
 TEST_P(ProofTest, UseAfterFree) {
   std::unique_ptr<ProofSource> source(
       crypto_test_utils::ProofSourceForTesting());
@@ -208,7 +282,7 @@ TEST_P(ProofTest, UseAfterFree) {
   // GetProof here expects the async method to invoke the callback
   // synchronously.
   source->GetProof(server_addr, hostname, server_config, GetParam(), chlo_hash,
-                   QuicTagVector(), std::move(cb));
+                   std::move(cb));
   ASSERT_TRUE(called);
   ASSERT_TRUE(ok);
 

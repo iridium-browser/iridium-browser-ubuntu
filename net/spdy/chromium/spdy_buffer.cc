@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "net/base/io_buffer.h"
 #include "net/spdy/core/spdy_protocol.h"
 #include "net/spdy/platform/api/spdy_estimate_memory_usage.h"
@@ -30,9 +29,9 @@ std::unique_ptr<SpdySerializedFrame> MakeSpdySerializedFrame(const char* data,
   CHECK_GT(size, 0u);
   CHECK_LE(size, kMaxSpdyFrameSize);
 
-  auto frame_data = base::MakeUnique<char[]>(size);
+  auto frame_data = std::make_unique<char[]>(size);
   std::memcpy(frame_data.get(), data, size);
-  return base::MakeUnique<SpdySerializedFrame>(frame_data.release(), size,
+  return std::make_unique<SpdySerializedFrame>(frame_data.release(), size,
                                                true /* owns_buffer */);
 }
 
@@ -60,9 +59,7 @@ class SpdyBuffer::SharedFrameIOBuffer : public IOBuffer {
 };
 
 SpdyBuffer::SpdyBuffer(std::unique_ptr<SpdySerializedFrame> frame)
-    : shared_frame_(new SharedFrame()), offset_(0) {
-  shared_frame_->data = std::move(frame);
-}
+    : shared_frame_(new SharedFrame(std::move(frame))), offset_(0) {}
 
 // The given data may not be strictly a SPDY frame; we (ab)use
 // |frame_| just as a container.

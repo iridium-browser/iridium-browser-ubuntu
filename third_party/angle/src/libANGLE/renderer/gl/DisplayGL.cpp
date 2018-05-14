@@ -63,7 +63,7 @@ ContextImpl *DisplayGL::createContext(const gl::ContextState &state)
     return new ContextGL(state, mRenderer);
 }
 
-StreamProducerImpl *DisplayGL::createStreamProducerD3DTextureNV12(
+StreamProducerImpl *DisplayGL::createStreamProducerD3DTexture(
     egl::Stream::ConsumerType consumerType,
     const egl::AttributeMap &attribs)
 {
@@ -107,6 +107,13 @@ gl::Version DisplayGL::getMaxSupportedESVersion() const
 {
     ASSERT(mRenderer != nullptr);
     return mRenderer->getMaxSupportedESVersion();
+}
+
+void DisplayGL::generateExtensions(egl::DisplayExtensions *outExtensions) const
+{
+    // Advertise robust resource initialization on all OpenGL backends for testing even though it is
+    // not fully implemented.
+    outExtensions->robustResourceInitialization = true;
 }
 
 egl::Error DisplayGL::makeCurrentSurfaceless(gl::Context *context)

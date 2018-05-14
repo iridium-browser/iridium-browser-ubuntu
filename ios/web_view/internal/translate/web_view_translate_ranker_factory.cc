@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
@@ -41,22 +40,21 @@ WebViewTranslateRankerFactory::BuildServiceInstanceFor(
   WebViewBrowserState* web_view_browser_state =
       WebViewBrowserState::FromBrowserState(context);
   std::unique_ptr<translate::TranslateRankerImpl> ranker =
-      base::MakeUnique<translate::TranslateRankerImpl>(
+      std::make_unique<translate::TranslateRankerImpl>(
           translate::TranslateRankerImpl::GetModelPath(
               web_view_browser_state->GetStatePath()),
           translate::TranslateRankerImpl::GetModelURL(),
           nullptr /* ukm::UkmRecorder */);
   // WebView has no consumer of translate ranker events, so don't generate them.
   ranker->EnableLogging(false);
-
-  // TODO(crbug.com/703565): remove std::move() once Xcode 9.0+ is required.
-  return std::move(ranker);
+  return ranker;
 }
 
 web::BrowserState* WebViewTranslateRankerFactory::GetBrowserStateToUse(
     web::BrowserState* context) const {
-  // Override to enable this service for off the record browser states.
-  return context;
+  WebViewBrowserState* browser_state =
+      WebViewBrowserState::FromBrowserState(context);
+  return browser_state->GetRecordingBrowserState();
 }
 
 }  // namespace ios_web_view

@@ -21,7 +21,7 @@ namespace {
 
 // URL to upload permission action reports.
 const char kPermissionActionReportingUploadUrl[] =
-    "https://safebrowsing.googleusercontent.com/safebrowsing/clientreport/"
+    "https://safebrowsing.google.com/safebrowsing/clientreport/"
     "chrome-permissions";
 
 const int kMaximumReportsPerOriginPerPermissionPerMinute = 5;
@@ -36,8 +36,6 @@ const PermissionAction kDummyAction = PermissionAction::GRANTED;
 const PermissionSourceUI kDummySourceUI = PermissionSourceUI::PROMPT;
 const PermissionRequestGestureType kDummyGestureType =
     PermissionRequestGestureType::GESTURE;
-const PermissionPersistDecision kDummyPersistDecision =
-    PermissionPersistDecision::PERSISTED;
 const int kDummyNumPriorDismissals = 10;
 const int kDummyNumPriorIgnores = 12;
 
@@ -59,8 +57,8 @@ struct base::Feature kFeatureOffByDefault {
 PermissionReportInfo BuildDummyReportInfo(const char* requesting_origin,
                                           ContentSettingsType permission) {
   PermissionReportInfo info(GURL(requesting_origin), permission, kDummyAction,
-      kDummySourceUI, kDummyGestureType, kDummyPersistDecision,
-      kDummyNumPriorDismissals, kDummyNumPriorIgnores);
+                            kDummySourceUI, kDummyGestureType,
+                            kDummyNumPriorDismissals, kDummyNumPriorIgnores);
 
   return info;
 }
@@ -75,16 +73,14 @@ class PermissionReporterTest : public ::testing::Test {
  protected:
   void SetUp() override {
     mock_report_sender_ = new MockPermissionReportSender;
-    clock_ = new base::SimpleTestClock;
-    permission_reporter_.reset(new PermissionReporter(
-        base::WrapUnique(mock_report_sender_), base::WrapUnique(clock_)));
+    permission_reporter_.reset(
+        new PermissionReporter(base::WrapUnique(mock_report_sender_), &clock_));
   }
 
   // Owned by |permission_reporter_|.
   MockPermissionReportSender* mock_report_sender_;
 
-  // Owned by |permission_reporter_|.
-  base::SimpleTestClock* clock_;
+  base::SimpleTestClock clock_;
 
   std::unique_ptr<PermissionReporter> permission_reporter_;
 };
@@ -101,7 +97,8 @@ TEST_F(PermissionReporterTest, SendReport) {
   EXPECT_EQ(PermissionReport::GRANTED, permission_report.action());
   EXPECT_EQ(PermissionReport::PROMPT, permission_report.source_ui());
   EXPECT_EQ(PermissionReport::GESTURE, permission_report.gesture());
-  EXPECT_EQ(PermissionReport::PERSISTED, permission_report.persisted());
+  EXPECT_EQ(PermissionReport::PERSIST_DECISION_UNSPECIFIED,
+            permission_report.persisted());
   EXPECT_EQ(kDummyOriginOne, permission_report.origin());
   EXPECT_EQ(kDummyNumPriorDismissals,
             permission_report.num_prior_dismissals());
@@ -198,17 +195,17 @@ TEST_F(PermissionReporterTest, IsReportThresholdExceeded) {
       BuildDummyReportInfo(kDummyOriginTwo, kDummyPermissionOne));
   EXPECT_EQ(1, mock_report_sender_->GetAndResetNumberOfReportsSent());
 
-  clock_->Advance(base::TimeDelta::FromMinutes(1));
+  clock_.Advance(base::TimeDelta::FromMinutes(1));
   permission_reporter_->SendReport(BuildDummyReportInfo());
 
-  clock_->Advance(base::TimeDelta::FromMicroseconds(1));
+  clock_.Advance(base::TimeDelta::FromMicroseconds(1));
   permission_reporter_->SendReport(BuildDummyReportInfo());
   EXPECT_EQ(1, mock_report_sender_->GetAndResetNumberOfReportsSent());
 
-  clock_->Advance(base::TimeDelta::FromMinutes(1));
+  clock_.Advance(base::TimeDelta::FromMinutes(1));
   reports_to_send = 12;
   while (reports_to_send--) {
-    clock_->Advance(base::TimeDelta::FromSeconds(5));
+    clock_.Advance(base::TimeDelta::FromSeconds(5));
     permission_reporter_->SendReport(BuildDummyReportInfo());
   }
   EXPECT_EQ(kMaximumReportsPerOriginPerPermissionPerMinute,

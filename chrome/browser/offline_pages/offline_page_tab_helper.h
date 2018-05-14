@@ -33,6 +33,7 @@ class OfflinePageTabHelper :
 
   void SetOfflinePage(const OfflinePageItem& offline_page,
                       const OfflinePageHeader& offline_header,
+                      bool is_trusted,
                       bool is_offline_preview);
 
   const OfflinePageItem* offline_page() {
@@ -43,8 +44,12 @@ class OfflinePageTabHelper :
     return offline_info_.offline_header;
   }
 
-  // Whether the page is an offline preview.
-  bool IsShowingOfflinePreview() const;
+  // Returns whether a trusted offline page is being displayed.
+  bool IsShowingTrustedOfflinePage() const;
+
+  // Returns nullptr if the page is not an offline preview. Returns the
+  // OfflinePageItem related to the page if the page is an offline preview.
+  const OfflinePageItem* GetOfflinePreviewItem() const;
 
   // Returns provisional offline page since actual navigation does not happen
   // during unit tests.
@@ -57,11 +62,11 @@ class OfflinePageTabHelper :
   // OfflinePageTabHelper instance is tied with the associated |web_contents|
   // and thus the callback will be automatically invalidated if |web_contents|
   // is gone.
-  void ScheduleDownloadHelper(
-      content::WebContents* web_contents,
-      const std::string& name_space,
-      const GURL& url,
-      OfflinePageUtils::DownloadUIActionFlags ui_action);
+  void ScheduleDownloadHelper(content::WebContents* web_contents,
+                              const std::string& name_space,
+                              const GURL& url,
+                              OfflinePageUtils::DownloadUIActionFlags ui_action,
+                              const std::string& request_origin);
 
  private:
   friend class content::WebContentsUserData<OfflinePageTabHelper>;
@@ -76,6 +81,9 @@ class OfflinePageTabHelper :
 
     // The offline header that is provided when offline page is loaded.
     OfflinePageHeader offline_header;
+
+    // Whether the page is deemed trusted or not.
+    bool is_trusted;
 
     // Whether the page is an offline preview. Offline page previews are shown
     // when a user's effective connection type is prohibitively slow.
@@ -92,18 +100,32 @@ class OfflinePageTabHelper :
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
 
-  void SelectPageForURLDone(const OfflinePageItem* offline_page);
+  // Finalize the offline info when the navigation is done.
+  void FinalizeOfflineInfo(content::NavigationHandle* navigation_handle);
+
+  // Report the metrics essential to PrefetchService.
+  void ReportPrefetchMetrics(content::NavigationHandle* navigation_handle);
+
+  // Reload the URL in order to fetch the offline page on certain net errors.
+  void TryLoadingOfflinePageOnNetError(
+      content::NavigationHandle* navigation_handle);
+
+  void SelectPagesForURLDone(const std::vector<OfflinePageItem>& offline_pages);
+
+  void GetPageByOfflineIdDone(const OfflinePageItem* offline_page);
 
   void DuplicateCheckDoneForScheduleDownload(
       content::WebContents* web_contents,
       const std::string& name_space,
       const GURL& url,
       OfflinePageUtils::DownloadUIActionFlags ui_action,
+      const std::string& request_origin,
       OfflinePageUtils::DuplicateCheckResult result);
   void DoDownloadPageLater(content::WebContents* web_contents,
                            const std::string& name_space,
                            const GURL& url,
-                           OfflinePageUtils::DownloadUIActionFlags ui_action);
+                           OfflinePageUtils::DownloadUIActionFlags ui_action,
+                           const std::string& request_origin);
 
   // The provisional info about the offline page being loaded. This is set when
   // the offline interceptor decides to serve the offline page and it will be
@@ -120,6 +142,11 @@ class OfflinePageTabHelper :
 
   // Service, overlives this object.
   PrefetchService* prefetch_service_ = nullptr;
+
+  // Table of OfflinePages policies.
+  // TODO(dimich): When we only have one shared version of PolicyController,
+  // replace this instance with access to a shared one.
+  ClientPolicyController policy_controller_;
 
   base::WeakPtrFactory<OfflinePageTabHelper> weak_ptr_factory_;
 

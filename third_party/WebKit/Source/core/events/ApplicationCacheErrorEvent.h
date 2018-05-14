@@ -5,8 +5,8 @@
 #ifndef ApplicationCacheErrorEvent_h
 #define ApplicationCacheErrorEvent_h
 
+#include "core/dom/events/Event.h"
 #include "core/events/ApplicationCacheErrorEventInit.h"
-#include "core/events/Event.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
 #include "public/platform/WebApplicationCacheHostClient.h"
 
@@ -41,7 +41,7 @@ class ApplicationCacheErrorEvent final : public Event {
     return EventNames::ApplicationCacheErrorEvent;
   }
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
  private:
   ApplicationCacheErrorEvent(WebApplicationCacheHost::ErrorReason,

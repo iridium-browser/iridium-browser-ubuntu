@@ -6,6 +6,11 @@
 
 #include <windows.h>
 
+// By default msi.h includes wincrypt.h which clashes with OpenSSL
+// (both define X509_NAME) so to be able to include
+// third_party/openssl (indirectly) in the same translation unit we
+// tell msi.h to not include wincrypt.h.
+#define _MSI_NO_CRYPTO
 #include <msi.h>
 #include <msiquery.h>
 
@@ -134,7 +139,7 @@ bool GetMsiComponentPath(const base::string16& product_guid,
 bool MsiUtil::GetMsiComponentPaths(
     const base::string16& product_guid,
     std::vector<base::string16>* component_paths) const {
-  base::ThreadRestrictions::AssertIOAllowed();
+  base::AssertBlockingAllowed();
 
   base::string16 msi_path;
   if (!GetMsiPath(product_guid, &msi_path))

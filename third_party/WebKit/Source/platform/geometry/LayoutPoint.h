@@ -31,13 +31,12 @@
 #ifndef LayoutPoint_h
 #define LayoutPoint_h
 
-#include <algorithm>
+#include <iosfwd>
 #include "platform/geometry/DoublePoint.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/LayoutSize.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/Forward.h"
-#include "platform/wtf/MathExtras.h"
 
 namespace blink {
 
@@ -45,7 +44,7 @@ class PLATFORM_EXPORT LayoutPoint {
   DISALLOW_NEW();
 
  public:
-  LayoutPoint() {}
+  LayoutPoint() = default;
   LayoutPoint(LayoutUnit x, LayoutUnit y) : x_(x), y_(y) {}
   LayoutPoint(int x, int y) : x_(LayoutUnit(x)), y_(LayoutUnit(y)) {}
   LayoutPoint(const IntPoint& point) : x_(point.X()), y_(point.Y()) {}
@@ -77,13 +76,8 @@ class PLATFORM_EXPORT LayoutPoint {
     y_ *= sy;
   }
 
-  LayoutPoint ExpandedTo(const LayoutPoint& other) const {
-    return LayoutPoint(std::max(x_, other.x_), std::max(y_, other.y_));
-  }
-
-  LayoutPoint ShrunkTo(const LayoutPoint& other) const {
-    return LayoutPoint(std::min(x_, other.x_), std::min(y_, other.y_));
-  }
+  LayoutPoint ExpandedTo(const LayoutPoint&) const;
+  LayoutPoint ShrunkTo(const LayoutPoint&) const;
 
   void ClampNegativeToZero() { *this = ExpandedTo(Zero()); }
 
@@ -216,6 +210,8 @@ inline LayoutSize ToLayoutSize(const LayoutPoint& p) {
 inline LayoutPoint FlooredLayoutPoint(const FloatSize& s) {
   return FlooredLayoutPoint(FloatPoint(s));
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const LayoutPoint&);
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/GeometryPrinters.h.

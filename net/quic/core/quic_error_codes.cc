@@ -4,6 +4,8 @@
 
 #include "net/quic/core/quic_error_codes.h"
 
+#include "base/metrics/histogram_macros.h"
+
 namespace net {
 
 #define RETURN_STRING_LITERAL(x) \
@@ -29,6 +31,7 @@ const char* QuicRstStreamErrorCodeToString(QuicRstStreamErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_INVALID_PROMISE_METHOD);
     RETURN_STRING_LITERAL(QUIC_PUSH_STREAM_TIMED_OUT);
     RETURN_STRING_LITERAL(QUIC_HEADERS_TOO_LARGE);
+    RETURN_STRING_LITERAL(QUIC_STREAM_TTL_EXPIRED);
   }
   // Return a default value so that we return this when |error| doesn't match
   // any of the QuicRstStreamErrorCodes. This can happen when the RstStream
@@ -128,9 +131,12 @@ const char* QuicErrorCodeToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_CRYPTO_CHLO_TOO_LARGE);
     RETURN_STRING_LITERAL(QUIC_MULTIPATH_PATH_DOES_NOT_EXIST);
     RETURN_STRING_LITERAL(QUIC_MULTIPATH_PATH_NOT_ACTIVE);
-    RETURN_STRING_LITERAL(QUIC_TOO_MANY_FRAME_GAPS);
+    RETURN_STRING_LITERAL(QUIC_TOO_MANY_STREAM_DATA_INTERVALS);
     RETURN_STRING_LITERAL(QUIC_STREAM_SEQUENCER_INVALID_STATE);
     RETURN_STRING_LITERAL(QUIC_TOO_MANY_SESSIONS_ON_SERVER);
+    RETURN_STRING_LITERAL(QUIC_STREAM_LENGTH_OVERFLOW);
+    RETURN_STRING_LITERAL(QUIC_CONNECTION_MIGRATION_DISABLED_BY_CONFIG);
+    RETURN_STRING_LITERAL(QUIC_CONNECTION_MIGRATION_INTERNAL_ERROR);
     RETURN_STRING_LITERAL(QUIC_LAST_ERROR);
     // Intentionally have no default case, so we'll break the build
     // if we add errors and don't put them here.
@@ -139,6 +145,11 @@ const char* QuicErrorCodeToString(QuicErrorCode error) {
   // any of the QuicErrorCodes. This can happen when the ConnectionClose
   // frame sent by the peer (attacker) has invalid error code.
   return "INVALID_ERROR_CODE";
+}
+
+void RecordInternalErrorLocation(QuicInternalErrorLocation location) {
+  UMA_HISTOGRAM_ENUMERATION("Net.QuicSession.InternalErrorLocation", location,
+                            INTERNAL_ERROR_LOCATION_MAX);
 }
 
 }  // namespace net

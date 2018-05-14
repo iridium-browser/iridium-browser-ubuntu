@@ -31,9 +31,6 @@ bool GetCurrentDisplayId(content::RenderFrameHost* rfh, int64_t* display_id) {
   return true;
 }
 
-void DoNothing(bool status) {
-}
-
 }  // namespace
 
 OutputProtectionDelegate::Controller::Controller() {}
@@ -103,9 +100,9 @@ bool OutputProtectionDelegate::InitializeControllerIfNecessary() {
     return false;
 
   if (ash_util::IsRunningInMash())
-    controller_ = base::MakeUnique<OutputProtectionControllerMus>();
+    controller_ = std::make_unique<OutputProtectionControllerMus>();
   else
-    controller_ = base::MakeUnique<OutputProtectionControllerAsh>();
+    controller_ = std::make_unique<OutputProtectionControllerAsh>();
 
   display_id_ = display_id;
   window_ = window;
@@ -132,10 +129,10 @@ void OutputProtectionDelegate::OnWindowHierarchyChanged(
   if (desired_method_mask_ != display::CONTENT_PROTECTION_METHOD_NONE) {
     DCHECK(controller_);
     controller_->SetProtection(new_display_id, desired_method_mask_,
-                               base::Bind(&DoNothing));
+                               base::DoNothing());
     controller_->SetProtection(display_id_,
                                display::CONTENT_PROTECTION_METHOD_NONE,
-                               base::Bind(&DoNothing));
+                               base::DoNothing());
   }
   display_id_ = new_display_id;
 }

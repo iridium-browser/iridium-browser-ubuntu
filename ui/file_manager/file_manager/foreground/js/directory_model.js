@@ -1003,7 +1003,7 @@ DirectoryModel.prototype.onVolumeChanged_ = function(volumeInfo) {
   // removable device.
   return Promise.resolve(undefined)
       .then(
-          /** @this {DirectoryModel} */
+          (/** @this {DirectoryModel} */
           function() {
             switch (volumeInfo.volumeType) {
               case VolumeManagerCommon.VolumeType.REMOVABLE:
@@ -1019,22 +1019,21 @@ DirectoryModel.prototype.onVolumeChanged_ = function(volumeInfo) {
                               volumeInfo.volumeType;
                         });
               case VolumeManagerCommon.VolumeType.PROVIDED:
-                var extensionId = volumeInfo.extensionId;
-                var extensionName =
-                    metrics.getFileSystemProviderName(extensionId);
-                // Make note of an unrecognized extension id. When we see
+                var providerId = volumeInfo.providerId;
+                var name = metrics.getFileSystemProviderName(providerId);
+                // Make note of an unrecognized provider id. When we see
                 // high counts for a particular id, we should add it to the
                 // whitelist in metrics_events.js.
-                if (extensionId && extensionName == 'unknown') {
+                if (providerId && name == 'unknown') {
                   this.tracker_.send(
-                      metrics.Internals.UNRECOGNIZED_FILE_SYSTEM_PROVIDER
-                          .label(extensionId));
+                      metrics.Internals.UNRECOGNIZED_FILE_SYSTEM_PROVIDER.label(
+                          providerId));
                 }
-                return volumeInfo.volumeType + ':' + extensionName;
+                return volumeInfo.volumeType + ':' + name;
               default:
                 return volumeInfo.volumeType;
             }
-          }.bind(this))
+          }).bind(this))
       .then(this.tracker_.sendAppView.bind(this.tracker_));
 };
 
@@ -1250,14 +1249,14 @@ DirectoryModel.prototype.createDirectoryContents_ =
  */
 DirectoryModel.prototype.getLastSearchQuery = function() {
   return this.lastSearchQuery_;
-}
+};
 
 /**
  * Clears the last search query with the empty string.
  */
 DirectoryModel.prototype.clearLastSearchQuery = function() {
   this.lastSearchQuery_ = '';
-}
+};
 
 /**
  * Performs search and displays results. The search type is dependent on the

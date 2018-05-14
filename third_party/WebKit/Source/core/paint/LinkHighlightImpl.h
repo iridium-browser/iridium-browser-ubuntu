@@ -28,9 +28,10 @@
 
 #include <memory>
 #include "core/CoreExport.h"
+#include "platform/animation/CompositorAnimation.h"
+#include "platform/animation/CompositorAnimationClient.h"
 #include "platform/animation/CompositorAnimationDelegate.h"
-#include "platform/animation/CompositorAnimationPlayer.h"
-#include "platform/animation/CompositorAnimationPlayerClient.h"
+#include "platform/graphics/CompositorElementId.h"
 #include "platform/graphics/LinkHighlight.h"
 #include "platform/graphics/Path.h"
 #include "platform/heap/Handle.h"
@@ -45,15 +46,14 @@ class LayoutBoxModelObject;
 class Node;
 class WebContentLayer;
 class WebLayer;
-class WebViewBase;
+class WebViewImpl;
 
-class CORE_EXPORT LinkHighlightImpl final
-    : public LinkHighlight,
-      public WebContentLayerClient,
-      public CompositorAnimationDelegate,
-      public CompositorAnimationPlayerClient {
+class CORE_EXPORT LinkHighlightImpl final : public LinkHighlight,
+                                            public WebContentLayerClient,
+                                            public CompositorAnimationDelegate,
+                                            public CompositorAnimationClient {
  public:
-  static std::unique_ptr<LinkHighlightImpl> Create(Node*, WebViewBase*);
+  static std::unique_ptr<LinkHighlightImpl> Create(Node*, WebViewImpl*);
   ~LinkHighlightImpl() override;
 
   WebContentLayer* ContentLayer();
@@ -76,15 +76,15 @@ class CORE_EXPORT LinkHighlightImpl final
   WebLayer* Layer() override;
   void ClearCurrentGraphicsLayer() override;
 
-  // CompositorAnimationPlayerClient implementation.
-  CompositorAnimationPlayer* CompositorPlayer() const override;
+  // CompositorAnimationClient implementation.
+  CompositorAnimation* GetCompositorAnimation() const override;
 
   GraphicsLayer* CurrentGraphicsLayerForTesting() const {
     return current_graphics_layer_;
   }
 
  private:
-  LinkHighlightImpl(Node*, WebViewBase*);
+  LinkHighlightImpl(Node*, WebViewImpl*);
 
   void ReleaseResources();
   void ComputeQuads(const Node&, Vector<FloatQuad>&) const;
@@ -101,14 +101,15 @@ class CORE_EXPORT LinkHighlightImpl final
   Path path_;
 
   Persistent<Node> node_;
-  WebViewBase* owning_web_view_;
+  WebViewImpl* owning_web_view_;
   GraphicsLayer* current_graphics_layer_;
   bool is_scrolling_graphics_layer_;
-  std::unique_ptr<CompositorAnimationPlayer> compositor_player_;
+  std::unique_ptr<CompositorAnimation> compositor_animation_;
 
   bool geometry_needs_update_;
   bool is_animating_;
   double start_time_;
+  UniqueObjectId unique_id_;
 };
 
 }  // namespace blink

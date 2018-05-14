@@ -25,8 +25,9 @@ const char kClipboardURL[] = "http://example.com/clipboard";
 class ClipboardURLProviderTest : public testing::Test {
  public:
   ClipboardURLProviderTest()
-      : client_(new testing::NiceMock<MockAutocompleteProviderClient>()),
-        provider_(new ClipboardURLProvider(client_.get(), nullptr,
+      : client_(new MockAutocompleteProviderClient()),
+        provider_(new ClipboardURLProvider(client_.get(),
+                                           nullptr,
                                            &clipboard_content_)) {
     SetClipboardUrl(GURL(kClipboardURL));
   }
@@ -41,17 +42,17 @@ class ClipboardURLProviderTest : public testing::Test {
   }
 
   AutocompleteInput CreateAutocompleteInput(bool from_omnibox_focus) {
-    return AutocompleteInput(base::string16(), base::string16::npos,
-                             std::string(), GURL(kCurrentURL), base::string16(),
-                             metrics::OmniboxEventProto::INVALID_SPEC, false,
-                             false, false, false, from_omnibox_focus,
-                             classifier_);
+    AutocompleteInput input(base::string16(), metrics::OmniboxEventProto::OTHER,
+                            classifier_);
+    input.set_current_url(GURL(kCurrentURL));
+    input.set_from_omnibox_focus(from_omnibox_focus);
+    return input;
   }
 
  protected:
   TestSchemeClassifier classifier_;
   FakeClipboardRecentContent clipboard_content_;
-  std::unique_ptr<testing::NiceMock<MockAutocompleteProviderClient>> client_;
+  std::unique_ptr<MockAutocompleteProviderClient> client_;
   scoped_refptr<ClipboardURLProvider> provider_;
 };
 

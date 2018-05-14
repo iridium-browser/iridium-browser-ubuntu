@@ -22,11 +22,12 @@
 #ifndef SVGElement_h
 #define SVGElement_h
 
+#include "base/macros.h"
 #include "core/CoreExport.h"
-#include "core/SVGNames.h"
 #include "core/dom/Element.h"
 #include "core/svg/SVGParsingError.h"
 #include "core/svg/properties/SVGPropertyInfo.h"
+#include "core/svg_names.h"
 #include "platform/heap/Handle.h"
 #include "platform/wtf/Allocator.h"
 #include "platform/wtf/HashMap.h"
@@ -87,7 +88,6 @@ class CORE_EXPORT SVGElement : public Element {
     kAncestorScope  // Used by SVGSVGElement::get{Enclosure|Intersection}List()
   };
   virtual AffineTransform LocalCoordinateSpaceTransform(CTMScope) const;
-  virtual bool NeedsPendingResourceHandling() const { return true; }
 
   bool InstanceUpdatesBlocked() const;
   void SetInstanceUpdatesBlocked(bool);
@@ -150,20 +150,20 @@ class CORE_EXPORT SVGElement : public Element {
 
   void SynchronizeAnimatedSVGAttribute(const QualifiedName&) const;
 
-  PassRefPtr<ComputedStyle> CustomStyleForLayoutObject() final;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   bool LayoutObjectIsNeeded(const ComputedStyle&) override;
 
 #if DCHECK_IS_ON()
   virtual bool IsAnimatableAttribute(const QualifiedName&) const;
 #endif
 
-  MutableStylePropertySet* AnimatedSMILStyleProperties() const;
-  MutableStylePropertySet* EnsureAnimatedSMILStyleProperties();
+  MutableCSSPropertyValueSet* AnimatedSMILStyleProperties() const;
+  MutableCSSPropertyValueSet* EnsureAnimatedSMILStyleProperties();
   void SetUseOverrideComputedStyle(bool);
 
   virtual bool HaveLoadedRequiredResources();
 
-  void InvalidateRelativeLengthClients(SubtreeLayoutScope* = 0);
+  void InvalidateRelativeLengthClients(SubtreeLayoutScope* = nullptr);
 
   void AddToPropertyMap(SVGAnimatedPropertyBase*);
 
@@ -173,15 +173,14 @@ class CORE_EXPORT SVGElement : public Element {
 
   SVGElementProxySet* ElementProxySet();
 
-  SVGElementSet* SetOfIncomingReferences() const;
   void AddReferenceTo(SVGElement*);
+  void NotifyIncomingReferences(bool needs_layout);
   void RebuildAllIncomingReferences();
   void RemoveAllIncomingReferences();
   void RemoveAllOutgoingReferences();
 
   class InvalidationGuard {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(InvalidationGuard);
 
    public:
     InvalidationGuard(SVGElement* element) : element_(element) {}
@@ -189,11 +188,11 @@ class CORE_EXPORT SVGElement : public Element {
 
    private:
     Member<SVGElement> element_;
+    DISALLOW_COPY_AND_ASSIGN(InvalidationGuard);
   };
 
   class InstanceUpdateBlocker {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(InstanceUpdateBlocker);
 
    public:
     InstanceUpdateBlocker(SVGElement* target_element);
@@ -201,13 +200,14 @@ class CORE_EXPORT SVGElement : public Element {
 
    private:
     Member<SVGElement> target_element_;
+    DISALLOW_COPY_AND_ASSIGN(InstanceUpdateBlocker);
   };
 
   void InvalidateInstances();
   void SetNeedsStyleRecalcForInstances(StyleChangeType,
                                        const StyleChangeReasonForTracing&);
 
-  DECLARE_VIRTUAL_TRACE();
+  virtual void Trace(blink::Visitor*);
 
   static const AtomicString& EventParameterName();
 
@@ -222,9 +222,10 @@ class CORE_EXPORT SVGElement : public Element {
   void ParseAttribute(const AttributeModificationParams&) override;
   void AttributeChanged(const AttributeModificationParams&) override;
 
-  void CollectStyleForPresentationAttribute(const QualifiedName&,
-                                            const AtomicString&,
-                                            MutableStylePropertySet*) override;
+  void CollectStyleForPresentationAttribute(
+      const QualifiedName&,
+      const AtomicString&,
+      MutableCSSPropertyValueSet*) override;
 
   InsertionNotificationRequest InsertedInto(ContainerNode*) override;
   void RemovedFrom(ContainerNode*) override;
@@ -235,11 +236,13 @@ class CORE_EXPORT SVGElement : public Element {
     UpdateRelativeLengthsInformation(SelfHasRelativeLengths(), this);
   }
   void UpdateRelativeLengthsInformation(bool has_relative_lengths, SVGElement*);
-  static void MarkForLayoutAndParentResourceInvalidation(LayoutObject*);
+  static void MarkForLayoutAndParentResourceInvalidation(LayoutObject&);
 
   virtual bool SelfHasRelativeLengths() const { return false; }
 
   bool HasSVGParent() const;
+
+  SVGElementSet* SetOfIncomingReferences() const;
 
   SVGElementRareData* EnsureSVGRareData();
   inline bool HasSVGRareData() const { return svg_rare_data_; }
@@ -270,8 +273,6 @@ class CORE_EXPORT SVGElement : public Element {
     return EnsureComputedStyle(pseudo_element_specifier);
   }
   void WillRecalcStyle(StyleRecalcChange) override;
-
-  void BuildPendingResourcesIfNeeded();
 
   HeapHashSet<WeakMember<SVGElement>> elements_with_relative_lengths_;
 
@@ -316,7 +317,7 @@ inline bool Node::HasTagName(const SVGQualifiedName& name) const {
   return IsSVGElement() && ToSVGElement(*this).HasTagName(name);
 }
 
-// This requires isSVG*Element(const SVGElement&).
+// This requires IsSVG*Element(const SVGElement&).
 #define DEFINE_SVGELEMENT_TYPE_CASTS_WITH_FUNCTION(thisType)               \
   inline bool Is##thisType(const thisType* element);                       \
   inline bool Is##thisType(const thisType& element);                       \
@@ -324,14 +325,10 @@ inline bool Node::HasTagName(const SVGQualifiedName& name) const {
     return element && Is##thisType(*element);                              \
   }                                                                        \
   inline bool Is##thisType(const Node& node) {                             \
-    return node.IsSVGElement() ? Is##thisType(ToSVGElement(node)) : false; \
+    return node.IsSVGElement() && Is##thisType(ToSVGElement(node));        \
   }                                                                        \
   inline bool Is##thisType(const Node* node) {                             \
     return node && Is##thisType(*node);                                    \
-  }                                                                        \
-  template <typename T>                                                    \
-  inline bool Is##thisType(const T* node) {                                \
-    return Is##thisType(node);                                             \
   }                                                                        \
   template <typename T>                                                    \
   inline bool Is##thisType(const Member<T>& node) {                        \
@@ -345,6 +342,6 @@ inline bool Node::HasTagName(const SVGQualifiedName& name) const {
 
 }  // namespace blink
 
-#include "core/SVGElementTypeHelpers.h"
+#include "core/svg_element_type_helpers.h"
 
 #endif  // SVGElement_h

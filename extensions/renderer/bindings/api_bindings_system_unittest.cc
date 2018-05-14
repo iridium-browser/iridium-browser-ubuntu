@@ -5,6 +5,7 @@
 #include "extensions/renderer/bindings/api_bindings_system.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
@@ -94,11 +95,6 @@ bool AllowAllAPIs(v8::Local<v8::Context> context, const std::string& name) {
   return true;
 }
 
-void DoNothingWithSilentRequest(
-    v8::Local<v8::Context> context,
-    const std::string& call_name,
-    const std::vector<v8::Local<v8::Value>>& arguments) {}
-
 }  // namespace
 
 APIBindingsSystemTest::APIBindingsSystemTest() {}
@@ -117,15 +113,13 @@ void APIBindingsSystemTest::SetUp() {
 
   binding::AddConsoleError add_console_error(base::Bind(
       &APIBindingsSystemTest::AddConsoleError, base::Unretained(this)));
-  bindings_system_ = base::MakeUnique<APIBindingsSystem>(
-      base::Bind(&RunFunctionOnGlobalAndIgnoreResult),
-      base::Bind(&RunFunctionOnGlobalAndReturnHandle),
+  bindings_system_ = std::make_unique<APIBindingsSystem>(
       base::Bind(&APIBindingsSystemTest::GetAPISchema, base::Unretained(this)),
       base::Bind(&AllowAllAPIs),
       base::Bind(&APIBindingsSystemTest::OnAPIRequest, base::Unretained(this)),
       base::Bind(&APIBindingsSystemTest::OnEventListenersChanged,
                  base::Unretained(this)),
-      base::Bind(&DoNothingWithSilentRequest), add_console_error,
+      base::DoNothing(), add_console_error,
       APILastError(base::Bind(&APIBindingsSystemTest::GetLastErrorParent,
                               base::Unretained(this)),
                    add_console_error));
@@ -340,7 +334,7 @@ TEST_F(APIBindingsSystemTest, TestCustomHooks) {
     return result;
   };
 
-  auto test_hooks = base::MakeUnique<APIBindingHooksTestDelegate>();
+  auto test_hooks = std::make_unique<APIBindingHooksTestDelegate>();
   test_hooks->AddHandler("alpha.functionWithCallback",
                          base::Bind(hook, &did_call));
   APIBindingHooks* binding_hooks =
@@ -446,7 +440,6 @@ TEST_F(APIBindingsSystemTest, TestCustomEvent) {
   v8::Local<v8::Context> context = MainContext();
 
   auto create_custom_event = [](v8::Local<v8::Context> context,
-                                const binding::RunJSFunctionSync& run_js,
                                 const std::string& event_name) {
     v8::Isolate* isolate = context->GetIsolate();
     v8::Local<v8::Object> ret = v8::Object::New(isolate);
@@ -456,7 +449,7 @@ TEST_F(APIBindingsSystemTest, TestCustomEvent) {
     return ret.As<v8::Value>();
   };
 
-  auto test_hooks = base::MakeUnique<APIBindingHooksTestDelegate>();
+  auto test_hooks = std::make_unique<APIBindingHooksTestDelegate>();
   test_hooks->SetCustomEvent(base::Bind(create_custom_event));
   APIBindingHooks* binding_hooks =
       bindings_system()->GetHooksForAPI(kAlphaAPIName);

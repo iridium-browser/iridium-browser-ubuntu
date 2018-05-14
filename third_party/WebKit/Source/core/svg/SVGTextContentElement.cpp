@@ -24,8 +24,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
-#include "core/SVGNames.h"
-#include "core/XMLNames.h"
 #include "core/editing/FrameSelection.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/UseCounter.h"
@@ -33,6 +31,8 @@
 #include "core/layout/svg/SVGTextQuery.h"
 #include "core/svg/SVGPointTearOff.h"
 #include "core/svg/SVGRectTearOff.h"
+#include "core/svg_names.h"
+#include "core/xml_names.h"
 
 namespace blink {
 
@@ -88,7 +88,7 @@ SVGTextContentElement::SVGTextContentElement(const QualifiedName& tag_name,
   AddToPropertyMap(length_adjust_);
 }
 
-DEFINE_TRACE(SVGTextContentElement) {
+void SVGTextContentElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(text_length_);
   visitor->Trace(length_adjust_);
   SVGGraphicsElement::Trace(visitor);
@@ -212,26 +212,7 @@ void SVGTextContentElement::selectSubString(unsigned charnum,
     nchars = number_of_chars - charnum;
 
   DCHECK(GetDocument().GetFrame());
-
-  // Find selection start
-  VisiblePosition start = VisiblePosition::FirstPositionInNode(
-      *const_cast<SVGTextContentElement*>(this));
-  for (unsigned i = 0; i < charnum; ++i)
-    start = NextPositionOf(start);
-
-  // Find selection end
-  VisiblePosition end(start);
-  for (unsigned i = 0; i < nchars; ++i)
-    end = NextPositionOf(end);
-
-  // TODO(editing-dev): We assume |start| and |end| are not null and we don't
-  // known when |start| and |end| are null. Once we get a such case, we check
-  // null for |start| and |end|.
-  GetDocument().GetFrame()->Selection().SetSelection(
-      SelectionInDOMTree::Builder()
-          .SetBaseAndExtent(start.DeepEquivalent(), end.DeepEquivalent())
-          .SetAffinity(start.Affinity())
-          .Build());
+  GetDocument().GetFrame()->Selection().SelectSubString(*this, charnum, nchars);
 }
 
 bool SVGTextContentElement::IsPresentationAttribute(
@@ -244,7 +225,7 @@ bool SVGTextContentElement::IsPresentationAttribute(
 void SVGTextContentElement::CollectStyleForPresentationAttribute(
     const QualifiedName& name,
     const AtomicString& value,
-    MutableStylePropertySet* style) {
+    MutableCSSPropertyValueSet* style) {
   if (name.Matches(XMLNames::spaceAttr)) {
     DEFINE_STATIC_LOCAL(const AtomicString, preserve_string, ("preserve"));
 
@@ -274,8 +255,8 @@ void SVGTextContentElement::SvgAttributeChanged(
       attr_name == XMLNames::spaceAttr) {
     SVGElement::InvalidationGuard invalidation_guard(this);
 
-    if (LayoutObject* layout_object = this->GetLayoutObject())
-      MarkForLayoutAndParentResourceInvalidation(layout_object);
+    if (LayoutObject* layout_object = GetLayoutObject())
+      MarkForLayoutAndParentResourceInvalidation(*layout_object);
 
     return;
   }
@@ -299,7 +280,7 @@ SVGTextContentElement* SVGTextContentElement::ElementFromLineLayoutItem(
   SVGElement* element = ToSVGElement(line_layout_item.GetNode());
   DCHECK(element);
   return IsSVGTextContentElement(*element) ? ToSVGTextContentElement(element)
-                                           : 0;
+                                           : nullptr;
 }
 
 }  // namespace blink

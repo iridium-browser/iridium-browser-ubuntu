@@ -27,8 +27,12 @@ class BackgroundTaskSchedulerUma {
     static final int BACKGROUND_TASK_OFFLINE_PREFETCH = 7;
     static final int BACKGROUND_TASK_DOWNLOAD_SERVICE = 8;
     static final int BACKGROUND_TASK_DOWNLOAD_CLEANUP = 9;
+    static final int BACKGROUND_TASK_WEBVIEW_VARIATIONS = 10;
+    static final int BACKGROUND_TASK_OFFLINE_CONTENT_NOTIFICATION = 11;
+    static final int BACKGROUND_TASK_WEBAPK_UPDATE = 12;
+    static final int BACKGROUND_TASK_DOWNLOAD_RESUMPTION = 13;
     // Keep this one at the end and increment appropriately when adding new tasks.
-    static final int BACKGROUND_TASK_COUNT = 10;
+    static final int BACKGROUND_TASK_COUNT = 14;
 
     static final String KEY_CACHED_UMA = "bts_cached_uma";
 
@@ -77,6 +81,7 @@ class BackgroundTaskSchedulerUma {
         }
 
         /** Converts cached UMA entry to a string in format: EVENT:VALUE:COUNT. */
+        @Override
         public String toString() {
             return mEvent + SEPARATOR + mValue + SEPARATOR + mCount;
         }
@@ -139,6 +144,12 @@ class BackgroundTaskSchedulerUma {
     /** Reports metrics for stopping a task. */
     public void reportTaskStopped(int taskId) {
         cacheEvent("Android.BackgroundTaskScheduler.TaskStopped", toUmaEnumValueFromTaskId(taskId));
+    }
+
+    /** Reports metrics for when a NativeBackgroundTask loads the native library. */
+    public void reportTaskStartedNative(int taskId) {
+        cacheEvent("Android.BackgroundTaskScheduler.TaskLoadedNative",
+                toUmaEnumValueFromTaskId(taskId));
     }
 
     /** Method that actually invokes histogram recording. Extracted for testing. */
@@ -228,6 +239,14 @@ class BackgroundTaskSchedulerUma {
                 return BACKGROUND_TASK_DOWNLOAD_SERVICE;
             case TaskIds.DOWNLOAD_CLEANUP_JOB_ID:
                 return BACKGROUND_TASK_DOWNLOAD_CLEANUP;
+            case TaskIds.WEBVIEW_VARIATIONS_SEED_FETCH_JOB_ID:
+                return BACKGROUND_TASK_WEBVIEW_VARIATIONS;
+            case TaskIds.OFFLINE_PAGES_PREFETCH_NOTIFICATION_JOB_ID:
+                return BACKGROUND_TASK_OFFLINE_CONTENT_NOTIFICATION;
+            case TaskIds.WEBAPK_UPDATE_JOB_ID:
+                return BACKGROUND_TASK_WEBAPK_UPDATE;
+            case TaskIds.DOWNLOAD_RESUMPTION_JOB_ID:
+                return BACKGROUND_TASK_DOWNLOAD_RESUMPTION;
             default:
                 assert false;
         }

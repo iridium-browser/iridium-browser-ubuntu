@@ -10,16 +10,18 @@
 #include "platform/PlatformExport.h"
 #include "platform/wtf/Allocator.h"
 
+#define PRINT_HEAP_STATS 0  // Enable this macro to print heap stats to stderr.
+
 namespace blink {
 
+class MarkingVisitor;
 class Visitor;
-
-#define PRINT_HEAP_STATS 0  // Enable this macro to print heap stats to stderr.
 
 using Address = uint8_t*;
 
 using FinalizationCallback = void (*)(void*);
-using VisitorCallback = void (*)(Visitor*, void* self);
+using VisitorCallback = void (*)(Visitor*, void*);
+using MarkingVisitorCallback = void (*)(MarkingVisitor*, void*);
 using TraceCallback = VisitorCallback;
 using WeakCallback = VisitorCallback;
 using EphemeronCallback = VisitorCallback;
@@ -110,4 +112,4 @@ class PLATFORM_EXPORT BlinkGC final {
 
 }  // namespace blink
 
-#endif
+#endif  // BlinkGC_h

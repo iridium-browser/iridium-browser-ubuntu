@@ -8,10 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "webrtc/media/base/streamparams.h"
+#include "media/base/streamparams.h"
 
 #include <list>
 #include <sstream>
+
+#include "rtc_base/checks.h"
 
 namespace cricket {
 namespace {
@@ -195,6 +197,22 @@ bool StreamParams::GetSecondarySsrc(const std::string& semantics,
     }
   }
   return false;
+}
+
+std::vector<std::string> StreamParams::stream_labels() const {
+  if (sync_label.empty()) {
+    return {};
+  }
+  return {sync_label};
+}
+
+void StreamParams::set_stream_labels(
+    const std::vector<std::string>& stream_labels) {
+  // TODO(steveanton): Support an arbitrary number of stream labels.
+  RTC_DCHECK_LE(stream_labels.size(), 1) << "set_stream_labels currently only "
+                                            "supports exactly 0 or 1 stream "
+                                            "label.";
+  sync_label = (stream_labels.empty() ? "" : stream_labels[0]);
 }
 
 bool IsOneSsrcStream(const StreamParams& sp) {

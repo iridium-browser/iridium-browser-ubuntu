@@ -28,6 +28,7 @@
 
 #include "core/CoreExport.h"
 #include "core/frame/NavigatorConcurrentHardware.h"
+#include "core/frame/NavigatorDeviceMemory.h"
 #include "core/frame/NavigatorID.h"
 #include "core/frame/NavigatorOnLine.h"
 #include "platform/Supplementable.h"
@@ -38,9 +39,9 @@
 namespace blink {
 
 class CORE_EXPORT WorkerNavigator final
-    : public GarbageCollectedFinalized<WorkerNavigator>,
-      public ScriptWrappable,
+    : public ScriptWrappable,
       public NavigatorConcurrentHardware,
+      public NavigatorDeviceMemory,
       public NavigatorID,
       public NavigatorOnLine,
       public Supplementable<WorkerNavigator> {
@@ -55,7 +56,8 @@ class CORE_EXPORT WorkerNavigator final
 
   String userAgent() const override;
 
-  DECLARE_TRACE();
+  void Trace(blink::Visitor*) override;
+  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   explicit WorkerNavigator(const String&);
