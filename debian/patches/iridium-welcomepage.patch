@@ -1,17 +1,6 @@
---- a/chrome/app/resources/locale_settings.grd
-+++ b/chrome/app/resources/locale_settings.grd
-@@ -187,7 +187,7 @@
-       <!-- The URL for Google Chrome welcome page. This is used for the pre -->
-       <!-- populated thumbnails. -->
-       <message name="IDS_CHROME_WELCOME_URL" translateable="false">
--        http://www.google.com/chrome/intl/[GRITLANGCODE]/welcome.html
-+	      https://iridiumbrowser.de/faq/?hl=[GRITLANGCODE]&amp;welcome
-       </message>
-       <if expr="is_android">
-         <message name="IDS_MOBILE_WELCOME_URL" translateable="false">
 --- a/chrome/browser/first_run/first_run.cc
 +++ b/chrome/browser/first_run/first_run.cc
-@@ -458,6 +458,7 @@ void SetShouldShowWelcomePage() {
+@@ -468,6 +468,7 @@ void SetShouldShowWelcomePage() {
  }
  
  bool ShouldShowWelcomePage() {

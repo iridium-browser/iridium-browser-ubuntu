@@ -41,9 +41,7 @@ suppress-newer-clang-warning-flags.patch
 fix-ffmpeg-build.patch
 fix-build-on-older-gcc.patch
 gn-remove-sysroot-use.patch
-<<<<<<< c00833707fa2d21261f8644c8390c6e8d3b79f81
 widevine-allow-on-linux.patch
 set-rpath-on-chromium-executables.patch
-fix-crashpad-build.patch
-iridium-manpage.patch
+#fix-crashpad-build.patch
 iridium-welcomepage.patch
