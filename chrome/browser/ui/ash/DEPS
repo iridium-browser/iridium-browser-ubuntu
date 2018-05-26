@@ -1,0 +1,22 @@
+include_rules = [
+  # Code under //ash runs out-of-process in mash so it must be accessed via mojo
+  # interfaces in //ash/public/interfaces. See //ash/README.md.
+  # TODO(mash): Remove. http://crbug.com/678705
+  "!ash",
+
+  "+ash/public",
+
+  # Use //ui/wm/core/window_util.h when manipulating chrome browser windows.
+  # Consult mustash-team@ if you need to manipulate non-browser windows because
+  # those are owned by the ash process under mash. See //ash/README.md.
+  "-ash/wm/window_util.h",
+
+  # ash depends on views, so code in ui/ash is allowed to depend on ui/views.
+  "+chrome/browser/ui/views",
+
+  "+components/arc",
+  "+components/drive",
+  "+components/session_manager/core",
+  "+components/user_manager",
+  "+media",
+]

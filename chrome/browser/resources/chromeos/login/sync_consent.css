@@ -1,0 +1,49 @@
+/* Copyright 2017 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+:root {
+  color: #333;
+  font: 13px Roboto, sans-serif;
+  font-weight: 400; /* roboto-regular */
+  height: 640px;
+  width: 768px;
+}
+
+.footer {
+  padding: 18px 64px 0;
+}
+
+.overview-list-item {
+  background-color: var(--google-grey-100);
+  margin-bottom: 16px;
+  padding: 16px;
+}
+
+.overview-list-item:last-of-type {
+  margin-bottom: 0;
+}
+
+.overview-list-item-icon {
+  -webkit-padding-end: 16px;
+}
+
+.overview-list-item-title {
+  font-weight: 500; /* roboto-medium */
+  margin-bottom: 4px;
+}
+
+paper-checkbox {
+  --paper-checkbox-label-spacing: 12px;
+  --paper-checkbox-size: 16px;
+  -webkit-padding-start: 8px;
+  padding-top: 28px; /* 40 to label base line => 40 - 16/2 - 13/3 = 28 */
+}
+
+#syncConsentOverviewDialog .bottom-buttons {
+  padding: 0 6px; /* = 8px - 2px button border */
+}
+
+#acceptAndContinue {
+  -webkit-padding-end: 18px;
+}

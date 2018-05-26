@@ -1,0 +1,6 @@
+include_rules = [
+  "+base",
+  "+net",
+  "+third_party/blink/renderer/platform/inspector_protocol",
+  "+ui/gfx",
+]
