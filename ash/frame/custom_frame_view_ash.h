@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "ash/ash_export.h"
+#include "ash/frame/caption_buttons/caption_button_model.h"
 #include "ash/public/interfaces/window_style.mojom.h"
 #include "ash/shell_observer.h"
 #include "ash/wm/splitview/split_view_controller.h"
@@ -58,8 +59,12 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView,
       views::Widget* frame,
       ImmersiveFullscreenControllerDelegate* immersive_delegate = nullptr,
       bool enable_immersive = true,
-      mojom::WindowStyle window_style = mojom::WindowStyle::DEFAULT);
+      mojom::WindowStyle window_style = mojom::WindowStyle::DEFAULT,
+      std::unique_ptr<CaptionButtonModel> model = nullptr);
   ~CustomFrameViewAsh() override;
+
+  // Sets the caption button modeland updates the caption buttons.
+  void SetCaptionButtonModel(std::unique_ptr<CaptionButtonModel> model);
 
   // Inits |immersive_fullscreen_controller| so that the controller reveals
   // and hides |header_view_| in immersive fullscreen.
@@ -72,16 +77,19 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView,
   // will have some transparency added when the frame is drawn.
   void SetFrameColors(SkColor active_frame_color, SkColor inactive_frame_color);
 
-  // Set the back buttons status. If |show| is true, the button becomes visible.
-  // |enabled| controls the enabled/disabled state of the back button.
-  void SetBackButtonState(FrameBackButtonState state);
-
   // Sets the height of the header. If |height| has no value (the default), the
   // preferred height is used.
   void SetHeaderHeight(base::Optional<int> height);
 
   // Get the view of the header.
   views::View* GetHeaderView();
+
+  // Calculate the client bounds for given window bounds.
+  gfx::Rect GetClientBoundsForWindowBounds(
+      const gfx::Rect& window_bounds) const;
+
+  // Returns the title string which should be shown in the frame.
+  virtual base::string16 GetFrameTitle() const;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -128,6 +136,13 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView,
   SkColor GetActiveFrameColorForTest() const;
   SkColor GetInactiveFrameColorForTest() const;
 
+ protected:
+  // Called when overview mode or split view state changed. If overview mode and
+  // split view mode are both active at the same time, the header of the window
+  // in split view should be visible, but the headers of other windows in
+  // overview are not.
+  void UpdateHeaderView();
+
  private:
   class AvatarObserver;
   class OverlayView;
@@ -145,12 +160,6 @@ class ASH_EXPORT CustomFrameViewAsh : public views::NonClientFrameView,
 
   // Height from top of window to top of client area.
   int NonClientTopBorderHeight() const;
-
-  // Called when overview mode or split view state changed. If overview mode and
-  // split view mode are both active at the same time, the header of the window
-  // in split view should be visible, but the headers of other windows in
-  // overview are not.
-  void OnOverviewOrSplitViewModeChanged();
 
   // Not owned.
   views::Widget* frame_;

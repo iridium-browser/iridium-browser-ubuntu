@@ -54,6 +54,14 @@ void SurfaceLayerImpl::SetStretchContentToFillBounds(bool stretch_content) {
   NoteLayerPropertyChanged();
 }
 
+void SurfaceLayerImpl::SetHitTestable(bool hit_testable) {
+  if (hit_testable_ == hit_testable)
+    return;
+
+  hit_testable_ = hit_testable;
+  NoteLayerPropertyChanged();
+}
+
 void SurfaceLayerImpl::PushPropertiesTo(LayerImpl* layer) {
   LayerImpl::PushPropertiesTo(layer);
   SurfaceLayerImpl* layer_impl = static_cast<SurfaceLayerImpl*>(layer);
@@ -63,6 +71,7 @@ void SurfaceLayerImpl::PushPropertiesTo(LayerImpl* layer) {
   deadline_in_frames_ = 0u;
   layer_impl->SetFallbackSurfaceId(fallback_surface_id_);
   layer_impl->SetStretchContentToFillBounds(stretch_content_to_fill_bounds_);
+  layer_impl->SetHitTestable(hit_testable_);
 }
 
 void SurfaceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
@@ -93,6 +102,10 @@ void SurfaceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
   deadline_in_frames_ = 0u;
 }
 
+bool SurfaceLayerImpl::is_surface_layer() const {
+  return true;
+}
+
 viz::SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
     viz::RenderPass* render_pass,
     const viz::SurfaceId& primary_surface_id,
@@ -119,7 +132,7 @@ viz::SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
   // *|common_shared_quad_state| so that it may be reused by another emitted
   // viz::SurfaceDrawQuad.
   viz::SharedQuadState* shared_quad_state =
-    shared_quad_state = render_pass->CreateAndAppendSharedQuadState();
+    render_pass->CreateAndAppendSharedQuadState();
 
   PopulateScaledSharedQuadState(shared_quad_state, device_scale_factor,
                                 device_scale_factor, contents_opaque());

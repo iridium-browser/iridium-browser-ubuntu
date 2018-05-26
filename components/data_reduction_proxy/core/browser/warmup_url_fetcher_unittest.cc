@@ -18,6 +18,7 @@
 #include "base/threading/platform_thread.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "net/base/proxy_server.h"
 #include "net/http/http_status_code.h"
 #include "net/nqe/network_quality_estimator_test_util.h"
@@ -52,7 +53,18 @@ class WarmupURLFetcherTest : public WarmupURLFetcher {
   static void InitExperiment(
       base::test::ScopedFeatureList* scoped_feature_list) {
     std::map<std::string, std::string> params;
+    params[params::GetWarmupCallbackParamName()] = "true";
+    scoped_feature_list->InitAndEnableFeatureWithParameters(
+        features::kDataReductionProxyRobustConnection, params);
+  }
+
+  static void InitExperimentWithTimeout(
+      base::test::ScopedFeatureList* scoped_feature_list) {
+    std::map<std::string, std::string> params;
     params["warmup_fetch_callback_enabled"] = "true";
+    params["warmup_url_fetch_min_timeout_seconds"] = "10";
+    params["warmup_url_fetch_max_timeout_seconds"] = "60";
+    params["warmup_url_fetch_init_http_rtt_multiplier"] = "12";
     scoped_feature_list->InitAndEnableFeatureWithParameters(
         features::kDataReductionProxyRobustConnection, params);
   }
@@ -551,6 +563,51 @@ TEST(WarmupURLFetcherTest, TestFetchTimeoutIncreasing) {
 
   warmup_url_fetcher.FetchWarmupURL(0);
   EXPECT_EQ(http_rtt * 5, warmup_url_fetcher.GetFetchTimeout());
+}
+
+TEST(WarmupURLFetcherTest, TestFetchTimeoutIncreasingWithFieldTrial) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  WarmupURLFetcherTest::InitExperimentWithTimeout(&scoped_feature_list);
+
+  // Must remain in sync with InitExperimentWithTimeout().
+  constexpr base::TimeDelta kMinTimeout = base::TimeDelta::FromSeconds(10);
+  constexpr base::TimeDelta kMaxTimeout = base::TimeDelta::FromSeconds(60);
+
+  base::HistogramTester histogram_tester;
+  base::MessageLoopForIO message_loop;
+
+  std::unique_ptr<net::TestURLRequestContext> test_request_context(
+      new net::TestURLRequestContext(true));
+
+  test_request_context->Init();
+  scoped_refptr<net::URLRequestContextGetter> request_context_getter =
+      new net::TestURLRequestContextGetter(message_loop.task_runner(),
+                                           std::move(test_request_context));
+  net::TestNetworkQualityEstimator estimator;
+  request_context_getter->GetURLRequestContext()->set_network_quality_estimator(
+      &estimator);
+
+  WarmupURLFetcherTest warmup_url_fetcher(request_context_getter);
+  EXPECT_FALSE(warmup_url_fetcher.IsFetchInFlight());
+
+  EXPECT_EQ(kMinTimeout, warmup_url_fetcher.GetFetchTimeout());
+
+  base::TimeDelta http_rtt = base::TimeDelta::FromSeconds(1);
+  estimator.SetStartTimeNullHttpRtt(http_rtt);
+  EXPECT_EQ(http_rtt * 12, warmup_url_fetcher.GetFetchTimeout());
+
+  warmup_url_fetcher.FetchWarmupURL(1);
+  EXPECT_EQ(http_rtt * 24, warmup_url_fetcher.GetFetchTimeout());
+
+  warmup_url_fetcher.FetchWarmupURL(2);
+  EXPECT_EQ(http_rtt * 48, warmup_url_fetcher.GetFetchTimeout());
+
+  http_rtt = base::TimeDelta::FromSeconds(5);
+  estimator.SetStartTimeNullHttpRtt(http_rtt);
+  EXPECT_EQ(kMaxTimeout, warmup_url_fetcher.GetFetchTimeout());
+
+  warmup_url_fetcher.FetchWarmupURL(0);
+  EXPECT_EQ(http_rtt * 12, warmup_url_fetcher.GetFetchTimeout());
 }
 
 }  // namespace

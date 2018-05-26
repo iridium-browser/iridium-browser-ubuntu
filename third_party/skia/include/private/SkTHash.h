@@ -270,8 +270,8 @@ public:
 
 private:
     struct Pair {
-        K key;
-        V val;
+        K key{};
+        V val{};
         static const K& GetKey(const Pair& p) { return p.key; }
         static uint32_t Hash(const K& key) { return HashK()(key); }
     };

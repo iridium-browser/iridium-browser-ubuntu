@@ -10,10 +10,10 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
+#include "chromeos/components/proximity_auth/logging/logging.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
-#include "components/proximity_auth/logging/logging.h"
 #include "components/session_manager/core/session_manager.h"
 
 namespace chromeos {
@@ -102,8 +102,8 @@ void HostScanSchedulerImpl::DefaultNetworkChanged(const NetworkState* network) {
   // NetworkStateHandlerObservers are finished running. Processing the
   // network change immediately can cause crashes; see https://crbug.com/800370.
   task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&HostScanSchedulerImpl::EnsureScan,
-                                    weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&HostScanSchedulerImpl::EnsureScan,
+                                        weak_ptr_factory_.GetWeakPtr()));
 }
 
 void HostScanSchedulerImpl::ScanRequested() {

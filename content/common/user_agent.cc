@@ -188,7 +188,7 @@ std::string BuildUserAgentFromOSAndProduct(const std::string& os_info,
       WEBKIT_VERSION_MAJOR,
       WEBKIT_VERSION_MINOR);
   if (strncmp(product.c_str(), "Chrome/", 7) != 0)
-	base::StringAppendF(&user_agent, " Chrome/66.0.3359.139");
+	base::StringAppendF(&user_agent, " Chrome/67.0.3396.40");
   return user_agent;
 }
 

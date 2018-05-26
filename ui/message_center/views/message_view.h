@@ -28,14 +28,17 @@ class ScrollView;
 
 namespace message_center {
 
+namespace test {
+class MessagePopupCollectionTest;
+}
+
 class Notification;
 class NotificationControlButtonsView;
 
 // An base class for a notification entry. Contains background and other
 // elements shared by derived notification views.
-class MESSAGE_CENTER_EXPORT MessageView
-    : public views::InkDropHostView,
-      public views::SlideOutController::Delegate {
+class MESSAGE_CENTER_EXPORT MessageView : public views::InkDropHostView,
+                                          public SlideOutController::Delegate {
  public:
   static const char kViewClassName[];
 
@@ -59,9 +62,11 @@ class MESSAGE_CENTER_EXPORT MessageView
   virtual bool IsCloseButtonFocused() const = 0;
   virtual void RequestFocusOnCloseButton() = 0;
   virtual void UpdateControlButtonsVisibility() = 0;
+  virtual const char* GetMessageViewSubClassName() const = 0;
 
   virtual void SetExpanded(bool expanded);
   virtual bool IsExpanded() const;
+  virtual bool IsAutoExpandingAllowed() const;
   virtual bool IsManuallyExpandedOrCollapsed() const;
   virtual void SetManuallyExpandedOrCollapsed(bool value);
 
@@ -78,16 +83,20 @@ class MESSAGE_CENTER_EXPORT MessageView
   // views::View
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   bool OnKeyReleased(const ui::KeyEvent& event) override;
   void OnPaint(gfx::Canvas* canvas) override;
   void OnFocus() override;
   void OnBlur() override;
   void Layout() override;
-  const char* GetClassName() const override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  // Subclasses of MessageView shouldn't use this method to distinguish classes.
+  // Instead, use GetMessageViewSubClassName().
+  const char* GetClassName() const final;
 
-  // views::SlideOutController::Delegate
+  // message_center::SlideOutController::Delegate
   ui::Layer* GetSlideOutLayer() override;
   void OnSlideChanged() override;
   void OnSlideOut() override;
@@ -113,6 +122,8 @@ class MESSAGE_CENTER_EXPORT MessageView
   bool is_nested() const { return is_nested_; }
 
  private:
+  friend class test::MessagePopupCollectionTest;
+
   std::string notification_id_;
   views::View* background_view_ = nullptr;  // Owned by views hierarchy.
   views::ScrollView* scroller_ = nullptr;
@@ -124,7 +135,7 @@ class MESSAGE_CENTER_EXPORT MessageView
 
   std::unique_ptr<views::Painter> focus_painter_;
 
-  views::SlideOutController slide_out_controller_;
+  message_center::SlideOutController slide_out_controller_;
 
   // True if |this| is embedded in another view. Equivalent to |!top_level| in
   // MessageViewFactory parlance.

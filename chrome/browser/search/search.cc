@@ -380,7 +380,8 @@ bool HandleNewTabURLReverseRewrite(GURL* url,
 
   // Do nothing in incognito.
   Profile* profile = Profile::FromBrowserContext(browser_context);
-  if (profile && profile->IsOffTheRecord())
+  DCHECK(profile);
+  if (profile->IsOffTheRecord())
     return false;
 
   if (IsInstantNTPURL(*url, profile)) {

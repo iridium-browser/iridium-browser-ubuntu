@@ -30,9 +30,8 @@ namespace crash_reporter {
 
 namespace {
 
-// Use a value of 1% for WebView Stable to avoid hitting the crash report upload
-// cap.
-const double minidump_generation_user_fraction = 0.01;
+// TODO(gsennton) lower the following value before pushing to stable:
+const double minidump_generation_user_fraction = 1.0;
 
 // Returns whether the current process should be reporting crashes through
 // minidumps. This function should only be called once per process - the return

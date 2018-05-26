@@ -18,6 +18,10 @@
 #include "mojo/public/cpp/bindings/binding.h"
 #include "ui/aura/window_observer.h"
 
+namespace {
+class HostedAppNonClientFrameViewAshTest;
+}
+
 class HostedAppButtonContainer;
 class TabIconView;
 
@@ -25,6 +29,7 @@ namespace ash {
 class FrameCaptionButton;
 class FrameCaptionButtonContainerView;
 class FrameHeader;
+class FrameHeaderOriginText;
 }
 
 // Provides the BrowserNonClientFrameView for Chrome OS.
@@ -49,7 +54,6 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   int GetThemeBackgroundXInset() const override;
   void UpdateThrobber(bool running) override;
   void UpdateMinimumSize() override;
-  views::View* GetHostedAppMenuView() override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -94,6 +98,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
                                const void* key,
                                intptr_t old) override;
 
+  HostedAppButtonContainer* GetHostedAppButtonContainerForTesting() const;
+
  protected:
   // BrowserNonClientFrameView:
   AvatarButtonStyle GetAvatarButtonStyle() const override;
@@ -109,7 +115,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
                            AvatarDisplayOnTeleportedWindow);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
                            HeaderVisibilityInOverviewAndSplitview);
-  FRIEND_TEST_ALL_PREFIXES(HostedAppNonClientFrameViewAshTest, HostedAppFrame);
+  FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
+                           HeaderHeightForSnappedBrowserInSplitView);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshBackButtonTest,
                            V1BackButton);
   FRIEND_TEST_ALL_PREFIXES(BrowserNonClientFrameViewAshTest,
@@ -119,10 +126,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   FRIEND_TEST_ALL_PREFIXES(ImmersiveModeControllerAshHostedAppBrowserTest,
                            FrameLayout);
 
+  friend class HostedAppNonClientFrameViewAshTest;
   friend class BrowserFrameHeaderAsh;
-
-  // Distance between the left edge of the NonClientFrameView and the tab strip.
-  int GetTabStripLeftInset() const;
 
   // Distance between the right edge of the NonClientFrameView and the tab
   // strip.
@@ -132,8 +137,6 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // the header used for packaged apps. Packaged apps use a different color
   // scheme than browser windows.
   bool UsePackagedAppHeaderStyle() const;
-
-  void LayoutProfileIndicatorIcon();
 
   // Returns true if there is anything to paint. Some fullscreen windows do not
   // need their frames painted.
@@ -145,6 +148,10 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
 
   // Creates the frame header for the browser window.
   std::unique_ptr<ash::FrameHeader> CreateFrameHeader();
+
+  // Triggers the hosted app origin and icon animations, assumes the hosted app
+  // UI elements exist.
+  void StartHostedAppAnimation();
 
   // View which contains the window controls.
   ash::FrameCaptionButtonContainerView* caption_button_container_;
@@ -161,6 +168,10 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // Owned by views hierarchy.
   HostedAppButtonContainer* hosted_app_button_container_;
 
+  // URL origin text for hosted app windows.
+  // Owned by views hierarchy.
+  ash::FrameHeaderOriginText* frame_header_origin_text_ = nullptr;
+
   // Ash's mojom::SplitViewController.
   ash::mojom::SplitViewControllerPtr split_view_controller_;
 
@@ -176,6 +187,8 @@ class BrowserNonClientFrameViewAsh : public BrowserNonClientFrameView,
   // Maintains the current split view state.
   ash::mojom::SplitViewState split_view_state_ =
       ash::mojom::SplitViewState::NO_SNAP;
+
+  base::WeakPtrFactory<BrowserNonClientFrameViewAsh> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserNonClientFrameViewAsh);
 };

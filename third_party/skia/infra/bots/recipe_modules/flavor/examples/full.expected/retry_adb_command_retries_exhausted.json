@@ -3,6 +3,20 @@
     "cmd": [
       "python",
       "-u",
+      "RECIPE_MODULE[recipe_engine::file]/resources/fileutil.py",
+      "--json-output",
+      "/path/to/tmp/json",
+      "copy",
+      "[START_DIR]/skia/infra/bots/assets/android_ndk_linux/VERSION",
+      "/path/to/tmp/"
+    ],
+    "infra_step": true,
+    "name": "Get android_ndk_linux VERSION"
+  },
+  {
+    "cmd": [
+      "python",
+      "-u",
       "[START_DIR]/skia/bin/fetch-gn"
     ],
     "cwd": "[START_DIR]/skia",
@@ -20,7 +34,7 @@
       "[START_DIR]/skia/bin/gn",
       "gen",
       "[START_DIR]/out/Debug",
-      "--args=extra_cflags=[\"-O1\"] ndk=\"[START_DIR]/android_ndk_linux\" target_cpu=\"None\""
+      "--args=extra_cflags=[\"-O1\", \"-DDUMMY_ndk_version=42\"] ndk=\"[START_DIR]/android_ndk_linux\" target_cpu=\"None\""
     ],
     "cwd": "[START_DIR]/skia",
     "env": {
@@ -298,12 +312,26 @@
     "cmd": [
       "python",
       "-u",
+      "import os\nprint os.environ.get('SWARMING_BOT_ID', '')\n"
+    ],
+    "name": "get swarming bot id",
+    "stdout": "/path/to/tmp/",
+    "~followup_annotations": [
+      "@@@STEP_LOG_LINE@python.inline@import os@@@",
+      "@@@STEP_LOG_LINE@python.inline@print os.environ.get('SWARMING_BOT_ID', '')@@@",
+      "@@@STEP_LOG_END@python.inline@@@"
+    ]
+  },
+  {
+    "cmd": [
+      "python",
+      "-u",
       "RECIPE_MODULE[recipe_engine::file]/resources/fileutil.py",
       "--json-output",
       "/path/to/tmp/json",
       "copy",
       " ",
-      "/home/chrome-bot/force_quarantine"
+      "/home/chrome-bot/build123-m2--device5.force_quarantine"
     ],
     "infra_step": true,
     "name": "Quarantining Bot"

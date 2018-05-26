@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <string>
 #include <vector>
 
 #include "build/build_config.h"
@@ -14,9 +15,9 @@
 #include "content/common/drag_event_source_info.h"
 #include "content/public/common/drop_data.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
-#include "third_party/WebKit/public/platform/WebDisplayMode.h"
-#include "third_party/WebKit/public/platform/WebDragOperation.h"
-#include "third_party/WebKit/public/platform/WebInputEvent.h"
+#include "third_party/blink/public/platform/web_display_mode.h"
+#include "third_party/blink/public/platform/web_drag_operation.h"
+#include "third_party/blink/public/platform/web_input_event.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace blink {
@@ -35,6 +36,10 @@ class Sample;
 
 namespace ukm {
 class UkmRecorder;
+}
+
+namespace viz {
+class LocalSurfaceId;
 }
 
 namespace content {
@@ -75,9 +80,11 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
                                       bool width_changed) {}
 
   // The contents auto-resized and the container should match it.
-  virtual void ResizeDueToAutoResize(RenderWidgetHostImpl* render_widget_host,
-                                     const gfx::Size& new_size,
-                                     uint64_t sequence_number) {}
+  virtual void ResizeDueToAutoResize(
+      RenderWidgetHostImpl* render_widget_host,
+      const gfx::Size& new_size,
+      uint64_t sequence_number,
+      const viz::LocalSurfaceId& local_surface_id) {}
 
   // Callback to give the browser a chance to handle the specified keyboard
   // event before sending it to the renderer. See enum for details on return
@@ -95,12 +102,10 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // the event itself.
   virtual bool HandleWheelEvent(const blink::WebMouseWheelEvent& event);
 
-  // Notification the user has performed a direct interaction (mouse down,
-  // scroll, raw key down, gesture tap, or browser-initiated navigation) while
-  // focus was on the page. Informs the delegate that a user is interacting with
-  // a site.
-  virtual void OnUserInteraction(RenderWidgetHostImpl* render_widget_host,
-                                 const blink::WebInputEvent::Type type) {}
+  // Notification that an input event from the user was dispatched to the
+  // widget.
+  virtual void DidReceiveInputEvent(RenderWidgetHostImpl* render_widget_host,
+                                    const blink::WebInputEvent::Type type) {}
 
   // Callback to give the browser a chance to handle the specified gesture
   // event before sending it to the renderer.
@@ -192,6 +197,18 @@ class CONTENT_EXPORT RenderWidgetHostDelegate {
   // Returns the widget that holds the mouse lock or nullptr if the mouse isn't
   // locked.
   virtual RenderWidgetHostImpl* GetMouseLockWidget();
+
+  // Requests to lock the keyboard. Once the request is approved or rejected,
+  // GotResponseToKeyboardLockRequest() will be called on the requesting render
+  // widget host.
+  virtual bool RequestKeyboardLock(RenderWidgetHostImpl* render_widget_host,
+                                   bool esc_key_locked);
+
+  // Cancels a previous keyboard lock request.
+  virtual void CancelKeyboardLock(RenderWidgetHostImpl* render_widget_host) {}
+
+  // Returns the widget that holds the keyboard lock or nullptr if not locked.
+  virtual RenderWidgetHostImpl* GetKeyboardLockWidget();
 
   // Called when the visibility of the RenderFrameProxyHost in outer
   // WebContents changes. This method is only called on an inner WebContents and

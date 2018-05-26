@@ -14,6 +14,7 @@
 #include "ash/session/session_controller.h"
 #include "ash/shelf/app_list_shelf_item_delegate.h"
 #include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -85,11 +86,9 @@ void SetShelfAlignmentFromPrefs() {
 void SetShelfBehaviorsFromPrefs() {
   // The shelf should always be bottom-aligned and not hidden in tablet mode;
   // alignment and auto-hide are assigned from prefs when tablet mode is exited.
-  // ShelfController outlives TabletModeController, hence the null check.
-  // https://crbug.com/817522
-  Shell* shell = Shell::Get();
-  if (shell->tablet_mode_controller() &&
-      shell->tablet_mode_controller()->IsTabletModeWindowManagerEnabled()) {
+  if (Shell::Get()
+          ->tablet_mode_controller()
+          ->IsTabletModeWindowManagerEnabled()) {
     return;
   }
 
@@ -128,19 +127,21 @@ ShelfController::ShelfController()
 }
 
 ShelfController::~ShelfController() {
-  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
-  if (Shell::Get()->tablet_mode_controller())
-    Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
-  Shell::Get()->session_controller()->RemoveObserver(this);
   model_.RemoveObserver(this);
   model_.DestroyItemDelegates();
 }
 
+void ShelfController::Shutdown() {
+  Shell::Get()->window_tree_host_manager()->RemoveObserver(this);
+  Shell::Get()->tablet_mode_controller()->RemoveObserver(this);
+  Shell::Get()->session_controller()->RemoveObserver(this);
+}
+
 // static
 void ShelfController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
-  // These prefs are public for ChromeLauncherController's OnIsSyncingChanged
-  // and ShelfBoundsChangesProbablyWithUser. See the pref names definitions for
-  // explanations of the synced, local, and per-display behaviors.
+  // These prefs are public for ChromeLauncherController's OnIsSyncingChanged.
+  // See the pref names definitions for explanations of the synced, local, and
+  // per-display behaviors.
   registry->RegisterStringPref(
       prefs::kShelfAutoHideBehavior, kShelfAutoHideBehaviorNever,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF | PrefRegistry::PUBLIC);
@@ -316,11 +317,11 @@ void ShelfController::OnActiveUserPrefServiceChanged(
   pref_change_registrar_ = std::make_unique<PrefChangeRegistrar>();
   pref_change_registrar_->Init(pref_service);
   pref_change_registrar_->Add(prefs::kShelfAlignmentLocal,
-                              base::Bind(&SetShelfAlignmentFromPrefs));
+                              base::BindRepeating(&SetShelfAlignmentFromPrefs));
   pref_change_registrar_->Add(prefs::kShelfAutoHideBehaviorLocal,
-                              base::Bind(&SetShelfAutoHideFromPrefs));
+                              base::BindRepeating(&SetShelfAutoHideFromPrefs));
   pref_change_registrar_->Add(prefs::kShelfPreferences,
-                              base::Bind(&SetShelfBehaviorsFromPrefs));
+                              base::BindRepeating(&SetShelfBehaviorsFromPrefs));
 }
 
 void ShelfController::OnTabletModeStarted() {
@@ -376,11 +377,20 @@ void ShelfController::OnNotificationAdded(const std::string& notification_id) {
       message_center::MessageCenter::Get()->FindVisibleNotificationById(
           notification_id);
 
-  // TODO(newcomer): Support ARC app notifications.
-  if (!notification || notification->notifier_id().type !=
-                           message_center::NotifierId::APPLICATION) {
+  if (!notification)
+    return;
+
+  // Skip this if the notification shouldn't badge an app.
+  if (notification->notifier_id().type !=
+          message_center::NotifierId::APPLICATION &&
+      notification->notifier_id().type !=
+          message_center::NotifierId::ARC_APPLICATION) {
     return;
   }
+
+  // Skip this if the notification doesn't have a valid app id.
+  if (notification->notifier_id().id == ash::kDefaultArcNotifierId)
+    return;
 
   model_.AddNotificationRecord(notification->notifier_id().id, notification_id);
 }

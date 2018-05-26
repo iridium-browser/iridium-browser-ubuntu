@@ -15,20 +15,17 @@ class Painter;
 
 namespace arc {
 
-class ArcNotificationContentViewDelegate;
+class ArcNotificationContentView;
 
 // View for custom notification with NOTIFICATION_TYPE_CUSTOM which hosts the
 // ArcNotificationContentView which shows content of the notification.
 class ArcNotificationView : public message_center::MessageView,
                             public ArcNotificationItem::Observer {
  public:
-  static const char kViewClassName[];
+  static const char kMessageViewSubClassName[];
 
   // |content_view| is a view to be hosted in this view.
   ArcNotificationView(ArcNotificationItem* item,
-                      std::unique_ptr<views::View> content_view,
-                      std::unique_ptr<ArcNotificationContentViewDelegate>
-                          contents_view_delegate,
                       const message_center::Notification& notification);
   ~ArcNotificationView() override;
 
@@ -49,15 +46,16 @@ class ArcNotificationView : public message_center::MessageView,
       const override;
   bool IsExpanded() const override;
   void SetExpanded(bool expanded) override;
+  bool IsAutoExpandingAllowed() const override;
   bool IsManuallyExpandedOrCollapsed() const override;
   void OnContainerAnimationStarted() override;
   void OnContainerAnimationEnded() override;
+  const char* GetMessageViewSubClassName() const final;
 
   // views::SlideOutController::Delegate:
   void OnSlideChanged() override;
 
   // Overridden from views::View:
-  const char* GetClassName() const override;
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   bool HasFocus() const override;
@@ -69,11 +67,11 @@ class ArcNotificationView : public message_center::MessageView,
 
   // ArcNotificationItem::Observer
   void OnItemDestroying() override;
-  void OnItemUpdated() override;
 
  private:
   friend class ArcNotificationContentViewTest;
   friend class ArcNotificationViewTest;
+  friend class ArcAccessibilityHelperBridgeTest;
 
   // TODO(yoshiki): Mmove this to message_center::MessageView.
   void UpdateControlButtonsVisibilityWithNotification(
@@ -82,8 +80,7 @@ class ArcNotificationView : public message_center::MessageView,
   ArcNotificationItem* item_;
 
   // The view for the custom content. Owned by view hierarchy.
-  views::View* contents_view_ = nullptr;
-  std::unique_ptr<ArcNotificationContentViewDelegate> contents_view_delegate_;
+  ArcNotificationContentView* const content_view_;
 
   std::unique_ptr<views::Painter> focus_painter_;
 
