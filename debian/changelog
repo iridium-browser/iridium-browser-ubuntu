@@ -1,3 +1,9 @@
+iridium-browser (2018.5.67-1iridium1) xenial; urgency=medium
+
+  * Iridium: Include libffmpeg.so in main package
+
+ -- Simon Eisenmann <simon@longsleep.org>  Sun, 27 May 2018 09:22:51 +0200
+
 iridium-browser (2018.5.67-1iridium0) xenial; urgency=medium
 
   * Fixup: add libva-dev build dependency
