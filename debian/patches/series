@@ -36,11 +36,9 @@ revert-Xclang-instcombine-lower-dbg-declare.patch
 suppress-newer-clang-warning-flags.patch
 fix-ffmpeg-build.patch
 fix-build-on-older-gcc.patch
-gn-remove-sysroot-use.patch
+#gn-remove-sysroot-use.patch
 widevine-allow-on-linux.patch
 set-rpath-on-chromium-executables.patch
 #ozone-wayland-support.patch
 #fix-gn-bootstrap.patch
-fix-crashpad-build.patch
-iridium-manpage.patch
 iridium-welcomepage.patch
